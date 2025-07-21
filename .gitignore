@@ -1,0 +1,20 @@
+# virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# environment variables
+.env
+*.env
+.vercel
+
+app/models/custom_objects/
+
+# deploy on pythonanywhere.org
+.wsgi
+wsgi.py
+
+# SQLite database files
+.db
