@@ -1,13 +1,14 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 
 class SensorDataSchema(BaseModel):
     id: int
-    temperature: Optional[float]
-    humidity: Optional[float]
-    light: Optional[float]
-    moisture: Optional[float]
+    temperature: Optional[float] = Field(None, description="Temperature in Celsius")
+    humidity: Optional[float] = Field(None, description="Humidity percentage (0-100%)")
+    light: Optional[float] = Field(None, description="Light intensity in lux")
+    moisture: Optional[float] = Field(None, description="Soil moisture percentage (0-100%)")
+    water_level: Optional[float] = Field(None, description="Water level percentage (0-100%)")
     created_at: datetime
 
     model_config = {
@@ -16,7 +17,18 @@ class SensorDataSchema(BaseModel):
 
 
 class SensorDataCreateSchema(BaseModel):
-    temperature: Optional[float] = None
-    humidity: Optional[float] = None
-    light: Optional[float] = None
-    moisture: Optional[float] = None
+    temperature: Optional[float] = Field(
+        None, description="Temperature in Celsius", ge=-50, le=100
+    )
+    humidity: Optional[float] = Field(
+        None, description="Humidity percentage (0-100%)", ge=0, le=100
+    )
+    light: Optional[float] = Field(
+        None, description="Light intensity in lux", ge=0
+    )
+    moisture: Optional[float] = Field(
+        None, description="Soil moisture percentage (0-100%)", ge=0, le=100
+    )
+    water_level: Optional[float] = Field(
+        None, description="Water level percentage (0-100%)", ge=0, le=100
+    )
