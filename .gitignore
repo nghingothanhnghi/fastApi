@@ -16,5 +16,15 @@ app/models/custom_objects/
 .wsgi
 wsgi.py
 
-# SQLite database files
-.db
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Large binary files
+*.pt
+*.pth
+*.onnx
+*.zip
+*.exe
+*.dll
