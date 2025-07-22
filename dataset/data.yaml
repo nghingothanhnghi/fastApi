@@ -1,0 +1,13 @@
+path: c:/Nghi/Python/started_project/backend/dataset
+train: images/train
+val: images/val
+
+# Number of classes
+nc: 1
+
+# Class names
+names: ['object']
+
+# You can modify the class names according to your specific objects
+# For example:
+# names: ['person', 'car', 'dog', 'cat']
