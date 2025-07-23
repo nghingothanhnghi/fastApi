@@ -8,3 +8,18 @@ class TransformRequest(BaseModel):
 
 class TransformResponse(BaseModel):
     transformed_data: Dict
+
+class TemplateCreate(BaseModel):
+    client_id: str
+    mapping: Dict[str, str]  # target_field -> source_field mapping
+
+class TemplateUpdate(BaseModel):
+    mapping: Dict[str, str]
+
+class TemplateOut(BaseModel):
+    id: int
+    client_id: str
+    mapping: Dict[str, str]
+    
+    class Config:
+        from_attributes = True

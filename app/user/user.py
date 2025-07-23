@@ -125,11 +125,19 @@ def update_user(db: Session, user_id: int, user_update: UserUpdate):
 
 
 def delete_user(db: Session, user_id: int):
+    total_users = db.query(User).count()
+    if total_users <= 1:
+        raise Exception("Cannot delete the only remaining user in the system.")
+
     user = get_user(db, user_id)
-    if user:
-        db.delete(user)
-        db.commit()
+    if not user:
+        raise Exception("User not found.")
+
+    db.delete(user)
+    db.commit()
     return user
+
+
 
 
 def save_reset_code(db: Session, email: str, code: str):

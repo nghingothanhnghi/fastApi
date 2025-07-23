@@ -28,3 +28,6 @@ wsgi.py
 *.zip
 *.exe
 *.dll
+
+# Ignore test scripts
+tests/

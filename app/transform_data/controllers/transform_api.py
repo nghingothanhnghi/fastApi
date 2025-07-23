@@ -7,7 +7,7 @@ from app.transform_data.services.transformer import transform_data
 
 router = APIRouter(prefix="/transform", tags=["Transform"])
 
-@router.post("/", response_model=TransformResponse)
+@router.post("", response_model=TransformResponse)
 def transform(req: TransformRequest, db: Session = Depends(get_db)):
     try:
         data = transform_data(req, db)

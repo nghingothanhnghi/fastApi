@@ -104,18 +104,16 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_user)
     current_user: User = Depends(require_roles(RoleEnum.ADMIN))
 ):
-    db_user = crud_user.get_user(db, user_id)
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    # if db_user.id != current_user.id:
-    #     raise HTTPException(status_code=403, detail="Not authorized to delete this user")
+    try:
+        crud_user.delete_user(db, user_id)
+        logger.info(f"User deleted: {user_id}")
+        return {"detail": "User deleted"}
+    except Exception as e:
+        logger.warning(f"User deletion failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-    crud_user.delete_user(db, user_id)
-    logger.info(f"User deleted: {user_id}")
-    return {"detail": "User deleted"}
 
 @router.post("/{user_id}/upload-image", response_model=UserOut)
 def upload_user_image(

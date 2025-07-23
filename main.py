@@ -11,7 +11,7 @@ from app.core.logging_config import configure_logging
 from app.init_db import init_db
 
 from app.migration.controllers import ingest_api
-from app.transform_data.controllers import transform_api
+from app.transform_data.controllers import transform_api, template_api
 
 from app.utils.scheduler import start_scheduler, add_job
 from app.transform_data.jobs.transform_job import transform_unprocessed_data
@@ -58,6 +58,7 @@ app.include_router(sensor_data.router)   # Handles /sensor/ endpoints
 
 app.include_router(ingest_api.router)
 app.include_router(transform_api.router)
+app.include_router(template_api.router)
 
 # -----------------------------------------
 # Scheduler Jobs
