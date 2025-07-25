@@ -1,6 +1,7 @@
 # app/transform_data/schemas/template.py
 from pydantic import BaseModel, Field
-from typing import Dict
+from typing import Dict, Optional
+from datetime import datetime
 
 # === Transformation ===
 class TransformRequest(BaseModel):
@@ -22,6 +23,8 @@ class TemplateOut(BaseModel):
     id: int
     client_id: str
     mapping: Dict[str, str]
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
     
     class Config:
         from_attributes = True
