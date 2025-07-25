@@ -11,3 +11,5 @@ USE_MOCK_DEVICES = os.getenv("USE_MOCK_DEVICES", "true").lower() in ("true", "1"
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads/profile_images")
 STATIC_URL_BASE = os.getenv("STATIC_URL_BASE", "/static/profile_images")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
