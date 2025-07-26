@@ -2,7 +2,7 @@
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.migration.models.base_data import RawData
-from app.transform_data.schemas.template import TransformRequest
+from app.transform_data.schemas.template import TransformRequest, TemplateCreate
 from app.transform_data.services.transformer import transform_data
 from app.transform_data.services.ai_mapper import suggest_mapping
 from app.transform_data.services.template_service import get_template_by_client_id, create_template
@@ -30,10 +30,11 @@ def transform_unprocessed_data():
                     suggested_mapping = suggest_mapping(item.payload, item.client_id)
 
                     # Save new template using service
-                    create_template(db, {
-                        "client_id": item.client_id,
-                        "mapping": suggested_mapping
-                    })
+                    new_template = TemplateCreate(
+                        client_id=item.client_id,
+                        mapping=suggested_mapping
+                    )
+                    create_template(db, new_template)
                     logger.info(f"[AI] Suggested and saved mapping for {item.client_id}")
                 # Now perform transformation
                 req = TransformRequest(client_id=item.client_id, raw_data=item.payload)

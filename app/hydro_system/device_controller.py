@@ -2,7 +2,7 @@
 # Description: Hardware control logic for hydroponic system devices
 
 from app.hydro_system.rules_engine import check_rules
-from app.hydro_system.state_manager import set_state
+from app.hydro_system.state_manager import set_state, get_state
 from app.hydro_system.config import DEVICE_IDS
 import logging
 
@@ -98,35 +98,25 @@ def handle_automation(sensor_data):
     
     # Execute automation actions
     for device, should_activate in actions.items():
-        current_state = set_state(device, should_activate)
+        prev_state = get_state(device)
         
-        if device == "pump" and should_activate != current_state:
-            if should_activate:
-                turn_pump_on()
-            else:
-                turn_pump_off()
-                
-        elif device == "light" and should_activate != current_state:
-            if should_activate:
-                turn_light_on()
-            else:
-                turn_light_off()
-                
-        elif device == "fan" and should_activate != current_state:
-            if should_activate:
-                turn_fan_on()
-            else:
-                turn_fan_off()
-                
-        elif device == "water_refill" and should_activate != current_state:
-            if should_activate:
+        if should_activate != prev_state:
+            set_state(device, should_activate)
+
+            if device == "pump":
+                turn_pump_on() if should_activate else turn_pump_off()
+            elif device == "light":
+                turn_light_on() if should_activate else turn_light_off()
+            elif device == "fan":
+                turn_fan_on() if should_activate else turn_fan_off()
+            elif device == "water_refill":
                 logger.warning("Water refill needed - manual intervention required")
-                # In production, this might trigger an automated refill sequence
-                
-        logger.info(f"[Automation] {device}: {should_activate}")
+
+            logger.info(f"[Automation] {device}: {should_activate}")
     
     return {
         "actions_taken": actions,
         "alerts": alerts,
         "sensor_data": sensor_data
     }
+

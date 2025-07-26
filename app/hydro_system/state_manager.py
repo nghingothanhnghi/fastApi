@@ -3,7 +3,9 @@
 _state = {
     "pump": False,
     "light": False,
-    "scheduler": False
+    "scheduler": False,
+    "water_refill": False,
+    "valve": False,
 }
 
 def get_state(device):
