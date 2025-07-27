@@ -18,17 +18,24 @@ class HydroDeviceService:
             db.rollback()
             raise e
 
-    def get_device(self, db: Session, device_id: int) -> HydroDevice | None:
+    def get_device(self, db: Session, device_id: int) -> Optional[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.id == device_id).first()
 
-    def get_devices_by_user(self, db: Session, user_id: int):
+    def get_devices_by_user(self, db: Session, user_id: int) -> List[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.user_id == user_id).all()
-    
+
+    def get_device_for_user(self, db: Session, device_id: int, user_id: int) -> Optional[HydroDevice]:
+        return (
+            db.query(HydroDevice)
+            .filter(HydroDevice.id == device_id, HydroDevice.user_id == user_id)
+            .first()
+        )
+
     def get_devices_by_client(self, db: Session, client_id: str) -> List[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.client_id == client_id).all()
 
     def get_all_devices(self, db: Session, skip: int = 0, limit: int = 100) -> List[HydroDevice]:
-        return db.query(HydroDevice).offset(skip).limit(limit).all()    
+        return db.query(HydroDevice).offset(skip).limit(limit).all()
 
     def update_device(self, db: Session, device: HydroDevice, updates: HydroDeviceUpdate) -> HydroDevice:
         try:

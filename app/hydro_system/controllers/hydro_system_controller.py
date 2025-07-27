@@ -30,69 +30,6 @@ def get_system_status():
         }
     }
 
-# def control_pump(on: bool, user_id: int, device_id: Optional[int] = None):
-#     """Control irrigation pump"""
-#     if on:
-#         controller.turn_pump_on()
-#     else:
-#         controller.turn_pump_off()
-#     state_manager.set_state("pump", on)
-#     logger.info(f"Irrigation pump {'ON' if on else 'OFF'}")
-
-# def control_light(on: bool):
-#     """Control grow lights"""
-#     if on:
-#         controller.turn_light_on()
-#     else:
-#         controller.turn_light_off()
-#     state_manager.set_state("light", on)
-#     logger.info(f"Grow lights {'ON' if on else 'OFF'}")
-
-# def control_fan(on: bool):
-#     """Control ventilation fan"""
-#     if on:
-#         controller.turn_fan_on()
-#     else:
-#         controller.turn_fan_off()
-#     state_manager.set_state("fan", on)
-#     logger.info(f"Ventilation fan {'ON' if on else 'OFF'}")
-
-# def control_water_pump(on: bool):
-#     """Control water tank refill pump"""
-#     if on:
-#         controller.turn_water_pump_on()
-#     else:
-#         controller.turn_water_pump_off()
-#     state_manager.set_state("water_pump", on)
-#     logger.info(f"Water refill pump {'ON' if on else 'OFF'}")
-
-# def refill_water_tank(duration_seconds: int = 300):
-#     """Refill water tank for specified duration (default 5 minutes)"""
-#     logger.info(f"Starting water tank refill for {duration_seconds} seconds")
-#     control_water_pump(True)
-    
-#     # In a real implementation, you would set a timer to turn off the pump
-#     # For now, we'll just log the action
-#     return {
-#         "message": f"Water tank refill started for {duration_seconds} seconds",
-#         "duration": duration_seconds,
-#         "status": "running"
-#     }
-
-# def emergency_stop():
-#     """Emergency stop all devices"""
-#     logger.warning("EMERGENCY STOP activated - turning off all devices")
-#     control_pump(False)
-#     control_light(False)
-#     control_fan(False)
-#     control_water_pump(False)
-    
-#     return {
-#         "message": "Emergency stop activated - all devices turned off",
-#         "timestamp": "now",
-#         "devices_stopped": ["pump", "light", "fan", "water_pump"]
-#     }
-
 def control_pump(on: bool, user_id: int, device_id: Optional[int] = None):
     """Control irrigation pump for specific user/device"""
     if device_id:
