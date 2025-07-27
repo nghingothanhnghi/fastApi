@@ -1,4 +1,5 @@
 # File: app/hydro_system/rules_engine.py
+# Description: Rules engine to determine actions based on sensor data
 
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 import logging

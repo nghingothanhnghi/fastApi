@@ -18,5 +18,5 @@ class SensorData(Base):
     water_level = Column(Float)  # Water level in percentage (0-100%)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    device_id = Column(Integer, ForeignKey("devices.id"), nullable=True)
-    device = relationship("Device")
+    device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=True)
+    device = relationship("HydroDevice")

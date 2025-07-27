@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-class DeviceBase(BaseModel):
+class HydroDeviceBase(BaseModel):
     name: str
     device_id: str
     location: Optional[str] = None
@@ -15,10 +15,10 @@ class DeviceBase(BaseModel):
         "from_attributes": True
     }
 
-class DeviceCreate(DeviceBase):
+class HydroDeviceCreate(HydroDeviceBase):
     user_id: int
 
-class DeviceUpdate(BaseModel):
+class HydroDeviceUpdate(BaseModel):
     name: Optional[str] = None
     location: Optional[str] = None
     type: Optional[str] = None
@@ -28,7 +28,7 @@ class DeviceUpdate(BaseModel):
         "from_attributes": True
     }
 
-class DeviceOut(DeviceBase):
+class HydroDeviceOut(HydroDeviceBase):
     id: int
     user_id: int
     created_at: datetime

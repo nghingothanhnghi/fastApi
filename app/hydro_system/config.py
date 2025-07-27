@@ -1,4 +1,5 @@
 # app/hydro_system/config.py
+# Configuration settings for the hydroponic system
 
 DEFAULT_THRESHOLDS = {
     "moisture_min": 30,        # percentage - minimum soil moisture

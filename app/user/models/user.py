@@ -31,8 +31,7 @@ class User(Base):
     # Relationships
     user_roles = relationship("UserRole", foreign_keys="UserRole.user_id", back_populates="user", cascade="all, delete-orphan")
 
-    devices = relationship("Device", back_populates="user", cascade="all, delete-orphan")
-    
+    devices_hydro = relationship("HydroDevice", back_populates="user", cascade="all, delete-orphan")
     @property
     def roles(self):
         """Get all roles for this user"""

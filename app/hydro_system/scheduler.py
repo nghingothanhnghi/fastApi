@@ -1,4 +1,5 @@
 # app/hydro_system/scheduler.py
+# Description: This module handles scheduling tasks for collecting and processing sensor data.
 from app.hydro_system.sensors import read_sensors
 from app.hydro_system.device_controller import handle_automation
 from app.database import SessionLocal

@@ -3,8 +3,8 @@ from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Bool
 from sqlalchemy.orm import relationship
 from app.database import Base
 
-class Device(Base):
-    __tablename__ = "devices"
+class HydroDevice(Base):
+    __tablename__ = "devices_hydro"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)  # e.g., "Greenhouse Pump Controller"
@@ -12,7 +12,7 @@ class Device(Base):
     device_id = Column(String, unique=True, nullable=False)  # ESP32 unique ID (e.g., MAC or UUID)
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    user = relationship("User", back_populates="devices")
+    user = relationship("User", back_populates="devices_hydro")
     client_id = Column(String, nullable=True)
 
     location = Column(String, nullable=True)  # e.g., "Greenhouse A"
