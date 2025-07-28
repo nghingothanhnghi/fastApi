@@ -1,4 +1,4 @@
-# app/api/endpoints/sensor_data.py
+# app/hydro_system/routes/sensor_router.py
 # This file defines the API endpoints for managing sensor data in the hydroponics system.
 from fastapi import APIRouter, Depends, Query
 from app.database import get_db

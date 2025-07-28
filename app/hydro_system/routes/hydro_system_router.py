@@ -1,4 +1,4 @@
-# File: backend/app/api/endpoints/hydro_system.py
+# app/hydro_system/routes/hydro_system_router.py
 # Description: This module defines the API endpoints for controlling the hydroponic system.
 from fastapi import APIRouter, Query, Depends, Body, Path
 from app.database import get_db
@@ -34,104 +34,120 @@ def get_status(
 # --- Irrigation Pump Control ---
 @router.post("/pump/on")
 def pump_on(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_pump(True, user_id=current_user.id, device_id=device_id)
+    system_controller.control_pump(db, True, user_id=current_user.id, device_id=device_id)
     return {"status": "Irrigation pump turned on", "device": "pump"}
 
 @router.post("/pump/off")
 def pump_off(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_pump(False, user_id=current_user.id, device_id=device_id)
+    system_controller.control_pump(db, False, user_id=current_user.id, device_id=device_id)
     return {"status": "Irrigation pump turned off", "device": "pump"}
 
 # --- Grow Light Control ---
 @router.post("/light/on")
 def light_on(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_light(True, user_id=current_user.id, device_id=device_id)
+    system_controller.control_light(db, True, user_id=current_user.id, device_id=device_id)
     return {"status": "Grow lights turned on", "device": "light"}
 
 @router.post("/light/off")
 def light_off(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_light(False, user_id=current_user.id, device_id=device_id)
+    system_controller.control_light(db, False, user_id=current_user.id, device_id=device_id)
     return {"status": "Grow lights turned off", "device": "light"}
 
 # --- Ventilation Fan Control ---
 @router.post("/fan/on")
 def fan_on(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_fan(True, user_id=current_user.id, device_id=device_id)
+    system_controller.control_fan(db, True, user_id=current_user.id, device_id=device_id)
     return {"status": "Ventilation fan turned on", "device": "fan"}
 
 @router.post("/fan/off")
 def fan_off(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_fan(False, user_id=current_user.id, device_id=device_id)
+    system_controller.control_fan(db, False, user_id=current_user.id, device_id=device_id)
     return {"status": "Ventilation fan turned off", "device": "fan"}
 
 # --- Water Tank Management ---
 @router.post("/water-pump/on")
 def water_pump_on(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_water_pump(True, user_id=current_user.id, device_id=device_id)
+    system_controller.control_water_pump(db, True, user_id=current_user.id, device_id=device_id)
     return {"status": "Water refill pump turned on", "device": "water_pump"}
 
 @router.post("/water-pump/off")
 def water_pump_off(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None)
 ):
-    system_controller.control_water_pump(False, user_id=current_user.id, device_id=device_id)
+    system_controller.control_water_pump(db, False, user_id=current_user.id, device_id=device_id)
     return {"status": "Water refill pump turned off", "device": "water_pump"}
 
 @router.post("/water-tank/refill")
 def refill_water_tank(
     duration: int = Query(300, description="Refill duration in seconds", ge=30, le=1800),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     device_id: Optional[int] = Query(None),
 ):
     return system_controller.refill_water_tank(
-        duration_seconds=duration, user_id=current_user.id, device_id=device_id
+        db=db, duration_seconds=duration, user_id=current_user.id, device_id=device_id
     )
 
 # --- Emergency Controls ---
 @router.post("/emergency-stop")
 def emergency_stop(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = system_controller.emergency_stop(user_id=current_user.id)
+    result = system_controller.emergency_stop(db=db, user_id=current_user.id)
     return result
 
 # --- Scheduler Control ---
 @router.post("/scheduler/start")
-def start_schedule():
+def start_schedule(
+    current_user: User = Depends(get_current_user)
+):
     """Start the sensor data collection scheduler"""
     system_controller.scheduler_control("start")
     return {"status": "Scheduler started"}
 
 @router.post("/scheduler/stop")
-def stop_schedule():
+def stop_schedule(
+    current_user: User = Depends(get_current_user)
+):
     """Stop the sensor data collection scheduler"""
     system_controller.scheduler_control("stop")
     return {"status": "Scheduler stopped"}
 
 @router.post("/scheduler/restart")
-def restart_schedule():
+def restart_schedule(
+    current_user: User = Depends(get_current_user)
+):
     """Restart the sensor data collection scheduler"""
     system_controller.scheduler_control("restart")
     return {"status": "Scheduler restarted"}

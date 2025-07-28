@@ -2,6 +2,7 @@
 from .database import engine, Base
 from .android_system.models.device import Device
 from .hydro_system.models.device import HydroDevice
+from .hydro_system.models.actuator import HydroActuator
 from .hydro_system.models.sensor_data import SensorData
 from .user.models.user import User
 from .user.models.password_reset import PasswordResetCode

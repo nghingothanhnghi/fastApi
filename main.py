@@ -6,6 +6,8 @@ from app.api.endpoints import (
     hydro_system, sensor_data, user, auth, password_reset, roles
 )
 
+from app.hydro_system.routes import ( hydro_system_router, sensor_router, actuator_router)
+
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
@@ -53,8 +55,13 @@ app.include_router(scheduler_health.router)  # /scheduler/health
 
 app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
 
-app.include_router(hydro_system.router)  # Handles /hydro/ endpoints
-app.include_router(sensor_data.router)   # Handles /sensor/ endpoints
+# app.include_router(hydro_system.router)  # Handles /hydro/ endpoints
+# app.include_router(sensor_data.router)   # Handles /sensor/ endpoints
+
+app.include_router(hydro_system_router.router)  # Handles /hydro/ endpoints
+app.include_router(sensor_router.router)   # Handles /sensor/ endpoints
+app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
+
 
 app.include_router(ingest_api.router)
 app.include_router(transform_api.router)

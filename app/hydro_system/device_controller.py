@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 def turn_pump_on():
     """Turn on irrigation pump"""
     device_id = DEVICE_IDS.get("pump", "device_pump_001")
+    set_state("pump", True)
     logger.info(f"Turning ON irrigation pump: {device_id}")
     # In production, this would interface with actual hardware
     # Example: GPIO.output(PUMP_PIN, GPIO.HIGH)
@@ -20,6 +21,7 @@ def turn_pump_on():
 def turn_pump_off():
     """Turn off irrigation pump"""
     device_id = DEVICE_IDS.get("pump", "device_pump_001")
+    set_state("pump", False)
     logger.info(f"Turning OFF irrigation pump: {device_id}")
     # In production, this would interface with actual hardware
     # Example: GPIO.output(PUMP_PIN, GPIO.LOW)
@@ -29,6 +31,7 @@ def turn_pump_off():
 def turn_light_on():
     """Turn on grow lights"""
     device_id = DEVICE_IDS.get("light", "device_light_001")
+    set_state("light", True)
     logger.info(f"Turning ON grow lights: {device_id}")
     # In production, this would interface with actual hardware
     print(f"💡 Grow lights ({device_id}) turned ON")
@@ -36,6 +39,7 @@ def turn_light_on():
 def turn_light_off():
     """Turn off grow lights"""
     device_id = DEVICE_IDS.get("light", "device_light_001")
+    set_state("light", False)
     logger.info(f"Turning OFF grow lights: {device_id}")
     # In production, this would interface with actual hardware
     print(f"🌙 Grow lights ({device_id}) turned OFF")
@@ -44,6 +48,7 @@ def turn_light_off():
 def turn_fan_on():
     """Turn on ventilation fan"""
     device_id = DEVICE_IDS.get("fan", "device_fan_001")
+    set_state("fan", True)
     logger.info(f"Turning ON ventilation fan: {device_id}")
     # In production, this would interface with actual hardware
     print(f"🌪️ Ventilation fan ({device_id}) turned ON")
@@ -51,6 +56,7 @@ def turn_fan_on():
 def turn_fan_off():
     """Turn off ventilation fan"""
     device_id = DEVICE_IDS.get("fan", "device_fan_001")
+    set_state("fan", False)
     logger.info(f"Turning OFF ventilation fan: {device_id}")
     # In production, this would interface with actual hardware
     print(f"🔇 Ventilation fan ({device_id}) turned OFF")
@@ -59,6 +65,7 @@ def turn_fan_off():
 def turn_water_pump_on():
     """Turn on water tank refill pump"""
     device_id = DEVICE_IDS.get("water_pump", "device_water_pump_001")
+    set_state("water_pump", True)
     logger.info(f"Turning ON water refill pump: {device_id}")
     # In production, this would interface with actual hardware
     print(f"💧 Water refill pump ({device_id}) turned ON")
@@ -66,6 +73,7 @@ def turn_water_pump_on():
 def turn_water_pump_off():
     """Turn off water tank refill pump"""
     device_id = DEVICE_IDS.get("water_pump", "device_water_pump_001")
+    set_state("water_pump", False)
     logger.info(f"Turning OFF water refill pump: {device_id}")
     # In production, this would interface with actual hardware
     print(f"🚰 Water refill pump ({device_id}) turned OFF")
@@ -74,12 +82,14 @@ def turn_water_pump_off():
 def open_valve():
     """Open water flow valve"""
     device_id = DEVICE_IDS.get("valve", "device_valve_001")
+    set_state("valve", True)
     logger.info(f"Opening valve: {device_id}")
     print(f"🔓 Valve ({device_id}) OPENED")
 
 def close_valve():
     """Close water flow valve"""
     device_id = DEVICE_IDS.get("valve", "device_valve_001")
+    set_state("valve", False)
     logger.info(f"Closing valve: {device_id}")
     print(f"🔒 Valve ({device_id}) CLOSED")
 

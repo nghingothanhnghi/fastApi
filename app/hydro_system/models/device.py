@@ -17,8 +17,12 @@ class HydroDevice(Base):
     client_id = Column(String, nullable=True)
 
     location = Column(String, nullable=True)  # e.g., "Greenhouse A"
-    type = Column(String, nullable=True)  # e.g., "pump", "sensor", etc.
+    type = Column(String, nullable=True)  # controller
     is_active = Column(Boolean, default=True)
+
+    # Inside class HydroDevice:
+    actuators = relationship("HydroActuator", back_populates="device", cascade="all, delete")
+
 
     thresholds = Column(JSON, nullable=True)  # ✅ Per-device automation thresholds
 
