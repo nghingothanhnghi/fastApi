@@ -38,8 +38,16 @@ def get_user_by_username(db: Session, username: str):
         .first()
     )
 
-def get_users_by_client(db: Session, client_id: str):
-    return db.query(User).filter(User.client_id == client_id).all()
+def get_users_by_client(db: Session, client_id: str, skip: int = 0, limit: int = 100):
+    return (
+        db.query(User)
+        .options(joinedload(User.user_roles).joinedload(UserRole.role))  # Optional: eager load roles
+        .filter(User.client_id == client_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()

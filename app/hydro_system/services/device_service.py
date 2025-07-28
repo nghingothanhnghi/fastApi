@@ -1,4 +1,5 @@
 # app/hydro_system/services/device_service.py
+# Service class for managing hydro devices
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError

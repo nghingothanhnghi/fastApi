@@ -1,5 +1,5 @@
 # backend/app/hydro_system/sensors.py
-# Description: This module provides functions to read sensor data for the hydroponic system.
+# This file is a hardware abstraction layer (or mock simulation) that reads the actual (or simulated) values from sensors.
 
 import random
 import logging
@@ -35,7 +35,8 @@ def read_water_level():
     logger.info(f"Water level reading: {water_level}%")
     return water_level
 
-def read_sensors():
+def read_sensors(device_id: int = None):
+    logger.info(f"Reading sensors for device {device_id}")
     """Read all sensor values and return as dictionary"""
     try:
         sensor_data = {

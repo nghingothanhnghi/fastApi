@@ -1,6 +1,6 @@
 # app/hydro_system/schemas/device.py
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict,Any
 from datetime import datetime
 
 class HydroDeviceBase(BaseModel):
@@ -10,6 +10,7 @@ class HydroDeviceBase(BaseModel):
     type: Optional[str] = None
     is_active: Optional[bool] = True
     client_id: Optional[str] = None
+    thresholds: Optional[Dict[str, Any]] = None
 
     model_config = {
         "from_attributes": True
@@ -23,6 +24,7 @@ class HydroDeviceUpdate(BaseModel):
     location: Optional[str] = None
     type: Optional[str] = None
     is_active: Optional[bool] = None
+    thresholds: Optional[Dict[str, Any]] = None  # ✅ Updatable
 
     model_config = {
         "from_attributes": True

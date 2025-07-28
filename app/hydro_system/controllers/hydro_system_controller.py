@@ -1,3 +1,7 @@
+# app/hydro_system/controllers/hydro_system_controller.py
+# Defines endpoints for controlling individual devices (pump, light, fan, water pump)
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
 from typing import Optional
 from app.hydro_system import sensors, device_controller as controller, state_manager
 from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restart_sensor_job
@@ -8,34 +12,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def get_system_status():
-    """Get comprehensive system status including all sensors and devices"""
-    sensor_data = sensors.read_sensors()
-    rules_result = check_rules(sensor_data, DEFAULT_THRESHOLDS)
-    
-    return {
-        "sensors": sensor_data,
-        "devices": {
-            "pump_state": state_manager.get_state("pump"),
-            "light_state": state_manager.get_state("light"),
-            "fan_state": state_manager.get_state("fan"),
-            "water_pump_state": state_manager.get_state("water_pump")
-        },
-        "system": {
-            "scheduler_state": state_manager.get_state("scheduler")
-        },
-        "automation": {
-            "rules_result": rules_result,
-            "thresholds": DEFAULT_THRESHOLDS
-        }
-    }
+def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Optional[int] = None):
+    devices = []
+
+    if device_id:
+        device = hydro_device_service.get_device_for_user(db, device_id, user_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found or not authorized")
+        devices = [device]
+    elif user_id:
+        devices = hydro_device_service.get_devices_by_user(db, user_id)
+        if not devices:
+            raise HTTPException(status_code=404, detail="No devices found for this user")
+    else:
+        raise HTTPException(status_code=400, detail="Must provide user_id or device_id to retrieve system status")
+
+    results = []
+
+    for device in devices:
+        sensor_data = sensors.read_sensors(device_id=device.id)
+        thresholds = device.thresholds if hasattr(device, "thresholds") and device.thresholds else DEFAULT_THRESHOLDS
+        rules_result = check_rules(sensor_data, thresholds)
+
+        results.append({
+            "device_id": device.id,
+            "device_name": device.name,
+            "sensors": sensor_data,
+            "devices": {
+                "pump_state": state_manager.get_state(f"pump_{device.id}"),
+                "light_state": state_manager.get_state(f"light_{device.id}"),
+                "fan_state": state_manager.get_state(f"fan_{device.id}"),
+                "water_pump_state": state_manager.get_state(f"water_pump_{device.id}")
+            },
+            "system": {
+                "scheduler_state": state_manager.get_state(f"scheduler_{device.id}")
+            },
+            "automation": {
+                "rules_result": rules_result,
+                "thresholds": thresholds
+            }
+        })
+
+    return results if len(results) > 1 else results[0]
 
 def control_pump(on: bool, user_id: int, device_id: Optional[int] = None):
     """Control irrigation pump for specific user/device"""
     if device_id:
         device = hydro_device_service.get_device_for_user(device_id, user_id)
         if not device or device.type != "pump":
-            raise ValueError("Pump device not found or not authorized")
+            raise HTTPException(status_code=404, detail="Pump device not found or not authorized")
         controller.turn_pump_on() if on else controller.turn_pump_off()
         state_manager.set_state(f"pump_{device_id}", on)
         logger.info(f"User {user_id} - Pump {device_id} {'ON' if on else 'OFF'}")
@@ -49,7 +74,7 @@ def control_light(on: bool, user_id: int, device_id: Optional[int] = None):
     if device_id:
         device = hydro_device_service.get_device_for_user(device_id, user_id)
         if not device or device.type != "light":
-            raise ValueError("Light device not found or not authorized")
+            raise HTTPException(status_code=404, detail="Light device not found or not authorized")
         controller.turn_light_on() if on else controller.turn_light_off()
         state_manager.set_state(f"light_{device_id}", on)
         logger.info(f"User {user_id} - Light {device_id} {'ON' if on else 'OFF'}")
@@ -63,7 +88,7 @@ def control_fan(on: bool, user_id: int, device_id: Optional[int] = None):
     if device_id:
         device = hydro_device_service.get_device_for_user(device_id, user_id)
         if not device or device.type != "fan":
-            raise ValueError("Fan device not found or not authorized")
+            raise HTTPException(status_code=404, detail="Fan device not found or not authorized")
         controller.turn_fan_on() if on else controller.turn_fan_off()
         state_manager.set_state(f"fan_{device_id}", on)
         logger.info(f"User {user_id} - Fan {device_id} {'ON' if on else 'OFF'}")
@@ -77,7 +102,7 @@ def control_water_pump(on: bool, user_id: int, device_id: Optional[int] = None):
     if device_id:
         device = hydro_device_service.get_device_for_user(device_id, user_id)
         if not device or device.type != "water_pump":
-            raise ValueError("Water pump device not found or not authorized")
+            raise HTTPException(status_code=404, detail="Water pump device not found or not authorized")
         controller.turn_water_pump_on() if on else controller.turn_water_pump_off()
         state_manager.set_state(f"water_pump_{device_id}", on)
         logger.info(f"User {user_id} - Water pump {device_id} {'ON' if on else 'OFF'}")

@@ -1,3 +1,5 @@
+# app/hydro_system/controllers/hydro_device_controller.py
+# Define your controller functions device
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.hydro_system.services.device_service import hydro_device_service

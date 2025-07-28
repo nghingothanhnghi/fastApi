@@ -1,3 +1,6 @@
+# app/middleware/error_handler.py
+# Middleware to handle exceptions and log them
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 import logging

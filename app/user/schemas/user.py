@@ -44,6 +44,7 @@ class UserUpdate(BaseModel):
 
 class UserOut(UserBase):
     id: int
+    client_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
     created_by_id: Optional[int] = None  # ✅ Add this to expose who created the user

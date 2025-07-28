@@ -1,5 +1,6 @@
 # app/hydro_system/models/device.py
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean
+# Description: Device model for hydroponic systems
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -18,6 +19,8 @@ class HydroDevice(Base):
     location = Column(String, nullable=True)  # e.g., "Greenhouse A"
     type = Column(String, nullable=True)  # e.g., "pump", "sensor", etc.
     is_active = Column(Boolean, default=True)
+
+    thresholds = Column(JSON, nullable=True)  # ✅ Per-device automation thresholds
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

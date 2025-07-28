@@ -1,5 +1,5 @@
 # app/api/endpoints/user.py
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from uuid import uuid4
 import os
 from app.core import config
@@ -67,11 +67,13 @@ def get_user(
 @router.get("/by-client/{client_id}", response_model=list[UserOut])
 def get_users_by_client(
     client_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
 ):
-    users = crud_user.get_users_by_client(db, client_id)
-    logger.info(f"{len(users)} users retrieved for client_id={client_id}")
+    users = crud_user.get_users_by_client(db, client_id, skip=skip, limit=limit)
+    logger.info(f"{len(users)} users retrieved for client_id={client_id} (skip={skip}, limit={limit})")
     return users
 
 @router.get("", response_model=List[UserWithRoles])

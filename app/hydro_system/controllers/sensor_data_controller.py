@@ -1,3 +1,5 @@
+# app/hydro_system/controllers/sensor_data_controller.py
+# This file defines business logic and database interaction for managing sensor data
 from sqlalchemy.orm import Session
 from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.schemas.sensor_data import SensorDataCreateSchema

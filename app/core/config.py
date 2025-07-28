@@ -1,4 +1,5 @@
 # app/core/config.py
+# Configuration settings for the application.
 from dotenv import load_dotenv
 import os
 
