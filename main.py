@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.endpoints import (
     devices, tap, health, scheduler_health , screen, object_detection, 
-    hydro_system, sensor_data, user, auth, password_reset, roles
+    user, auth, password_reset, roles
 )
 
 from app.hydro_system.routes import ( hydro_system_router, sensor_router, actuator_router)

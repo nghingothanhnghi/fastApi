@@ -14,6 +14,7 @@ from app.hydro_system.controllers import (
     hydro_system_controller as system_controller,
     hydro_device_controller as device_controller,
     sensor_data_controller as sensor_controller,
+    actuator_controller as actuator_controller
 )
 
 from typing import Optional, List

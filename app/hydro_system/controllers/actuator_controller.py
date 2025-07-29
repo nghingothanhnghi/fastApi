@@ -7,6 +7,7 @@ from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
 from app.hydro_system.config import DEVICE_IDS
 from app.hydro_system.services.actuator_service import get_actuator_by_device_and_type
+from app.hydro_system.services.actuator_log_service import log_actuator_action
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,15 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
         if actuator:
             set_state(f"{device_type}_{device_id}", on)
             log_device_action(device_type, on, device_id)
+            log_actuator_action(db, actuator.id, on)  # <--- Added DB logging
             return
 
     # Fallback to default logic if no actuator or device_id
     fallback_id = DEVICE_IDS.get(device_type, f"default_{device_type}_id")
     set_state(device_type, on)
     log_device_action(device_type, on, fallback_id)
+    log_actuator_action(db, None, on)  # <--- Log as unknown actuator
+
 
 
 # --- Individual device control using combined logic ---

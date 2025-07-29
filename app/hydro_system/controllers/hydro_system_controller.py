@@ -3,7 +3,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from app.hydro_system import sensors, device_controller as controller, state_manager
+from app.hydro_system import sensors, state_manager
 from app.hydro_system.controllers import actuator_controller
 from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restart_sensor_job
 from app.hydro_system.rules_engine import check_rules

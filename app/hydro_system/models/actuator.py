@@ -19,5 +19,7 @@ class HydroActuator(Base):
     device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=False)
     device = relationship("HydroDevice", back_populates="actuators")
 
+    logs = relationship("HydroActuatorLog", back_populates="actuator", cascade="all, delete")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
