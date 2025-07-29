@@ -18,8 +18,10 @@ from app.hydro_system.controllers import (
 )
 
 from typing import Optional, List
+from app.hydro_system.routes.actuator_logs_router import actuator_log_router
 
 router = APIRouter(prefix="/hydro", tags=["Hydro System"])
+router.include_router(actuator_log_router, prefix="/actuator-logs", tags=["Hydro | Actuator Logs"])
 
 # --- System Status ---
 @router.get("/status")

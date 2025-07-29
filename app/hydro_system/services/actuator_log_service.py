@@ -29,16 +29,20 @@ def get_actuator_logs(
     db: Session,
     actuator_id: Optional[int] = None,
     device_id: Optional[str] = None,
+    client_id: Optional[int] = None,
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
 ) -> List[HydroActuatorLog]:
-    query = db.query(HydroActuatorLog)
+    query = db.query(HydroActuatorLog).join(HydroActuator)
 
     if actuator_id:
         query = query.filter(HydroActuatorLog.actuator_id == actuator_id)
 
     if device_id:
-        query = query.join(HydroActuator).filter(HydroActuator.device_id == device_id)
+        query = query.filter(HydroActuator.device_id == device_id)
+
+    if client_id:
+        query = query.join(HydroActuator.device).filter(HydroActuator.device.client_id == client_id)
 
     if start_time:
         query = query.filter(HydroActuatorLog.timestamp >= start_time)
