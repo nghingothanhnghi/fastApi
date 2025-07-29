@@ -3,16 +3,16 @@ from typing import Optional
 from datetime import datetime
 
 class HydroActuatorBase(BaseModel):
-    name: str = Field(..., example="Pump 1")
-    type: str = Field(..., example="pump")  # pump, light, fan, water_pump, etc.
-    pin: Optional[str] = Field(None, example="GPIO12")
+    name: str = Field(..., json_schema_extra={"example": "Pump 1"})
+    type: str = Field(..., json_schema_extra={"example": "pump"})  # pump, light, fan, water_pump, etc.
+    pin: Optional[str] = Field(None, json_schema_extra={"example": "PIN031"})
     port: int
     is_active: Optional[bool] = True
     default_state: Optional[bool] = False
     device_id: int
 
 class HydroActuatorCreate(HydroActuatorBase):
-    device_id: int = Field(..., example=1)
+    device_id: int = Field(..., json_schema_extra={"example": 1})
 
 class HydroActuatorUpdate(BaseModel):
     name: Optional[str]

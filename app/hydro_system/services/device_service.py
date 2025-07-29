@@ -5,13 +5,29 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from app.hydro_system.models.device import HydroDevice
+from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.device import HydroDeviceCreate, HydroDeviceUpdate
+from app.hydro_system.config import DEFAULT_ACTUATORS
 
 class HydroDeviceService:
     def create_device(self, db: Session, device_in: HydroDeviceCreate) -> HydroDevice:
         try:
             device = HydroDevice(**device_in.dict())
             db.add(device)
+            db.flush()  # So device.id is available before commit
+
+            # Automatically create default actuators
+            for act in DEFAULT_ACTUATORS:
+                actuator = HydroActuator(
+                    type=act["type"],
+                    name=act.get("name"),
+                    pin=act.get("pin"),
+                    port=act.get("port"),
+                    default_state=act.get("default_state", False),
+                    device_id=device.id,
+                )
+                db.add(actuator)
+
             db.commit()
             db.refresh(device)
             return device
@@ -21,7 +37,7 @@ class HydroDeviceService:
 
     def get_device(self, db: Session, device_id: int) -> Optional[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.id == device_id).first()
-    
+
     def get_device_by_external_id(self, db: Session, external_id: str) -> Optional[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.device_id == external_id).first()
 

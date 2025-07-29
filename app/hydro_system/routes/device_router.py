@@ -15,6 +15,9 @@ from app.hydro_system.controllers import hydro_device_controller as device_contr
 
 device_router = APIRouter()
 
+# ========================
+# 📦 DEVICE (ESP32) CRUD ENDPOINTS
+# ========================
 @device_router.get("", response_model=List[HydroDeviceOut])
 def get_devices(
     user_id: Optional[int] = Query(None),

@@ -32,7 +32,7 @@ class TemplateOut(BaseModel):
 # === AI Mapping Suggestion ===
 
 class SuggestMappingRequest(BaseModel):
-    client_id: str = Field(..., example="client_123")
+    client_id: str = Field(..., json_schema_extra={"example": "Client_123"})
     raw_data: Dict = Field(..., example={"source_name": "John", "source_age": 30})
 
 class SuggestMappingResponse(BaseModel):

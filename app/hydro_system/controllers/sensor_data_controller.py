@@ -22,22 +22,6 @@ def update_thresholds(thresholds: dict):
     DEFAULT_THRESHOLDS.update(thresholds)
     logger.info(f"Thresholds updated: {thresholds}")
     return DEFAULT_THRESHOLDS
-
-
-# def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
-#     new_data = SensorData(
-#         temperature=payload.temperature,
-#         humidity=payload.humidity,
-#         light=payload.light,
-#         moisture=payload.moisture,
-#         water_level=payload.water_level,
-#         created_at=datetime.utcnow(),
-#     )
-#     db.add(new_data)
-#     db.commit()
-#     db.refresh(new_data)
-#     logger.info(f"New sensor data created: ID={new_data.id}, water_level={new_data.water_level}%")
-#     return new_data
 def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
     # Lookup HydroDevice by external_id
     device = hydro_device_service.get_device_by_external_id(db, payload.device_id)
