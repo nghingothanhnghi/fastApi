@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
 from app.hydro_system.config import DEFAULT_ACTUATORS
-from app.hydro_system.services.actuator_service import get_actuator_by_device_and_type
+from app.hydro_system.services.actuator_service import get_actuator_by_device_and_type, get_all_actuators_by_type
 from app.hydro_system.services.actuator_log_service import log_actuator_action
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,41 +74,54 @@ def close_valve(db: Session, device_id: str = None): control_actuator(db, "valve
 
 # --- Automation handler (uses same interface) ---
 
-def handle_automation(db: Session, sensor_data):
-    """Handle automated device control based on sensor data"""
-    rules_result = check_rules(sensor_data)
-    actions = rules_result.get("actions", {})
-    alerts = rules_result.get("alerts", [])
+def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
+    """
+    Handle automated control based on sensor data for each actuator individually.
+    Supports multiple actuators of the same type with optional per-actuator threshold overrides.
+    """
+    alerts = []
+    actions_taken = {}
 
-    # Log alerts
-    for alert in alerts:
-        level = alert["type"]
-        message = alert["message"]
-        getattr(logger, level)(f"{level.upper()} ALERT: {message}")
+    for device_type in ["pump", "light", "fan", "water_pump", "valve"]:
+        actuators = get_all_actuators_by_type(db, device_type, device_id=device_id)
 
-    # Perform actions
-    for device_type, should_activate in actions.items():
-        prev_state = get_state(device_type)
+        if not actuators:
+            logger.warning(f"No actuators found for type '{device_type}' on device '{device_id}'")
+            continue
 
-        if should_activate != prev_state:
-            if device_type == "pump":
-                turn_pump_on(db) if should_activate else turn_pump_off(db)
-            elif device_type == "light":
-                turn_light_on(db) if should_activate else turn_light_off(db)
-            elif device_type == "fan":
-                turn_fan_on(db) if should_activate else turn_fan_off(db)
-            elif device_type == "water_pump":
-                turn_water_pump_on(db) if should_activate else turn_water_pump_off(db)
-            elif device_type == "valve":
-                open_valve(db) if should_activate else close_valve(db)
-            elif device_type == "water_refill":
-                logger.warning("Water refill needed - manual intervention required")
+        for actuator in actuators:
+            # Use actuator-level override thresholds if defined
+            thresholds_override = actuator.thresholds or {}
 
-            set_state(device_type, should_activate)
-            logger.info(f"[Automation] {device_type}: {should_activate}")
+            # Re-run rules per actuator with their own overrides
+            rules_result = check_rules(sensor_data, overrides=thresholds_override)
+            should_activate = rules_result.get("actions", {}).get(device_type)
+
+            actuator_key = f"{device_type}_{actuator.device_id}"
+            prev_state = get_state(actuator_key)
+
+            # Collect and log alerts (don't re-log duplicates)
+            for alert in rules_result.get("alerts", []):
+                level = alert.get("type", "info")
+                message = alert.get("message", "")
+                getattr(logger, level)(f"{level.upper()} ALERT: {message}")
+                alerts.append(alert)
+
+            # Decide whether to activate/deactivate actuator
+            if should_activate is not None and should_activate != prev_state:
+                control_actuator(db, device_type, should_activate, actuator.device_id)
+                set_state(actuator_key, should_activate)
+                logger.info(f"[Automation] {device_type} ({actuator.device_id}) -> {should_activate}")
+                actions_taken[actuator_key] = {
+                    "activated": should_activate,
+                    "overrides": thresholds_override
+                }
+            else:
+                logger.debug(f"No change for {actuator_key}, remains {prev_state}")
 
     return {
-        "actions_taken": actions,
+        "actions_taken": actions_taken,
         "alerts": alerts,
         "sensor_data": sensor_data
     }
+

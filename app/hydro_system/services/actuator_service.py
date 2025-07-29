@@ -45,3 +45,27 @@ def delete_actuator(db: Session, actuator_id: int):
         db.commit()
     return actuator
 
+def get_all_actuators_by_type(db: Session, actuator_type: str, device_id: int = None):
+    """
+    Fetch all actuators of a given type, optionally filtered by device ID.
+    Useful for automation or bulk operations.
+    """
+    query = db.query(HydroActuator).filter(HydroActuator.type == actuator_type)
+    if device_id is not None:
+        query = query.filter(HydroActuator.device_id == device_id)
+    return query.all()
+
+def get_all_actuators(db: Session):
+    return db.query(HydroActuator).all()
+
+def get_active_actuators_by_type(db: Session, actuator_type: str, device_id: int = None):
+    query = db.query(HydroActuator).filter(
+        HydroActuator.type == actuator_type,
+        HydroActuator.is_active == True
+    )
+    if device_id:
+        query = query.filter(HydroActuator.device_id == device_id)
+    return query.all()
+
+
+

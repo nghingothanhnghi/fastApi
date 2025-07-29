@@ -1,6 +1,6 @@
 # app/hydro_system/models/actuator.py
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, func
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, func, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.hydro_system.models.device import HydroDevice   
@@ -20,6 +20,8 @@ class HydroActuator(Base):
     device = relationship("HydroDevice", back_populates="actuators")
 
     logs = relationship("HydroActuatorLog", back_populates="actuator", cascade="all, delete")
+
+    thresholds = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

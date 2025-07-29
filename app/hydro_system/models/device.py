@@ -1,5 +1,5 @@
 # app/hydro_system/models/device.py
-# Description: Device model for hydroponic systems
+# Description: Device model for hydroponic systems (ESP32 devices)
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base

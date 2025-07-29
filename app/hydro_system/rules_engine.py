@@ -2,6 +2,7 @@
 # Description: Rules engine to determine actions based on sensor data
 
 from app.hydro_system.config import DEFAULT_THRESHOLDS
+from app.hydro_system.models.actuator import HydroActuator
 import logging
 
 logger = logging.getLogger(__name__)
@@ -68,20 +69,69 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
         "critical_threshold": thresholds.get("water_level_critical", 10)
     }
 
-def check_rules(sensor_data: dict, thresholds: dict = DEFAULT_THRESHOLDS) -> dict:
+def should_turn_on_water_pump(sensor_data: dict, thresholds: dict) -> bool:
     """
-    Check sensor values against rules and return a dict of actions and alerts.
+    Determine if the water pump should be turned on.
+    Example logic: used to refill internal reservoirs when main tank is sufficient
     """
-    actions = {
-        "pump": should_turn_on_pump(sensor_data, thresholds),
-        "light": should_turn_on_light(sensor_data, thresholds),
-        "fan": should_turn_on_fan(sensor_data, thresholds),
-        "water_refill": should_refill_water_tank(sensor_data, thresholds)
-    }
-    
+    water_level = sensor_data.get("water_level", 0)
+    return water_level > thresholds.get("water_level_min", 20)  # Example: pump if water is available
+
+def should_open_valve(sensor_data: dict, thresholds: dict) -> bool:
+    """
+    Determine if a valve should be opened.
+    Example logic: open valve if soil is dry and water level is sufficient
+    """
+    moisture = sensor_data.get("moisture", 0)
+    water_level = sensor_data.get("water_level", 0)
+
+    if water_level < thresholds.get("water_level_min", 20):
+        logger.warning("Cannot open valve: Water level too low")
+        return False
+
+    return moisture < thresholds.get("moisture_min", 30)
+
+
+def check_rules(
+    sensor_data: dict,
+    thresholds: dict = DEFAULT_THRESHOLDS,
+    actuators: list = []
+) -> dict:
+    """
+    Evaluate sensor data and decide actions for each actuator, using individual thresholds if available.
+    Returns a list of per-actuator actions and system alerts.
+    """
+    actions = []
     alerts = []
-    
-    # Check for water level alerts
+
+    for actuator in actuators:
+        actuator_type = actuator.type.lower()
+        actuator_id = actuator.id
+        # Use actuator's custom thresholds if present, otherwise fallback
+        actuator_thresholds = actuator.thresholds or thresholds
+
+        should_activate = False
+
+        if actuator_type == "pump":
+            should_activate = should_turn_on_pump(sensor_data, actuator_thresholds)
+        elif actuator_type == "light":
+            should_activate = should_turn_on_light(sensor_data, actuator_thresholds)
+        elif actuator_type == "fan":
+            should_activate = should_turn_on_fan(sensor_data, actuator_thresholds)
+        elif actuator_type == "valve":
+            should_activate = should_open_valve(sensor_data, actuator_thresholds)
+        elif actuator_type == "water_pump":
+            should_activate = should_turn_on_water_pump(sensor_data, actuator_thresholds)
+        # Add more actuator types as needed...
+
+        actions.append({
+            "actuator_id": actuator_id,
+            "on": should_activate,
+            "type": actuator_type,
+            "thresholds_used": actuator_thresholds
+        })
+
+    # Evaluate general system alerts (global threshold)
     if is_water_level_critical(sensor_data, thresholds):
         alerts.append({
             "type": "critical",
@@ -98,19 +148,20 @@ def check_rules(sensor_data: dict, thresholds: dict = DEFAULT_THRESHOLDS) -> dic
             "value": sensor_data.get("water_level", 0),
             "action_required": "Schedule water tank refill"
         })
-    
-    # Check for other sensor alerts
-    moisture = sensor_data.get("moisture", 0)
-    if moisture < thresholds.get("moisture_min", 30) and sensor_data.get("water_level", 0) < thresholds.get("water_level_min", 20):
+
+    # Compound condition alert
+    if sensor_data.get("moisture", 0) < thresholds.get("moisture_min", 30) and \
+       sensor_data.get("water_level", 0) < thresholds.get("water_level_min", 20):
         alerts.append({
             "type": "warning",
             "message": "Cannot irrigate: Both soil moisture and water level are low",
             "sensor": "moisture_water_level",
             "action_required": "Refill water tank before irrigation"
         })
-    
+
     return {
         "actions": actions,
         "alerts": alerts,
         "water_status": get_water_level_status(sensor_data, thresholds)
     }
+
