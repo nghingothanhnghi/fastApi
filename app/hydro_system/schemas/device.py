@@ -6,6 +6,8 @@ from datetime import datetime
 class HydroDeviceBase(BaseModel):
     name: str
     device_id: str
+    user_id: Optional[int] = None
+    external_id: Optional[str] = None
     location: Optional[str] = None
     type: Optional[str] = None
     is_active: Optional[bool] = True
@@ -21,6 +23,9 @@ class HydroDeviceCreate(HydroDeviceBase):
 
 class HydroDeviceUpdate(BaseModel):
     name: Optional[str] = None
+    external_id: Optional[str] = None
+    user_id: Optional[int] = None
+    client_id: Optional[str] = None
     location: Optional[str] = None
     type: Optional[str] = None
     is_active: Optional[bool] = None

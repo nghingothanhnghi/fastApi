@@ -1,4 +1,5 @@
 # app/hydro_system/models/actuator_log.py
+# This file defines the ActuatorLog model which represents logs related to actuators.
 
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship

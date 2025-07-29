@@ -17,6 +17,8 @@ class SensorDataSchema(BaseModel):
 
 
 class SensorDataCreateSchema(BaseModel):
+    device_id: str = Field(..., description="External ID of the device sending the sensor data")
+    
     temperature: Optional[float] = Field(
         None, description="Temperature in Celsius", ge=-50, le=100
     )

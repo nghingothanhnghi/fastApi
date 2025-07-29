@@ -1,10 +1,12 @@
 # app/hydro_system/controllers/sensor_data_controller.py
 # This file defines business logic and database interaction for managing sensor data
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.schemas.sensor_data import SensorDataCreateSchema
 from app.hydro_system.config import DEFAULT_THRESHOLDS, WATER_LEVEL_CONFIG
 from app.hydro_system.rules_engine import get_water_level_status, check_rules
+from app.hydro_system.services.device_service import hydro_device_service
 from datetime import datetime, timedelta
 import logging
 
@@ -22,20 +24,41 @@ def update_thresholds(thresholds: dict):
     return DEFAULT_THRESHOLDS
 
 
+# def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
+#     new_data = SensorData(
+#         temperature=payload.temperature,
+#         humidity=payload.humidity,
+#         light=payload.light,
+#         moisture=payload.moisture,
+#         water_level=payload.water_level,
+#         created_at=datetime.utcnow(),
+#     )
+#     db.add(new_data)
+#     db.commit()
+#     db.refresh(new_data)
+#     logger.info(f"New sensor data created: ID={new_data.id}, water_level={new_data.water_level}%")
+#     return new_data
 def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
+    # Lookup HydroDevice by external_id
+    device = hydro_device_service.get_device_by_external_id(db, payload.device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device with external_id '{payload.device_id}' not found")
+
     new_data = SensorData(
         temperature=payload.temperature,
         humidity=payload.humidity,
         light=payload.light,
         moisture=payload.moisture,
         water_level=payload.water_level,
+        device_id=device.id,
         created_at=datetime.utcnow(),
     )
     db.add(new_data)
     db.commit()
     db.refresh(new_data)
-    logger.info(f"New sensor data created: ID={new_data.id}, water_level={new_data.water_level}%")
+    logger.info(f"New sensor data created: ID={new_data.id}, water_level={new_data.water_level}%, device_id={device.id}")
     return new_data
+
 
 def get_water_level_history(db: Session, hours: int = 24):
     """Get water level history for the specified number of hours"""

@@ -16,12 +16,15 @@ class HydroDevice(Base):
     user = relationship("User", back_populates="devices_hydro")
     client_id = Column(String, nullable=True)
 
+    # Add an external_id field like mac_address, serial_number, or a unique device_id sent by the ESP32 or similar hardware. 
+    external_id = Column(String, unique=True, index=True, nullable=True)
     location = Column(String, nullable=True)  # e.g., "Greenhouse A"
     type = Column(String, nullable=True)  # controller
     is_active = Column(Boolean, default=True)
 
     # Inside class HydroDevice:
     actuators = relationship("HydroActuator", back_populates="device", cascade="all, delete")
+
 
 
     thresholds = Column(JSON, nullable=True)  # ✅ Per-device automation thresholds

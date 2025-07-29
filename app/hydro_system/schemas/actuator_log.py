@@ -1,3 +1,6 @@
+# app/hydro_system/schemas/actuator_log.py
+# This file contains schemas related to hydroponic system actuator logs.
+
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional

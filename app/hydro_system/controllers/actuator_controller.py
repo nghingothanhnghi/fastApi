@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.orm import Session
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
-from app.hydro_system.config import DEVICE_IDS
+from app.hydro_system.config import DEFAULT_ACTUATORS
 from app.hydro_system.services.actuator_service import get_actuator_by_device_and_type
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
@@ -46,7 +46,7 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
             return
 
     # Fallback to default logic if no actuator or device_id
-    fallback_id = DEVICE_IDS.get(device_type, f"default_{device_type}_id")
+    fallback_id = DEFAULT_ACTUATORS.get(device_type, f"default_{device_type}_id")
     set_state(device_type, on)
     log_device_action(device_type, on, fallback_id)
     log_actuator_action(db, None, on)  # <--- Log as unknown actuator

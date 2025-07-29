@@ -1,4 +1,6 @@
 # app/hydro_system/services/actuator_log_service.py
+# define functions for logging actuator actions and retrieving logs
+
 from sqlalchemy.orm import Session
 from app.hydro_system.models.actuator_log import HydroActuatorLog
 from app.hydro_system.models.actuator import HydroActuator

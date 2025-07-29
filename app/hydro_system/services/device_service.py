@@ -21,6 +21,9 @@ class HydroDeviceService:
 
     def get_device(self, db: Session, device_id: int) -> Optional[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.id == device_id).first()
+    
+    def get_device_by_external_id(self, db: Session, external_id: str) -> Optional[HydroDevice]:
+        return db.query(HydroDevice).filter(HydroDevice.device_id == external_id).first()
 
     def get_devices_by_user(self, db: Session, user_id: int) -> List[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.user_id == user_id).all()
