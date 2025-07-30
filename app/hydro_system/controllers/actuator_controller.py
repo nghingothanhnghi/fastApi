@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
 from app.hydro_system.config import DEFAULT_ACTUATORS
-from app.hydro_system.services.actuator_service import get_actuator_by_device_and_type, get_all_actuators_by_type
+from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
 
@@ -39,7 +39,7 @@ def log_device_action(device_type: str, state: bool, device_id: str = None):
 def control_actuator(db: Session, device_type: str, on: bool, device_id: str = None):
     """Control actuator with optional database logic"""
     if device_id:
-        actuator = get_actuator_by_device_and_type(db, device_id, device_type)
+        actuator = hydro_actuator_service.get_actuator_by_device_and_type(db, device_id, device_type)
         if actuator:
             set_state(f"{device_type}_{device_id}", on)
             log_device_action(device_type, on, device_id)
@@ -83,7 +83,7 @@ def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
     actions_taken = {}
 
     for device_type in ["pump", "light", "fan", "water_pump", "valve"]:
-        actuators = get_all_actuators_by_type(db, device_type, device_id=device_id)
+        actuators = hydro_actuator_service.get_all_actuators_by_type(db, device_type, device_id=device_id)
 
         if not actuators:
             logger.warning(f"No actuators found for type '{device_type}' on device '{device_id}'")

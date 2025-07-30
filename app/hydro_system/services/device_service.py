@@ -1,8 +1,9 @@
 # app/hydro_system/services/device_service.py
-# Service class for managing hydro devices
+# Service class for managing hydro devices (ESP32)
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from fastapi import HTTPException
 from typing import List, Optional
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
@@ -11,12 +12,17 @@ from app.hydro_system.config import DEFAULT_ACTUATORS
 
 class HydroDeviceService:
     def create_device(self, db: Session, device_in: HydroDeviceCreate) -> HydroDevice:
+        # Check for existing device_id (unique constraint)
+        existing = db.query(HydroDevice).filter(HydroDevice.device_id == device_in.device_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Device ID already exists.")
+
         try:
             device = HydroDevice(**device_in.dict())
             db.add(device)
-            db.flush()  # So device.id is available before commit
+            db.flush()  # Get device.id before commit
 
-            # Automatically create default actuators
+            # Create default actuators for this device
             for act in DEFAULT_ACTUATORS:
                 actuator = HydroActuator(
                     type=act["type"],
@@ -33,7 +39,7 @@ class HydroDeviceService:
             return device
         except SQLAlchemyError as e:
             db.rollback()
-            raise e
+            raise HTTPException(status_code=500, detail="Failed to create device.")
 
     def get_device(self, db: Session, device_id: int) -> Optional[HydroDevice]:
         return db.query(HydroDevice).filter(HydroDevice.id == device_id).first()

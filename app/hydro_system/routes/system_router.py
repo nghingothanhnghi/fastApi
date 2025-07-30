@@ -5,16 +5,9 @@ from app.database import get_db
 from app.utils.token import get_current_user
 from app.user.models.user import User
 from sqlalchemy.orm import Session
-# from app.hydro_system.controllers import hydro_system_controller as controller
-from app.hydro_system.schemas.device import (
-    HydroDeviceCreate, HydroDeviceUpdate, HydroDeviceOut
-)
 # Import controllers with aliases for clarity
 from app.hydro_system.controllers import (
-    hydro_system_controller as system_controller,
-    hydro_device_controller as device_controller,
-    sensor_data_controller as sensor_controller,
-    actuator_controller as actuator_controller
+    system_controller
 )
 
 from typing import Optional, List

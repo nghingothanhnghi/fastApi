@@ -10,7 +10,7 @@ from app.user.models.user import User
 from app.hydro_system.schemas.device import (
     HydroDeviceCreate, HydroDeviceUpdate, HydroDeviceOut
 )
-from app.hydro_system.controllers import hydro_device_controller as device_controller
+from app.hydro_system.controllers import device_controller
 
 
 device_router = APIRouter()
