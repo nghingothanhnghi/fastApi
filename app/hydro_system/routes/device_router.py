@@ -6,11 +6,14 @@ from typing import Optional, List
 
 from app.database import get_db
 from app.utils.token import get_current_user
+from app.utils.role_requirements import require_roles
+from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.hydro_system.schemas.device import (
     HydroDeviceCreate, HydroDeviceUpdate, HydroDeviceOut
 )
 from app.hydro_system.controllers import device_controller
+
 
 
 device_router = APIRouter()
@@ -29,11 +32,17 @@ def get_devices(
 ):
     """List all devices or filter by user_id or client_id. 
     Defaults to current user's client_id if none provided.
+    SuperAdmin can view all devices.
     """
+    if RoleEnum.SUPER_ADMIN in current_user.roles:
+        return device_controller.get_all_devices(db, skip=skip, limit=limit)
+
     if user_id is not None:
         return device_controller.get_devices_by_user(db, user_id)
+
     if client_id is not None:
-        return device_controller.get_devices_by_client(db, client_id)
+        return device_controller.get_devices_by_client(db, client_id, skip=skip, limit=limit)
+
     return device_controller.get_devices_by_client(db, current_user.client_id, skip=skip, limit=limit)
 
 
@@ -50,7 +59,12 @@ def get_device(
 def create_device(
     device_in: HydroDeviceCreate = Body(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    """Create a new device and auto-assign current user's user_id and client_id"""
+    # Inject authenticated user details
+    device_in.user_id = current_user.id
+    device_in.client_id = current_user.client_id
     """Create a new device"""
     return device_controller.create_device(db, device_in)
 

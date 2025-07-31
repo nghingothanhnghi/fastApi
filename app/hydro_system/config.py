@@ -1,7 +1,11 @@
 # app/hydro_system/config.py
 # Configuration settings for the hydroponic system
 
-# Configuration settings for the hydroponic system
+DEVICE_IDS = [
+    "esp32-dev-001",
+    "esp32-dev-002",
+    "esp32-dev-003",
+]
 
 # Default automation thresholds per device (can be overridden per device in DB)
 DEFAULT_THRESHOLDS = {

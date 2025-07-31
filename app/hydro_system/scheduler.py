@@ -1,5 +1,7 @@
 # app/hydro_system/scheduler.py
 # Description: This module handles scheduling tasks for collecting and processing sensor data.
+from app.hydro_system.models.device import HydroDevice
+from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.sensors import read_sensors
 from app.hydro_system.controllers.actuator_controller import handle_automation
 from app.database import SessionLocal
@@ -8,9 +10,6 @@ from app.hydro_system import state_manager
 from app.utils.scheduler import add_job, remove_job
 import logging
 
-
-# scheduler = BackgroundScheduler()
-
 logger = logging.getLogger(__name__)
 
 JOB_ID = "sensor_collect_job"
@@ -18,19 +17,34 @@ JOB_ID = "sensor_collect_job"
 def collect_and_process():
     session = SessionLocal()
     try:
-        sensor_data = read_sensors()
-        logger.info(f"Collected sensor data: {sensor_data}")
-        # Save to DB
-        entry = SensorData(**sensor_data)
-        session.add(entry)
-        session.commit()
+        devices = session.query(HydroDevice).filter(HydroDevice.is_active == True).all()
 
-        # Trigger automation
-        handle_automation(sensor_data)
+        if not devices:
+            logger.warning("No active devices found. Skipping sensor collection.")
+            return
+
+        for device in devices:
+            device_id = device.id
+            logger.info(f"🔄 Collecting data for device: {device_id}")
+
+            try:
+                sensor_data = read_sensors(device_id=device_id)
+                logger.info(f"Device {device_id} sensor data: {sensor_data}")
+
+                entry = SensorData(**sensor_data, device_id=device_id)
+                session.add(entry)
+                session.commit()
+
+                handle_automation(session, sensor_data, device_id=device_id)
+
+            except Exception as e:
+                logger.error(f"❌ Failed processing device {device_id}: {e}")
+
     except Exception as e:
         logger.error(f"Sensor collection failed: {e}")
     finally:
         session.close()
+
 
 def start_sensor_job():
     # ✅ Use global scheduler to add job

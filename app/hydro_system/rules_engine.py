@@ -107,8 +107,8 @@ def check_rules(
     for actuator in actuators:
         actuator_type = actuator.type.lower()
         actuator_id = actuator.id
-        # Use actuator's custom thresholds if present, otherwise fallback
-        actuator_thresholds = actuator.thresholds or thresholds
+        # ✅ Get thresholds from the associated device
+        actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
 
         should_activate = False
 

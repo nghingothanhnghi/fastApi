@@ -9,6 +9,9 @@ from app.hydro_system.models.device import HydroDevice
 def create_device(db: Session, device_in: HydroDeviceCreate) -> HydroDevice:
     return hydro_device_service.create_device(db, device_in)
 
+def get_or_create_default_device(db: Session) -> HydroDevice:
+    return hydro_device_service.get_or_create_default_device(db)
+
 def get_device(db: Session, device_id: int) -> HydroDevice:
     device = hydro_device_service.get_device(db, device_id)
     if not device:
@@ -18,8 +21,9 @@ def get_device(db: Session, device_id: int) -> HydroDevice:
 def get_devices_by_user(db: Session, user_id: int):
     return hydro_device_service.get_devices_by_user(db, user_id)
 
-def get_devices_by_client(db: Session, client_id: str):
-    return hydro_device_service.get_devices_by_client(db, client_id)
+def get_devices_by_client(db: Session, client_id: str, skip: int = 0, limit: int = 100):
+    return hydro_device_service.get_devices_by_client(db, client_id, skip=skip, limit=limit)
+
 
 def get_all_devices(db: Session, skip: int = 0, limit: int = 100):
     return hydro_device_service.get_all_devices(db, skip, limit)

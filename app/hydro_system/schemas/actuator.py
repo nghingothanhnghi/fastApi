@@ -10,7 +10,6 @@ class HydroActuatorBase(BaseModel):
     is_active: Optional[bool] = True
     default_state: Optional[bool] = False
     device_id: int
-    thresholds: Optional[Dict[str, Any]] = None  # 👈 NEW
 
 class HydroActuatorCreate(HydroActuatorBase):
     device_id: int = Field(..., json_schema_extra={"example": 1})
@@ -22,8 +21,6 @@ class HydroActuatorUpdate(BaseModel):
     pin: Optional[str]
     is_active: Optional[bool]
     default_state: Optional[bool] = None
-    thresholds: Optional[Dict[str, Any]] = None
-
 class HydroActuatorOut(HydroActuatorBase):
     id: int
     device_id: int
