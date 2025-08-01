@@ -128,24 +128,31 @@ def emergency_stop(
 # --- Scheduler Control ---
 @router.post("/scheduler/start")
 def start_schedule(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    device_id: Optional[int] = Query(None)
 ):
     """Start the sensor data collection scheduler"""
-    system_controller.scheduler_control("start")
-    return {"status": "Scheduler started"}
+    system_controller.scheduler_control("start", user_id=current_user.id, device_id=device_id)
+    return {"status": "Scheduler started", "device_id": device_id}
+
 
 @router.post("/scheduler/stop")
 def stop_schedule(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    device_id: Optional[int] = Query(None)
 ):
     """Stop the sensor data collection scheduler"""
-    system_controller.scheduler_control("stop")
-    return {"status": "Scheduler stopped"}
+    system_controller.scheduler_control("stop", user_id=current_user.id, device_id=device_id)
+    return {"status": "Scheduler stopped", "device_id": device_id}
+
 
 @router.post("/scheduler/restart")
 def restart_schedule(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    device_id: Optional[int] = Query(None)
 ):
     """Restart the sensor data collection scheduler"""
-    system_controller.scheduler_control("restart")
-    return {"status": "Scheduler restarted"}
+    system_controller.scheduler_control("restart", user_id=current_user.id, device_id=device_id)
+    return {"status": "Scheduler restarted", "device_id": device_id}
+
+

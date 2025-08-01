@@ -6,12 +6,10 @@ from datetime import datetime
 class HydroDeviceBase(BaseModel):
     name: str
     device_id: str
-    user_id: Optional[int] = None
     external_id: Optional[str] = None
     location: Optional[str] = None
     type: Optional[str] = None
     is_active: Optional[bool] = True
-    client_id: Optional[str] = None
     thresholds: Optional[Dict[str, Any]] = None
 
     model_config = {
@@ -19,7 +17,8 @@ class HydroDeviceBase(BaseModel):
     }
 
 class HydroDeviceCreate(HydroDeviceBase):
-    user_id: int
+    client_id: Optional[str] = None
+    user_id: Optional[int] = None
 
 class HydroDeviceUpdate(BaseModel):
     name: Optional[str] = None
