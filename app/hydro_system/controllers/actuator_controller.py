@@ -90,8 +90,8 @@ def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
             continue
 
         for actuator in actuators:
-            # Use actuator-level override thresholds if defined
-            thresholds_override = actuator.thresholds or {}
+            # ✅ Use device thresholds
+            thresholds_override = actuator.device.thresholds or {}
 
             # Re-run rules per actuator with their own overrides
             rules_result = check_rules(sensor_data, overrides=thresholds_override)

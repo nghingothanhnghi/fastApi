@@ -39,11 +39,17 @@ def read_sensors(device_id: int = None):
         device = None
         if device_id:
             device = session.query(HydroDevice).filter(HydroDevice.id == device_id).first()
-            if not device:
+            # if not device:
+            #     logger.warning(f"No device found with ID {device_id}")
+            if device:
+                device_name = device.name  # 👈 Get device_name
+            else:
                 logger.warning(f"No device found with ID {device_id}")
 
         # Simulated readings (replace with actual sensor reads in production)
         sensor_data = {
+            "device_id": device_id,
+            "device_name": device_name,  # 👈 Include in response
             "temperature": read_temperature(),
             "humidity": read_humidity(),
             "light": read_light(),
@@ -57,6 +63,8 @@ def read_sensors(device_id: int = None):
     except Exception as e:
         logger.error(f"❌ Error reading sensors for device {device_id}: {e}")
         return {
+            "device_id": device_id,
+            "device_name": None,
             "temperature": None,
             "humidity": None,
             "light": None,

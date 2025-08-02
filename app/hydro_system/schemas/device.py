@@ -1,7 +1,9 @@
 # app/hydro_system/schemas/device.py
 from pydantic import BaseModel
-from typing import Optional, Dict,Any
+from typing import Optional, Dict,Any, List
 from datetime import datetime
+from app.user.schemas.user import UserOut  # You must define this
+from app.hydro_system.schemas.actuator import HydroActuatorOut  # You must define this too
 
 class HydroDeviceBase(BaseModel):
     name: str
@@ -39,6 +41,14 @@ class HydroDeviceOut(HydroDeviceBase):
     user_id: int
     created_at: datetime
     updated_at: Optional[datetime]
+
+    model_config = {
+        "from_attributes": True
+    }
+
+class HydroDeviceWithRelations(HydroDeviceOut):
+    user: Optional[UserOut] = None
+    actuators: List[HydroActuatorOut] = []
 
     model_config = {
         "from_attributes": True

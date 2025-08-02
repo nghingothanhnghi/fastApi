@@ -31,7 +31,12 @@ def collect_and_process():
                 sensor_data = read_sensors(device_id=device_id)
                 logger.info(f"Device {device_id} sensor data: {sensor_data}")
 
-                entry = SensorData(**sensor_data, device_id=device_id)
+                # entry = SensorData(**sensor_data)
+                # Only keep fields that exist in SensorData model
+                allowed_keys = {"temperature", "humidity", "light", "moisture", "water_level", "device_id"}
+                clean_data = {k: v for k, v in sensor_data.items() if k in allowed_keys}
+
+                entry = SensorData(**clean_data)
                 session.add(entry)
                 session.commit()
 
