@@ -2,9 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.endpoints import (
-    devices, tap, health, scheduler_health , screen, object_detection, 
-    user, auth, password_reset, roles
+    devices, tap, health, scheduler_health , screen,
 )
+
+from app.user.routes import (user_router, roles_router, auth_router, password_reset_router)
+
+from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router)
 
 from app.hydro_system.routes import ( system_router, sensor_router, actuator_router)
 
@@ -41,10 +44,10 @@ app.middleware("http")(catch_exceptions_middleware)
 # -----------------------------------------
 # Routers
 # -----------------------------------------
-app.include_router(auth.router)
-app.include_router(user.router)
-app.include_router(roles.router)
-app.include_router(password_reset.router)
+app.include_router(auth_router.router)
+app.include_router(user_router.router)
+app.include_router(roles_router.router)
+app.include_router(password_reset_router.router)
 
 app.include_router(devices.router, prefix="/devices", tags=["devices"])
 app.include_router(tap.router, prefix="/tap")
@@ -53,7 +56,10 @@ app.include_router(screen.router, prefix="/screen")
 
 app.include_router(scheduler_health.router)  # /scheduler/health
 
-app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
+# app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
+app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
+app.include_router(hardware_detection_router.router, prefix="/object-detection", tags=["hardware-detection"])
+
 
 # app.include_router(hydro_system.router)  # Handles /hydro/ endpoints
 # app.include_router(sensor_data.router)   # Handles /sensor/ endpoints

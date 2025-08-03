@@ -9,6 +9,7 @@ from .user.models.password_reset import PasswordResetCode
 from .user.models.role import Role
 from .user.models.user_role import UserRole
 from .camera_object_detection.models.detection import DetectionResult, DetectionObject
+from .camera_object_detection.models.hardware_detection import HardwareDetection, LocationHardwareInventory, HardwareDetectionSummary
 from .migration.models.base_data import RawData
 from .transform_data.models.template import Template
 def init_db():
