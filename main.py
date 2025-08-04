@@ -58,7 +58,7 @@ app.include_router(scheduler_health.router)  # /scheduler/health
 
 # app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
-app.include_router(hardware_detection_router.router, prefix="/object-detection", tags=["hardware-detection"])
+app.include_router(hardware_detection_router.router, prefix="/hardware-detection", tags=["hardware-detection"])
 
 
 # app.include_router(hydro_system.router)  # Handles /hydro/ endpoints
