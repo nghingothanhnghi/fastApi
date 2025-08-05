@@ -7,6 +7,7 @@ from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.actuator import HydroActuatorCreate, HydroActuatorUpdate
 
 class HydroActuatorService:
+
     def create_actuator(self, db: Session, actuator_in: HydroActuatorCreate) -> HydroActuator:
         try:
             actuator = HydroActuator(**actuator_in.dict())
@@ -24,11 +25,11 @@ class HydroActuatorService:
     def get_actuators_by_device(self, db: Session, device_id: int) -> List[HydroActuator]:
         return db.query(HydroActuator).filter(HydroActuator.device_id == device_id).all()
 
-    def get_actuator_by_device_and_type(self, db: Session, device_id: int, actuator_type: str) -> Optional[HydroActuator]:
+    def get_actuators_by_device_and_type(self, db: Session, device_id: int, actuator_type: str) -> List[HydroActuator]:
         return (
             db.query(HydroActuator)
             .filter(HydroActuator.device_id == device_id, HydroActuator.type == actuator_type)
-            .first()
+            .all()
         )
 
     def update_actuator(self, db: Session, actuator: HydroActuator, updates: HydroActuatorUpdate) -> HydroActuator:
@@ -67,6 +68,18 @@ class HydroActuatorService:
 
     def get_all_actuators(self, db: Session) -> List[HydroActuator]:
         return db.query(HydroActuator).all()
+
+    def update_actuators_by_type(
+        self, db: Session, device_id: int, actuator_type: str, value: bool
+    ) -> List[HydroActuator]:
+        """
+        Toggle all actuators of a type on a device.
+        """
+        actuators = self.get_actuators_by_device_and_type(db, device_id, actuator_type)
+        for actuator in actuators:
+            actuator.default_state = value
+        db.commit()
+        return actuators    
 
 
 # Export a single instance (singleton-style)

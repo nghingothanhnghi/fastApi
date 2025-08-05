@@ -9,6 +9,7 @@ from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restar
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.device_service import hydro_device_service
+from app.hydro_system.services.actuator_service import hydro_actuator_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,10 +36,27 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         thresholds = device.thresholds if hasattr(device, "thresholds") and device.thresholds else DEFAULT_THRESHOLDS
         rules_result = check_rules(sensor_data, thresholds)
 
-        actuators_state = {
-            actuator_type: state_manager.get_state(f"{actuator_type}_{device.id}")
-            for actuator_type in ["pump", "light", "fan", "water_pump"]
-        }
+        actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
+
+        actuators_state = []
+
+        for actuator in actuators:
+            sensor_value = None
+            if actuator.sensor_key and actuator.sensor_key in sensor_data:
+                sensor_value = sensor_data[actuator.sensor_key]
+
+            actuators_state.append({
+                "id": actuator.id,
+                "name": actuator.name,
+                "type": actuator.type,
+                "pin": actuator.pin,
+                "port": actuator.port,
+                "is_active": actuator.is_active,
+                "default_state": actuator.default_state,
+                "sensor_key": actuator.sensor_key,
+                "linked_sensor_value": sensor_value,
+                "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
+            })      
 
         results.append({
             "device_id": device.id,
@@ -54,13 +72,17 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             }
         })
 
-    return results if len(results) > 1 else results[0]
+    # return results if len(results) > 1 else results[0]
+
+    return results
 
 
 def control_actuator(db: Session, actuator_type: str, on: bool, user_id: int, device_id: Optional[int] = None):
     device_id_str = str(device_id) if device_id is not None else None
     actuator_controller.control_actuator(db, actuator_type, on, device_id_str)
 
+def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
+    return actuator_controller.control_actuator_by_id(db, actuator_id, on)
 def control_pump(db: Session, on: bool, user_id: int, device_id: Optional[int] = None):
     control_actuator(db, "pump", on, user_id, device_id)
 

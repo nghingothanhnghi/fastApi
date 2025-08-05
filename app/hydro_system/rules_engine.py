@@ -91,81 +91,6 @@ def should_open_valve(sensor_data: dict, thresholds: dict) -> bool:
 
     return moisture < thresholds.get("moisture_min", 30)
 
-
-# def check_rules(
-#     sensor_data: dict,
-#     thresholds: dict = DEFAULT_THRESHOLDS,
-#     actuators: list = []
-# ) -> dict:
-#     """
-#     Evaluate sensor data and decide actions for each actuator, using individual thresholds if available.
-#     Returns a list of per-actuator actions and system alerts.
-#     """
-#     actions = []
-#     alerts = []
-
-#     for actuator in actuators:
-#         actuator_type = actuator.type.lower()
-#         actuator_id = actuator.id
-#         # ✅ Get thresholds from the associated device
-#         actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
-
-#         should_activate = False
-
-#         if actuator_type == "pump":
-#             should_activate = should_turn_on_pump(sensor_data, actuator_thresholds)
-#         elif actuator_type == "light":
-#             should_activate = should_turn_on_light(sensor_data, actuator_thresholds)
-#         elif actuator_type == "fan":
-#             should_activate = should_turn_on_fan(sensor_data, actuator_thresholds)
-#         elif actuator_type == "valve":
-#             should_activate = should_open_valve(sensor_data, actuator_thresholds)
-#         elif actuator_type == "water_pump":
-#             should_activate = should_turn_on_water_pump(sensor_data, actuator_thresholds)
-#         # Add more actuator types as needed...
-
-#         actions.append({
-#             "actuator_id": actuator_id,
-#             "on": should_activate,
-#             "type": actuator_type,
-#             "thresholds_used": actuator_thresholds
-#         })
-
-#     # Evaluate general system alerts (global threshold)
-#     if is_water_level_critical(sensor_data, thresholds):
-#         alerts.append({
-#             "type": "critical",
-#             "message": "Water level critically low!",
-#             "sensor": "water_level",
-#             "value": sensor_data.get("water_level", 0),
-#             "action_required": "Immediate water tank refill"
-#         })
-#     elif should_refill_water_tank(sensor_data, thresholds):
-#         alerts.append({
-#             "type": "warning",
-#             "message": "Water level low",
-#             "sensor": "water_level",
-#             "value": sensor_data.get("water_level", 0),
-#             "action_required": "Schedule water tank refill"
-#         })
-
-#     # Compound condition alert
-#     if sensor_data.get("moisture", 0) < thresholds.get("moisture_min", 30) and \
-#        sensor_data.get("water_level", 0) < thresholds.get("water_level_min", 20):
-#         alerts.append({
-#             "type": "warning",
-#             "message": "Cannot irrigate: Both soil moisture and water level are low",
-#             "sensor": "moisture_water_level",
-#             "action_required": "Refill water tank before irrigation"
-#         })
-
-#     return {
-#         "actions": actions,
-#         "alerts": alerts,
-#         "water_status": get_water_level_status(sensor_data, thresholds)
-#     }
-
-
 def check_rules(
     sensor_data: dict,
     thresholds: dict = DEFAULT_THRESHOLDS,
@@ -175,12 +100,13 @@ def check_rules(
     """
     Evaluate sensor data and decide actions for each actuator, using individual thresholds if available.
     Optionally override global thresholds with `overrides`.
+    Supports multiple actuators of the same type.
     Returns a list of per-actuator actions and system alerts.
     """
     actions = []
     alerts = []
 
-    # Merge overrides into thresholds if provided
+    # Merge overrides if provided
     if overrides:
         thresholds = {**thresholds, **overrides}
 
@@ -188,7 +114,7 @@ def check_rules(
         actuator_type = actuator.type.lower()
         actuator_id = actuator.id
 
-        # Get thresholds from device or fall back to global thresholds (already merged with overrides)
+        # Use thresholds from device, fallback to global
         actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
 
         should_activate = False
@@ -208,10 +134,10 @@ def check_rules(
             "actuator_id": actuator_id,
             "on": should_activate,
             "type": actuator_type,
-            "thresholds_used": actuator_thresholds
+            "thresholds_used": actuator_thresholds,
         })
 
-    # Global/system alerts (based on possibly overridden thresholds)
+    # Global/system alerts
     if is_water_level_critical(sensor_data, thresholds):
         alerts.append({
             "type": "critical",
@@ -244,5 +170,6 @@ def check_rules(
         "alerts": alerts,
         "water_status": get_water_level_status(sensor_data, thresholds)
     }
+
 
 

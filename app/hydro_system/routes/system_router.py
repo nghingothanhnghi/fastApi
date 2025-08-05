@@ -125,6 +125,23 @@ def emergency_stop(
     result = system_controller.emergency_stop(db=db, user_id=current_user.id)
     return result
 
+@router.post("/actuator/{actuator_id}/on", summary="Turn actuator ON by ID")
+def turn_actuator_on(
+    actuator_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return system_controller.control_actuator_by_id(db, actuator_id=actuator_id, on=True)
+
+@router.post("/actuator/{actuator_id}/off", summary="Turn actuator OFF by ID")
+def turn_actuator_off(
+    actuator_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return system_controller.control_actuator_by_id(db, actuator_id=actuator_id, on=False)
+
+
 # --- Scheduler Control ---
 @router.post("/scheduler/start")
 def start_schedule(

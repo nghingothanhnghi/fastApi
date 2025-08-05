@@ -64,7 +64,6 @@ def get_water_level_history(db: Session, hours: int = 24):
         .all()
     )
 
-
 def get_current_water_status(db: Session):
     devices = db.query(HydroDevice).filter(HydroDevice.is_active == True).all()
     if not devices:
@@ -104,16 +103,22 @@ def get_current_water_status(db: Session):
         }
 
         water_status = get_water_level_status(sensor_data, DEFAULT_THRESHOLDS)
-        rules_result = check_rules(sensor_data, DEFAULT_THRESHOLDS)
+        rules_result = check_rules(sensor_data, DEFAULT_THRESHOLDS, device=device)
 
         actions = []
-        for actuator_type, decision in rules_result.get("actions", {}).items():
-            if decision:
-                actions.append({
-                    "type": actuator_type,
-                    "action": decision.get("action"),
-                    "reason": decision.get("reason", "No reason provided"),
-                })
+        raw_actions = rules_result.get("actions", [])
+        
+        if isinstance(raw_actions, dict):  # fallback if old structure used
+            raw_actions = [dict(type=k, **v) for k, v in raw_actions.items()]
+
+        for decision in raw_actions:
+            actions.append({
+                "id": decision.get("id"),
+                "type": decision.get("type"),
+                "port": decision.get("port"),
+                "action": decision.get("action"),
+                "reason": decision.get("reason", "No reason provided"),
+            })
 
         results.append({
             "device_id": device.device_id,
@@ -128,6 +133,7 @@ def get_current_water_status(db: Session):
         "status": "success",
         "devices": results,
     }
+
 
 
 def get_water_consumption_rate(db: Session, hours: int = 24):

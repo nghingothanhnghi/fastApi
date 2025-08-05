@@ -56,6 +56,17 @@ DEFAULT_ACTUATORS = [
     }
 ]
 
+# app/hydro_system/config.py (or a new config_actuators.py)
+
+ACTUATOR_TYPES = {
+    "pump": {"emoji_on": "✅", "emoji_off": "❌", "label": "Pump"},
+    "light": {"emoji_on": "💡", "emoji_off": "🌙", "label": "Light"},
+    "fan": {"emoji_on": "🌪️", "emoji_off": "🔇", "label": "Fan"},
+    "water_pump": {"emoji_on": "💧", "emoji_off": "🚰", "label": "Water Pump"},
+    "valve": {"emoji_on": "🔓", "emoji_off": "🔒", "label": "Valve"},
+}
+
+
 # Water level sensor configuration
 WATER_LEVEL_CONFIG = {
     "sensor_type": "ultrasonic",  # ultrasonic, float, pressure

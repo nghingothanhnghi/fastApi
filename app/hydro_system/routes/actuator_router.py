@@ -41,3 +41,4 @@ def delete_actuator(actuator_id: int, db: Session = Depends(get_db)):
     if not actuator:
         raise HTTPException(status_code=404, detail="Actuator not found")
     return {"detail": "Actuator deleted successfully"}
+
