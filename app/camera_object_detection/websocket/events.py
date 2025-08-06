@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
 
-from .connection_manager import hardware_detection_ws_manager
+from app.utils.connection_manager import detection_ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class HardwareDetectionEventBroadcaster:
     """Handles broadcasting of hardware detection events via WebSocket"""
     
     def __init__(self):
-        self.ws_manager = hardware_detection_ws_manager
+        self.ws_manager = detection_ws_manager
     
     async def broadcast_new_detection(self, detection_data: Dict[str, Any], location: str):
         """Broadcast when a new hardware detection is created"""

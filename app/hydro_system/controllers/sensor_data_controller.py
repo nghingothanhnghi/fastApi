@@ -11,7 +11,7 @@ from app.hydro_system.config import DEFAULT_THRESHOLDS, WATER_LEVEL_CONFIG
 from app.hydro_system.rules_engine import get_water_level_status, check_rules
 from app.hydro_system.services.device_service import hydro_device_service
 
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

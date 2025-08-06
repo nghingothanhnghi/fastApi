@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.hydro_system.schemas.sensor_data import SensorDataSchema, SensorDataCreateSchema
 from app.hydro_system.controllers import sensor_data_controller as controller
 from typing import Optional
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

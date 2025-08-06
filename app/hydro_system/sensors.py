@@ -7,7 +7,7 @@ from app.database import SessionLocal
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.config import WATER_LEVEL_CONFIG
 
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -9,7 +9,7 @@ from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES, SUPPORTED
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

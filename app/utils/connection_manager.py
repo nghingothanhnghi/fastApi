@@ -10,7 +10,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-class HardwareDetectionWebSocketManager:
+class DetectionWebSocketManager:
     """Manages WebSocket connections for hardware detection real-time updates"""
     
     def __init__(self):
@@ -231,4 +231,4 @@ class HardwareDetectionWebSocketManager:
         }
 
 # Global instance
-hardware_detection_ws_manager = HardwareDetectionWebSocketManager()
+detection_ws_manager = DetectionWebSocketManager()

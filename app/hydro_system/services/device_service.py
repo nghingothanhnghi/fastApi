@@ -9,7 +9,7 @@ from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.device import HydroDeviceCreate, HydroDeviceUpdate
 from app.hydro_system.config import DEFAULT_ACTUATORS, DEVICE_IDS
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 class HydroDeviceService:

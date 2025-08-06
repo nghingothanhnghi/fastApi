@@ -3,7 +3,7 @@
 
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.models.actuator import HydroActuator
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -4,8 +4,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import time
 
-from ..models.detection import DetectionResult, DetectionObject
-from ..schemas.detection import DetectionFilterSchema, DetectionStatsSchema
+from app.camera_object_detection.models.detection import DetectionResult, DetectionObject
+from app.camera_object_detection.schemas.detection import DetectionFilterSchema, DetectionStatsSchema
 
 
 class DetectionService:

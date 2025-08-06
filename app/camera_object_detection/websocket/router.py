@@ -9,8 +9,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from .connection_manager import hardware_detection_ws_manager
-from ..services.hardware_detection_service import hardware_detection_service
+from app.utils.connection_manager import detection_ws_manager
+from app.camera_object_detection.services.hardware_detection_service import hardware_detection_service
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def hardware_detection_websocket(
     
     try:
         # Establish connection
-        success = await hardware_detection_ws_manager.connect(
+        success = await detection_ws_manager.connect(
             websocket, connection_id, location_list, user_id
         )
         
@@ -75,7 +75,7 @@ async def hardware_detection_websocket(
                 try:
                     # Send current location status
                     status = hardware_detection_service.get_location_status(db, location)
-                    await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                    await detection_ws_manager.send_to_connection(connection_id, {
                         "type": "initial_location_status",
                         "location": location,
                         "data": status.dict() if hasattr(status, 'dict') else status,
@@ -96,14 +96,14 @@ async def hardware_detection_websocket(
                 if message_type == "subscribe_location":
                     location = message.get("location")
                     if location:
-                        await hardware_detection_ws_manager.subscribe_to_location(
+                        await detection_ws_manager.subscribe_to_location(
                             connection_id, location
                         )
                         
                         # Send current location status
                         try:
                             status = hardware_detection_service.get_location_status(db, location)
-                            await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                            await detection_ws_manager.send_to_connection(connection_id, {
                                 "type": "location_status",
                                 "location": location,
                                 "data": status.dict() if hasattr(status, 'dict') else status,
@@ -115,7 +115,7 @@ async def hardware_detection_websocket(
                 elif message_type == "unsubscribe_location":
                     location = message.get("location")
                     if location:
-                        await hardware_detection_ws_manager.unsubscribe_from_location(
+                        await detection_ws_manager.unsubscribe_from_location(
                             connection_id, location
                         )
                 
@@ -124,14 +124,14 @@ async def hardware_detection_websocket(
                     if location:
                         try:
                             status = hardware_detection_service.get_location_status(db, location)
-                            await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                            await detection_ws_manager.send_to_connection(connection_id, {
                                 "type": "location_status",
                                 "location": location,
                                 "data": status.dict() if hasattr(status, 'dict') else status,
                                 "timestamp": None
                             })
                         except Exception as e:
-                            await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                            await detection_ws_manager.send_to_connection(connection_id, {
                                 "type": "error",
                                 "message": f"Could not get status for location {location}: {str(e)}",
                                 "timestamp": None
@@ -140,13 +140,13 @@ async def hardware_detection_websocket(
                 elif message_type == "get_stats":
                     try:
                         stats = hardware_detection_service.get_hardware_detection_stats(db)
-                        await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                        await detection_ws_manager.send_to_connection(connection_id, {
                             "type": "stats",
                             "data": stats.dict() if hasattr(stats, 'dict') else stats,
                             "timestamp": None
                         })
                     except Exception as e:
-                        await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                        await detection_ws_manager.send_to_connection(connection_id, {
                             "type": "error",
                             "message": f"Could not get stats: {str(e)}",
                             "timestamp": None
@@ -157,14 +157,14 @@ async def hardware_detection_websocket(
                     logger.debug(f"Received pong from connection {connection_id}")
                 
                 else:
-                    await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                    await detection_ws_manager.send_to_connection(connection_id, {
                         "type": "error",
                         "message": f"Unknown message type: {message_type}",
                         "timestamp": None
                     })
                     
             except json.JSONDecodeError:
-                await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                await detection_ws_manager.send_to_connection(connection_id, {
                     "type": "error",
                     "message": "Invalid JSON format",
                     "timestamp": None
@@ -173,7 +173,7 @@ async def hardware_detection_websocket(
                 break
             except Exception as e:
                 logger.error(f"Error handling WebSocket message: {e}")
-                await hardware_detection_ws_manager.send_to_connection(connection_id, {
+                await detection_ws_manager.send_to_connection(connection_id, {
                     "type": "error",
                     "message": f"Server error: {str(e)}",
                     "timestamp": None
@@ -184,12 +184,12 @@ async def hardware_detection_websocket(
     except Exception as e:
         logger.error(f"WebSocket error for connection {connection_id}: {e}")
     finally:
-        await hardware_detection_ws_manager.disconnect(connection_id)
+        await detection_ws_manager.disconnect(connection_id)
 
 @router.get("/connections/stats")
 async def get_websocket_stats():
     """Get statistics about current WebSocket connections"""
-    return hardware_detection_ws_manager.get_connection_stats()
+    return detection_ws_manager.get_connection_stats()
 
 @router.post("/test-broadcast")
 async def test_broadcast(
@@ -215,5 +215,5 @@ async def test_broadcast(
 @router.post("/ping-all")
 async def ping_all_connections():
     """Send ping to all WebSocket connections"""
-    await hardware_detection_ws_manager.ping_connections()
+    await detection_ws_manager.ping_connections()
     return {"message": "Ping sent to all connections"}

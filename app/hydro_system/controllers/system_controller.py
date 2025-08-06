@@ -10,7 +10,7 @@ from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
-from core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -5,11 +5,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
-import logging
 
-from ..models.detection import DetectionResult, DetectionObject
-from ..models.hardware_detection import HardwareDetection, LocationHardwareInventory, HardwareDetectionSummary
-from ..schemas.hardware_detection import (
+from app.camera_object_detection.models.detection import DetectionResult, DetectionObject
+from app.camera_object_detection.models.hardware_detection import HardwareDetection, LocationHardwareInventory, HardwareDetectionSummary
+from app.camera_object_detection.schemas.hardware_detection import (
     HardwareDetectionCreate, HardwareDetectionUpdate, HardwareDetectionFilter,
     LocationHardwareInventoryCreate, LocationHardwareInventoryUpdate,
     LocationStatusResponse, HardwareDetectionStats, BulkHardwareDetectionCreate,
@@ -18,7 +17,9 @@ from ..schemas.hardware_detection import (
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
 
-logger = logging.getLogger(__name__)
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class HardwareDetectionService:

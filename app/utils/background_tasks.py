@@ -7,13 +7,13 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from app.database import SessionLocal
-from .connection_manager import hardware_detection_ws_manager
+from .connection_manager import detection_ws_manager
 from .events import hardware_detection_broadcaster
 from ..services.hardware_detection_service import hardware_detection_service
 
 logger = logging.getLogger(__name__)
 
-class HardwareDetectionBackgroundTasks:
+class AsyncBackgroundTaskManager:
     """Background tasks for hardware detection WebSocket updates"""
     
     def __init__(self):
@@ -54,7 +54,7 @@ class HardwareDetectionBackgroundTasks:
         """Send periodic ping to keep connections alive"""
         while self.running:
             try:
-                await hardware_detection_ws_manager.ping_connections()
+                await detection_ws_manager.ping_connections()
                 await asyncio.sleep(30)  # Ping every 30 seconds
             except asyncio.CancelledError:
                 break
@@ -67,7 +67,7 @@ class HardwareDetectionBackgroundTasks:
         while self.running:
             try:
                 # Only send stats if there are active connections
-                if hardware_detection_ws_manager.active_connections:
+                if detection_ws_manager.active_connections:
                     db = SessionLocal()
                     try:
                         stats = hardware_detection_service.get_hardware_detection_stats(db)
@@ -89,11 +89,11 @@ class HardwareDetectionBackgroundTasks:
         while self.running:
             try:
                 # Only update if there are location subscriptions
-                if hardware_detection_ws_manager.location_subscriptions:
+                if detection_ws_manager.location_subscriptions:
                     db = SessionLocal()
                     try:
                         # Update status for each subscribed location
-                        for location in hardware_detection_ws_manager.location_subscriptions.keys():
+                        for location in detection_ws_manager.location_subscriptions.keys():
                             try:
                                 status = hardware_detection_service.get_location_status(db, location)
                                 status_data = status.dict() if hasattr(status, 'dict') else status
@@ -114,13 +114,13 @@ class HardwareDetectionBackgroundTasks:
                 await asyncio.sleep(600)
 
 # Global instance
-hardware_detection_bg_tasks = HardwareDetectionBackgroundTasks()
+detection_bg_tasks = AsyncBackgroundTaskManager()
 
 # Convenience functions
 async def start_hardware_detection_background_tasks():
     """Start hardware detection background tasks"""
-    await hardware_detection_bg_tasks.start_background_tasks()
+    await detection_bg_tasks.start_background_tasks()
 
 async def stop_hardware_detection_background_tasks():
     """Stop hardware detection background tasks"""
-    await hardware_detection_bg_tasks.stop_background_tasks()
+    await detection_bg_tasks.stop_background_tasks()
