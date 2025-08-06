@@ -66,6 +66,8 @@ ACTUATOR_TYPES = {
     "valve": {"emoji_on": "🔓", "emoji_off": "🔒", "label": "Valve"},
 }
 
+SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve"]
+
 
 # Water level sensor configuration
 WATER_LEVEL_CONFIG = {

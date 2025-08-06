@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
-from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES
+from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES, SUPPORTED_ACTUATOR_TYPES
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
@@ -64,20 +64,20 @@ def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
 
 # --- Individual device control using combined logic ---
 
-def turn_pump_on(db: Session, device_id: str = None): control_actuator(db, "pump", True, device_id)
-def turn_pump_off(db: Session, device_id: str = None): control_actuator(db, "pump", False, device_id)
+# def turn_pump_on(db: Session, device_id: str = None): control_actuator(db, "pump", True, device_id)
+# def turn_pump_off(db: Session, device_id: str = None): control_actuator(db, "pump", False, device_id)
 
-def turn_light_on(db: Session, device_id: str = None): control_actuator(db, "light", True, device_id)
-def turn_light_off(db: Session, device_id: str = None): control_actuator(db, "light", False, device_id)
+# def turn_light_on(db: Session, device_id: str = None): control_actuator(db, "light", True, device_id)
+# def turn_light_off(db: Session, device_id: str = None): control_actuator(db, "light", False, device_id)
 
-def turn_fan_on(db: Session, device_id: str = None): control_actuator(db, "fan", True, device_id)
-def turn_fan_off(db: Session, device_id: str = None): control_actuator(db, "fan", False, device_id)
+# def turn_fan_on(db: Session, device_id: str = None): control_actuator(db, "fan", True, device_id)
+# def turn_fan_off(db: Session, device_id: str = None): control_actuator(db, "fan", False, device_id)
 
-def turn_water_pump_on(db: Session, device_id: str = None): control_actuator(db, "water_pump", True, device_id)
-def turn_water_pump_off(db: Session, device_id: str = None): control_actuator(db, "water_pump", False, device_id)
+# def turn_water_pump_on(db: Session, device_id: str = None): control_actuator(db, "water_pump", True, device_id)
+# def turn_water_pump_off(db: Session, device_id: str = None): control_actuator(db, "water_pump", False, device_id)
 
-def open_valve(db: Session, device_id: str = None): control_actuator(db, "valve", True, device_id)
-def close_valve(db: Session, device_id: str = None): control_actuator(db, "valve", False, device_id)
+# def open_valve(db: Session, device_id: str = None): control_actuator(db, "valve", True, device_id)
+# def close_valve(db: Session, device_id: str = None): control_actuator(db, "valve", False, device_id)
 
 # --- Automation handler for multiple actuators ---
 
@@ -89,7 +89,7 @@ def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
     alerts = []
     actions_taken = {}
 
-    for device_type in ["pump", "light", "fan", "water_pump", "valve"]:
+    for device_type in SUPPORTED_ACTUATOR_TYPES:
         actuators = hydro_actuator_service.get_all_actuators_by_type(db, device_type, device_id=device_id)
 
         if not actuators:
