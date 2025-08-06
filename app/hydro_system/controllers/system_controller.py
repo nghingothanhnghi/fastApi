@@ -61,6 +61,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         results.append({
             "device_id": device.id,
             "device_name": device.name,
+            "location": device.location,
             "sensors": sensor_data,
             "actuators": actuators_state,
             "system": {

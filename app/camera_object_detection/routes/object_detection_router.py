@@ -1,4 +1,4 @@
-# backend/app/api/endpoints/object_detection.py
+# backend/app/api/endpoints/object_detection_router.py
 # This file is part of the backend API for a camera object detection system.
 # It provides endpoints for object detection, model training, and historical data retrieval.
 
@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.core.logging_config import get_logger
-from app.utils.image_processing import decode_base64_image, encode_image_to_base64
+from app.camera_object_detection.utils.image_processing import decode_base64_image, encode_image_to_base64
 from app.database import get_db
 from app.camera_object_detection.controllers.detector import ObjectDetector, get_detector
 from app.camera_object_detection.services.detection_service import DetectionService
