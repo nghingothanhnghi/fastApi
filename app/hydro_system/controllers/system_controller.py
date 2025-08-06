@@ -10,9 +10,9 @@ from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
-import logging
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Optional[int] = None):
     devices = []

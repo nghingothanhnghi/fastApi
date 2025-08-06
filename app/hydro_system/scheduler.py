@@ -8,9 +8,9 @@ from app.database import SessionLocal
 from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system import state_manager
 from app.utils.scheduler import add_job, remove_job
-import logging
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 JOB_ID = "sensor_collect_job"
 

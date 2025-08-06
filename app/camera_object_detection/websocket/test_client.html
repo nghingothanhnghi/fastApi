@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hardware Detection WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .panel {
+            border: 1px solid #ccc;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .controls {
+            grid-column: 1 / -1;
+        }
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .message.new_detection { background-color: #e8f5e8; }
+        .message.detection_validated { background-color: #fff3cd; }
+        .message.bulk_detections_created { background-color: #d4edda; }
+        .message.detection_processed { background-color: #cce5ff; }
+        .message.location_status_changed { background-color: #f8d7da; }
+        .message.inventory_updated { background-color: #d1ecf1; }
+        .message.error { background-color: #f8d7da; color: #721c24; }
+        .message.connection_established { background-color: #d4edda; color: #155724; }
+        
+        button {
+            margin: 5px;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .connect { background-color: #28a745; color: white; }
+        .disconnect { background-color: #dc3545; color: white; }
+        .send { background-color: #007bff; color: white; }
+        
+        input, select {
+            margin: 5px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.connected { background-color: #d4edda; color: #155724; }
+        .status.disconnected { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Hardware Detection WebSocket Test Client</h1>
+    
+    <div class="container">
+        <div class="panel controls">
+            <h3>Connection Controls</h3>
+            <div class="status disconnected" id="status">Disconnected</div>
+            
+            <div>
+                <label>WebSocket URL:</label>
+                <input type="text" id="wsUrl" value="ws://localhost:8000/hardware-detection/ws/hardware-detection" style="width: 400px;">
+            </div>
+            
+            <div>
+                <label>Locations (comma-separated):</label>
+                <input type="text" id="locations" placeholder="greenhouse_a,greenhouse_b" style="width: 300px;">
+            </div>
+            
+            <div>
+                <label>User ID:</label>
+                <input type="number" id="userId" placeholder="1">
+            </div>
+            
+            <div>
+                <button class="connect" onclick="connect()">Connect</button>
+                <button class="disconnect" onclick="disconnect()">Disconnect</button>
+                <button onclick="clearMessages()">Clear Messages</button>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h3>Send Commands</h3>
+            
+            <div>
+                <h4>Subscribe/Unsubscribe</h4>
+                <input type="text" id="subLocation" placeholder="Location name">
+                <button class="send" onclick="subscribeLocation()">Subscribe</button>
+                <button class="send" onclick="unsubscribeLocation()">Unsubscribe</button>
+            </div>
+            
+            <div>
+                <h4>Get Data</h4>
+                <input type="text" id="statusLocation" placeholder="Location name">
+                <button class="send" onclick="getLocationStatus()">Get Location Status</button>
+                <button class="send" onclick="getStats()">Get Stats</button>
+            </div>
+            
+            <div>
+                <h4>Custom Message</h4>
+                <textarea id="customMessage" rows="3" style="width: 100%;" placeholder='{"type": "custom", "data": {}}'></textarea>
+                <button class="send" onclick="sendCustomMessage()">Send Custom</button>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h3>Connection Info</h3>
+            <div id="connectionInfo">Not connected</div>
+        </div>
+        
+        <div class="panel">
+            <h3>Messages</h3>
+            <div class="messages" id="messages"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let connectionId = null;
+
+        function updateStatus(connected, info = '') {
+            const statusEl = document.getElementById('status');
+            const infoEl = document.getElementById('connectionInfo');
+            
+            if (connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+                infoEl.innerHTML = info;
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+                infoEl.textContent = 'Not connected';
+            }
+        }
+
+        function addMessage(type, data, timestamp) {
+            const messagesEl = document.getElementById('messages');
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            
+            const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            messageEl.innerHTML = `
+                <strong>[${time}] ${type}:</strong><br>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+
+            const url = document.getElementById('wsUrl').value;
+            const locations = document.getElementById('locations').value;
+            const userId = document.getElementById('userId').value;
+            
+            let wsUrl = url;
+            const params = new URLSearchParams();
+            
+            if (locations) params.append('locations', locations);
+            if (userId) params.append('user_id', userId);
+            
+            if (params.toString()) {
+                wsUrl += '?' + params.toString();
+            }
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function(event) {
+                updateStatus(true, 'Connecting...');
+                addMessage('connection', 'WebSocket connection opened', null);
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'connection_established') {
+                        connectionId = data.connection_id;
+                        updateStatus(true, `
+                            <strong>Connection ID:</strong> ${data.connection_id}<br>
+                            <strong>Subscribed Locations:</strong> ${data.subscribed_locations.join(', ') || 'None'}<br>
+                            <strong>Connected At:</strong> ${new Date(data.timestamp).toLocaleString()}
+                        `);
+                    }
+                    
+                    addMessage(data.type, data, data.timestamp);
+                } catch (e) {
+                    addMessage('error', 'Failed to parse message: ' + event.data, null);
+                }
+            };
+
+            ws.onclose = function(event) {
+                updateStatus(false);
+                addMessage('connection', `WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`, null);
+                ws = null;
+                connectionId = null;
+            };
+
+            ws.onerror = function(error) {
+                addMessage('error', 'WebSocket error: ' + error, null);
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+                addMessage('sent', message, null);
+            } else {
+                addMessage('error', 'WebSocket is not connected', null);
+            }
+        }
+
+        function subscribeLocation() {
+            const location = document.getElementById('subLocation').value;
+            if (location) {
+                sendMessage({
+                    type: 'subscribe_location',
+                    location: location
+                });
+            }
+        }
+
+        function unsubscribeLocation() {
+            const location = document.getElementById('subLocation').value;
+            if (location) {
+                sendMessage({
+                    type: 'unsubscribe_location',
+                    location: location
+                });
+            }
+        }
+
+        function getLocationStatus() {
+            const location = document.getElementById('statusLocation').value;
+            if (location) {
+                sendMessage({
+                    type: 'get_location_status',
+                    location: location
+                });
+            }
+        }
+
+        function getStats() {
+            sendMessage({
+                type: 'get_stats'
+            });
+        }
+
+        function sendCustomMessage() {
+            const message = document.getElementById('customMessage').value;
+            try {
+                const parsed = JSON.parse(message);
+                sendMessage(parsed);
+            } catch (e) {
+                addMessage('error', 'Invalid JSON in custom message', null);
+            }
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        // Send ping every 30 seconds
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                sendMessage({ type: 'pong' });
+            }
+        }, 30000);
+    </script>
+</body>
+</html>

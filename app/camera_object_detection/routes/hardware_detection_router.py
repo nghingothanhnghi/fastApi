@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import asyncio
 
 from app.database import get_db
 from ..services.hardware_detection_service import hardware_detection_service
@@ -14,6 +15,11 @@ from ..schemas.hardware_detection import (
     BulkHardwareDetectionCreate, HardwareValidationRequest,
     LocationHardwareInventoryCreate, LocationHardwareInventoryResponse,
     LocationHardwareInventoryUpdate, ConditionStatus, HardwareType
+)
+from ..websocket.events import (
+    broadcast_new_detection, broadcast_detection_validated, broadcast_bulk_detections,
+    broadcast_detection_processed, broadcast_location_status_change, 
+    broadcast_inventory_updated, broadcast_hydro_device_matched, broadcast_stats_updated
 )
 
 router = APIRouter(prefix="/hardware-detection", tags=["Hardware Detection"])
@@ -28,6 +34,11 @@ async def create_hardware_detection(
     """Create a new hardware detection record"""
     try:
         detection = hardware_detection_service.create_hardware_detection(db, detection_data)
+        
+        # Broadcast new detection event
+        detection_dict = detection.dict() if hasattr(detection, 'dict') else detection.__dict__
+        asyncio.create_task(broadcast_new_detection(detection_dict, detection_data.location))
+        
         return detection
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -41,6 +52,11 @@ async def create_bulk_hardware_detections(
     """Create multiple hardware detections from a single detection result"""
     try:
         detections = hardware_detection_service.create_bulk_hardware_detections(db, bulk_data)
+        
+        # Broadcast bulk detections event
+        detections_dict = [d.dict() if hasattr(d, 'dict') else d.__dict__ for d in detections]
+        asyncio.create_task(broadcast_bulk_detections(detections_dict, bulk_data.location, len(detections)))
+        
         return detections
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -59,6 +75,11 @@ async def process_detection_for_hardware(
         detections = hardware_detection_service.process_detection_result_for_hardware(
             db, detection_result_id, location, camera_source, confidence_threshold
         )
+        
+        # Broadcast detection processed event
+        detections_dict = [d.dict() if hasattr(d, 'dict') else d.__dict__ for d in detections]
+        asyncio.create_task(broadcast_detection_processed(detections_dict, location, detection_result_id))
+        
         return detections
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -109,6 +130,13 @@ async def validate_hardware_detection(
         detection = hardware_detection_service.validate_hardware_detection(
             db, detection_id, validation_data
         )
+        
+        # Broadcast validation event
+        detection_dict = detection.dict() if hasattr(detection, 'dict') else detection.__dict__
+        location = detection_dict.get('location', 'unknown')
+        validation_status = validation_data.is_valid
+        asyncio.create_task(broadcast_detection_validated(detection_dict, location, validation_status))
+        
         return detection
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -139,6 +167,11 @@ async def create_location_inventory(
     """Create expected hardware inventory for a location"""
     try:
         inventory = hardware_detection_service.create_location_inventory(db, inventory_data)
+        
+        # Broadcast inventory update
+        inventory_dict = inventory.dict() if hasattr(inventory, 'dict') else inventory.__dict__
+        asyncio.create_task(broadcast_inventory_updated(inventory_data.location, inventory_dict))
+        
         return inventory
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -154,6 +187,15 @@ async def sync_location_inventory(
         inventory_items = hardware_detection_service.sync_location_inventory_with_hydro_devices(
             db, location
         )
+        
+        # Broadcast inventory sync update
+        inventory_dict = [item.dict() if hasattr(item, 'dict') else item.__dict__ for item in inventory_items]
+        asyncio.create_task(broadcast_inventory_updated(location, {
+            "synced_items": inventory_dict,
+            "count": len(inventory_items),
+            "sync_type": "hydro_devices"
+        }))
+        
         return inventory_items
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -165,6 +207,11 @@ async def get_hardware_detection_stats(db: Session = Depends(get_db)):
     """Get overall hardware detection statistics"""
     try:
         stats = hardware_detection_service.get_hardware_detection_stats(db)
+        
+        # Optionally broadcast stats update (uncomment if needed)
+        # stats_dict = stats.dict() if hasattr(stats, 'dict') else stats.__dict__
+        # asyncio.create_task(broadcast_stats_updated(stats_dict))
+        
         return stats
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

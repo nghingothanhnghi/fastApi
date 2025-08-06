@@ -1,7 +1,6 @@
 # File: backend/app/hydro_system/controllers/actuator_controller.py
 # Description: Hardware + actuator-based control logic for hydroponic system devices
 
-import logging
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.hydro_system.rules_engine import check_rules
@@ -10,8 +9,9 @@ from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES, SUPPORTED
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def log_device_action(name: str, device_type: str, state: bool, device_id: str = None, actuator_id: int = None):

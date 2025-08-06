@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from app.hydro_system.schemas.sensor_data import SensorDataSchema, SensorDataCreateSchema
 from app.hydro_system.controllers import sensor_data_controller as controller
 from typing import Optional
-import logging
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/sensor", tags=["Sensor Data"])
-
-logger = logging.getLogger(__name__)
 
 @router.get("/data", response_model=list[SensorDataSchema])
 def get_latest_sensor_data(db: Session = Depends(get_db)):

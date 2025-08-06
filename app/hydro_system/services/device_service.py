@@ -9,8 +9,9 @@ from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.device import HydroDeviceCreate, HydroDeviceUpdate
 from app.hydro_system.config import DEFAULT_ACTUATORS, DEVICE_IDS
-import logging
-logger = logging.getLogger(__name__)
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
 class HydroDeviceService:
     def create_device(self, db: Session, device_in: HydroDeviceCreate) -> HydroDevice:
         logger.info(f"Attempting to create device: {device_in.device_id}")

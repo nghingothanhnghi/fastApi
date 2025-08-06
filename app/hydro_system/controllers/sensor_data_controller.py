@@ -3,7 +3,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-import logging
 
 from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.models.device import HydroDevice
@@ -12,8 +11,9 @@ from app.hydro_system.config import DEFAULT_THRESHOLDS, WATER_LEVEL_CONFIG
 from app.hydro_system.rules_engine import get_water_level_status, check_rules
 from app.hydro_system.services.device_service import hydro_device_service
 
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def get_latest_sensor_data(db: Session):
     return db.query(SensorData).order_by(SensorData.created_at.desc()).limit(10).all()

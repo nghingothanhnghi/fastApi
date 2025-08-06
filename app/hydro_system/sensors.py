@@ -2,13 +2,14 @@
 # This file is a hardware abstraction layer (or mock simulation) that reads the actual (or simulated) values from sensors.
 
 import random
-import logging
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.config import WATER_LEVEL_CONFIG
 
-logger = logging.getLogger(__name__)
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def read_temperature():
     return round(random.uniform(20.0, 30.0), 1)

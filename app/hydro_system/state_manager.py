@@ -1,9 +1,9 @@
 # app/hydro_system/state_manager.py
 # This file is used to manage the state of devices in the hydroponic system.
 
-import logging
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _state = {
     "pump": False,

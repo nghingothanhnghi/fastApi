@@ -3,9 +3,9 @@
 
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.models.actuator import HydroActuator
-import logging
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def should_turn_on_pump(sensor_data: dict, thresholds: dict) -> bool:
     """Check if irrigation pump should be turned on based on soil moisture"""
