@@ -52,6 +52,16 @@ class HardwareDetectionService:
         "cable": "cable",
         "wire": "cable",
     }
+    @staticmethod
+    def get_camera_sources_by_location(db: Session, location: str) -> List[str]:
+        sources = (
+            db.query(HardwareDetection.camera_source)
+            .filter(HardwareDetection.location == location)
+            .filter(HardwareDetection.camera_source.isnot(None))
+            .distinct()
+            .all()
+        )
+        return [source[0] for source in sources]
     
     @staticmethod
     def create_hardware_detection(

@@ -2,14 +2,15 @@
 # Event system for broadcasting hardware detection updates
 
 import asyncio
-import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
 
 from app.utils.connection_manager import detection_ws_manager
 
-logger = logging.getLogger(__name__)
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class HardwareDetectionEventType(Enum):
     """Types of hardware detection events"""

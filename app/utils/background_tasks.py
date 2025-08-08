@@ -8,8 +8,8 @@ from typing import Dict, Any
 
 from app.database import SessionLocal
 from .connection_manager import detection_ws_manager
-from .events import hardware_detection_broadcaster
-from ..services.hardware_detection_service import hardware_detection_service
+from app.camera_object_detection.websocket.events import hardware_detection_broadcaster
+from app.camera_object_detection.services.hardware_detection_service import hardware_detection_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class AsyncBackgroundTaskManager:
             asyncio.create_task(self._periodic_ping()),
             asyncio.create_task(self._periodic_stats_update()),
             asyncio.create_task(self._periodic_location_status_update()),
+            asyncio.create_task(self._periodic_cleanup()),
         ]
         
         logger.info("Hardware detection background tasks started")
@@ -112,6 +113,18 @@ class AsyncBackgroundTaskManager:
             except Exception as e:
                 logger.error(f"Error in periodic location status update: {e}")
                 await asyncio.sleep(600)
+    
+    async def _periodic_cleanup(self):
+        """Periodically clean up stale WebSocket connections"""
+        while self.running:
+            try:
+                await detection_ws_manager.cleanup_stale_connections()
+                await asyncio.sleep(120)  # Clean up every 2 minutes
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in periodic cleanup: {e}")
+                await asyncio.sleep(120)
 
 # Global instance
 detection_bg_tasks = AsyncBackgroundTaskManager()

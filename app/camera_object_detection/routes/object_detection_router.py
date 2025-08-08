@@ -2,7 +2,7 @@
 # This file is part of the backend API for a camera object detection system.
 # It provides endpoints for object detection, model training, and historical data retrieval.
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, WebSocket, Depends, Form, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Depends, Form, Query
 from fastapi.responses import JSONResponse, Response
 from typing import List, Dict, Any, Optional
 import numpy as np
@@ -124,26 +124,39 @@ async def detect_objects_base64(
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time object detection"""
-    await websocket.accept()
-    detector = ObjectDetector()
-
     try:
-        while True:
-            data = await websocket.receive_text()
-            data_json = json.loads(data)
+        await websocket.accept()
+        detector = ObjectDetector()
+        logger.info("Object detection WebSocket connection established")
 
-            if "image" in data_json:
-                img = decode_base64_image(data_json["image"])
-                if img is not None:
-                    results = detector.detect_objects(img)
-                    await websocket.send_json(results)
+        while True:
+            try:
+                data = await websocket.receive_text()
+                data_json = json.loads(data)
+
+                if "image" in data_json:
+                    img = decode_base64_image(data_json["image"])
+                    if img is not None:
+                        results = detector.detect_objects(img)
+                        await websocket.send_json(results)
+                    else:
+                        await websocket.send_json({"error": "Invalid image data"})
                 else:
-                    await websocket.send_json({"error": "Invalid image data"})
-            else:
-                await websocket.send_json({"error": "No image data provided"})
+                    await websocket.send_json({"error": "No image data provided"})
+            except json.JSONDecodeError:
+                await websocket.send_json({"error": "Invalid JSON format"})
+            except Exception as e:
+                logger.error(f"Error processing WebSocket message: {e}")
+                await websocket.send_json({"error": f"Processing error: {str(e)}"})
+                
+    except WebSocketDisconnect:
+        logger.info("Object detection WebSocket disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception as close_error:
+            logger.error(f"Error closing WebSocket: {close_error}")
 
 @router.post("/train")
 async def train_model(

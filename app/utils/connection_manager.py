@@ -26,11 +26,14 @@ class DetectionWebSocketManager:
         # Store connection metadata
         self.connection_metadata: Dict[str, Dict[str, Any]] = {}
         
-    async def connect(self, websocket: WebSocket, connection_id: str, 
-                     locations: Optional[List[str]] = None, 
-                     user_id: Optional[int] = None) -> bool:
+    async def connect(
+            self, websocket: WebSocket, connection_id: str, 
+            locations: Optional[List[str]] = None, 
+            user_id: Optional[int] = None
+            ) -> bool:
         """Accept a new WebSocket connection and set up subscriptions"""
         try:
+            # Accept the WebSocket connection
             await websocket.accept()
             
             # Store the connection
@@ -47,30 +50,31 @@ class DetectionWebSocketManager:
             # Set up location subscriptions
             if locations:
                 for location in locations:
-                    if location not in self.location_subscriptions:
-                        self.location_subscriptions[location] = set()
-                    self.location_subscriptions[location].add(connection_id)
-            
-            # Set up user subscriptions
+                    self.location_subscriptions.setdefault(location, set()).add(connection_id)
+        
             if user_id:
-                if user_id not in self.user_subscriptions:
-                    self.user_subscriptions[user_id] = set()
-                self.user_subscriptions[user_id].add(connection_id)
-            
+                self.user_subscriptions.setdefault(user_id, set()).add(connection_id)
+        
             logger.info(f"WebSocket connection established: {connection_id}")
             
             # Send connection confirmation
-            await self.send_to_connection(connection_id, {
-                "type": "connection_established",
-                "connection_id": connection_id,
-                "subscribed_locations": locations or [],
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            try:
+                await self.send_to_connection(connection_id, {
+                    "type": "connection_established",
+                    "connection_id": connection_id,
+                    "subscribed_locations": locations or [],
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            except Exception as send_error:
+                logger.error(f"Failed to send connection confirmation to {connection_id}: {send_error}")
+                # Don't fail the connection just because we couldn't send the confirmation
             
             return True
             
         except Exception as e:
             logger.error(f"Error connecting WebSocket {connection_id}: {e}")
+            # Clean up if connection failed
+            await self.disconnect(connection_id)
             return False
     
     async def disconnect(self, connection_id: str):
@@ -102,12 +106,29 @@ class DetectionWebSocketManager:
         try:
             if connection_id in self.active_connections:
                 websocket = self.active_connections[connection_id]
+                
+                # Check if websocket is still connected before sending
+                if websocket.client_state.name != "CONNECTED":
+                    logger.warning(f"WebSocket {connection_id} is not connected (state: {websocket.client_state.name})")
+                    await self.disconnect(connection_id)
+                    return False
+                
                 await websocket.send_text(json.dumps(data, default=str))
                 return True
             return False
         except WebSocketDisconnect:
+            logger.info(f"WebSocket {connection_id} disconnected during send")
             await self.disconnect(connection_id)
             return False
+        except RuntimeError as e:
+            if "WebSocket is not connected" in str(e) or "Need to call accept first" in str(e):
+                logger.warning(f"WebSocket {connection_id} connection error: {e}")
+                await self.disconnect(connection_id)
+                return False
+            else:
+                logger.error(f"Runtime error sending to connection {connection_id}: {e}")
+                await self.disconnect(connection_id)
+                return False
         except Exception as e:
             logger.error(f"Error sending to connection {connection_id}: {e}")
             await self.disconnect(connection_id)
@@ -206,6 +227,27 @@ class DetectionWebSocketManager:
         }
         
         await self.broadcast_to_all(ping_data)
+    
+    async def cleanup_stale_connections(self):
+        """Clean up connections that are no longer valid"""
+        stale_connections = []
+        
+        for connection_id, websocket in list(self.active_connections.items()):
+            try:
+                # Check if the WebSocket is still connected
+                if websocket.client_state.name != "CONNECTED":
+                    stale_connections.append(connection_id)
+            except Exception as e:
+                logger.warning(f"Error checking connection state for {connection_id}: {e}")
+                stale_connections.append(connection_id)
+        
+        # Remove stale connections
+        for connection_id in stale_connections:
+            logger.info(f"Cleaning up stale connection: {connection_id}")
+            await self.disconnect(connection_id)
+        
+        if stale_connections:
+            logger.info(f"Cleaned up {len(stale_connections)} stale connections")
     
     def get_connection_stats(self) -> Dict[str, Any]:
         """Get statistics about current connections"""

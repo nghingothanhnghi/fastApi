@@ -22,7 +22,7 @@ from app.transform_data.controllers import transform_api, template_api
 from app.utils.scheduler import start_scheduler, add_job
 from app.transform_data.jobs.transform_job import transform_unprocessed_data
 from app.hydro_system.scheduler import start_sensor_job
-from app.camera_object_detection.websocket.background_tasks import start_hardware_detection_background_tasks
+from app.utils.background_tasks import start_hardware_detection_background_tasks
 
 app = FastAPI()
 
@@ -60,8 +60,8 @@ app.include_router(scheduler_health.router)  # /scheduler/health
 
 # app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
-app.include_router(hardware_detection_router.router, prefix="/hardware-detection", tags=["hardware-detection"])
-app.include_router(hardware_ws_router.router, prefix="/hardware-detection", tags=["hardware-detection-websocket"])
+app.include_router(hardware_detection_router.router)
+app.include_router(hardware_ws_router.router)
 
 
 # app.include_router(hydro_system.router)  # Handles /hydro/ endpoints

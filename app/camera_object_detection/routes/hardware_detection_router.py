@@ -8,15 +8,15 @@ from datetime import datetime
 import asyncio
 
 from app.database import get_db
-from ..services.hardware_detection_service import hardware_detection_service
-from ..schemas.hardware_detection import (
+from app.camera_object_detection.services.hardware_detection_service import hardware_detection_service
+from app.camera_object_detection.schemas.hardware_detection import (
     HardwareDetectionCreate, HardwareDetectionUpdate, HardwareDetectionResponse,
     HardwareDetectionFilter, LocationStatusResponse, HardwareDetectionStats,
     BulkHardwareDetectionCreate, HardwareValidationRequest,
     LocationHardwareInventoryCreate, LocationHardwareInventoryResponse,
     LocationHardwareInventoryUpdate, ConditionStatus, HardwareType
 )
-from ..websocket.events import (
+from app.camera_object_detection.websocket.events import (
     broadcast_new_detection, broadcast_detection_validated, broadcast_bulk_detections,
     broadcast_detection_processed, broadcast_location_status_change, 
     broadcast_inventory_updated, broadcast_hydro_device_matched, broadcast_stats_updated
@@ -320,3 +320,14 @@ async def setup_location_inventory(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+
+@router.get("/location/{location}/camera-sources", response_model=List[str])
+def get_camera_sources_by_location(
+    location: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get distinct camera sources for a given location.
+    """
+    return hardware_detection_service.get_camera_sources_by_location(db, location)
