@@ -435,6 +435,78 @@ class HardwareDetectionService:
             average_confidence=average_confidence,
             detection_trend={}  # Implement trend analysis later if needed
         )
+    
+    @staticmethod
+    def enhance_detections_with_hardware_info(
+        detections: List[Dict[str, Any]], 
+        known_actuators: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enhance detection results with known hardware information"""
+        
+        enhanced_detections = []
+        
+        for detection in detections:
+            enhanced_detection = detection.copy()
+            
+            # Check if this detection matches any known hardware type
+            original_class = detection.get("original_class", detection.get("class_name", ""))
+            mapped_hardware = HardwareDetectionService.HARDWARE_TYPE_MAPPING.get(original_class.lower())
+            
+            if mapped_hardware:
+                enhanced_detection["hardware_type"] = mapped_hardware
+                enhanced_detection["is_hardware"] = True
+                
+                # Try to match with known actuators
+                matching_actuators = [
+                    actuator for actuator in known_actuators 
+                    if actuator["type"].lower() in mapped_hardware.lower() or 
+                       mapped_hardware.lower() in actuator["type"].lower()
+                ]
+                
+                if matching_actuators:
+                    enhanced_detection["matching_actuators"] = matching_actuators
+                    enhanced_detection["actuator_count"] = len(matching_actuators)
+            else:
+                enhanced_detection["is_hardware"] = False
+                enhanced_detection["hardware_type"] = None
+            
+            enhanced_detections.append(enhanced_detection)
+        
+        return enhanced_detections
+    
+    @staticmethod
+    def get_hardware_statistics(detections: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Generate statistics about detected hardware"""
+        hardware_detections = [d for d in detections if d.get("is_hardware", False)]
+        
+        if not hardware_detections:
+            return {
+                "total_hardware": 0,
+                "hardware_types": {},
+                "average_confidence": 0,
+                "known_actuators_detected": 0,
+                "unique_hardware_types": 0
+            }
+        
+        hardware_types = {}
+        total_confidence = 0
+        known_actuators = 0
+        
+        for detection in hardware_detections:
+            hardware_type = detection.get("hardware_type", "unknown")
+            hardware_types[hardware_type] = hardware_types.get(hardware_type, 0) + 1
+            total_confidence += detection.get("confidence", 0)
+            
+            if detection.get("matching_actuators"):
+                known_actuators += len(detection["matching_actuators"])
+        
+        return {
+            "total_hardware": len(hardware_detections),
+            "hardware_types": hardware_types,
+            "average_confidence": total_confidence / len(hardware_detections),
+            "known_actuators_detected": known_actuators,
+            "unique_hardware_types": len(hardware_types)
+        }
 
 
 # Export service instance

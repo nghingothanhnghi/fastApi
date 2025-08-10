@@ -122,8 +122,8 @@ async def detect_objects_base64(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time object detection"""
+async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+    """WebSocket endpoint for real-time object detection with hardware detection"""
     try:
         await websocket.accept()
         detector = ObjectDetector()
@@ -137,7 +137,49 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "image" in data_json:
                     img = decode_base64_image(data_json["image"])
                     if img is not None:
+                        # Get basic detection results
                         results = detector.detect_objects(img)
+                        
+                        # Enhance with hardware information if available
+                        try:
+                            from app.camera_object_detection.services.hardware_detection_service import HardwareDetectionService
+                            
+                            # Get known actuators from database
+                            known_actuators = []
+                            try:
+                                from app.hydro_system.models.actuator import HydroActuator
+                                from app.hydro_system.models.device import HydroDevice
+                                
+                                actuators = db.query(HydroActuator).join(HydroDevice).all()
+                                known_actuators = [
+                                    {
+                                        "id": actuator.id,
+                                        "type": actuator.type,
+                                        "name": actuator.name,
+                                        "device_name": actuator.device.name if actuator.device else None,
+                                        "is_active": actuator.is_active
+                                    }
+                                    for actuator in actuators
+                                ]
+                            except Exception as db_error:
+                                logger.warning(f"Could not fetch actuators: {db_error}")
+                            
+                            # Enhance detections with hardware info
+                            enhanced_detections = HardwareDetectionService.enhance_detections_with_hardware_info(
+                                results["detections"], known_actuators
+                            )
+                            results["detections"] = enhanced_detections
+                            
+                            # Add hardware statistics
+                            hardware_stats = HardwareDetectionService.get_hardware_statistics(enhanced_detections)
+                            results["hardware_stats"] = hardware_stats
+                            
+                            # Add known actuators info
+                            results["known_actuators"] = known_actuators
+                            
+                        except Exception as enhance_error:
+                            logger.warning(f"Could not enhance with hardware info: {enhance_error}")
+                        
                         await websocket.send_json(results)
                     else:
                         await websocket.send_json({"error": "Invalid image data"})

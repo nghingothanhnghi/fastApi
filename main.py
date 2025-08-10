@@ -58,14 +58,10 @@ app.include_router(screen.router, prefix="/screen")
 
 app.include_router(scheduler_health.router)  # /scheduler/health
 
-# app.include_router(object_detection.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(hardware_detection_router.router)
 app.include_router(hardware_ws_router.router)
 
-
-# app.include_router(hydro_system.router)  # Handles /hydro/ endpoints
-# app.include_router(sensor_data.router)   # Handles /sensor/ endpoints
 
 app.include_router(system_router.router)  # Handles /hydro/ endpoints
 app.include_router(sensor_router.router)   # Handles /sensor/ endpoints

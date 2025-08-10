@@ -1,4 +1,4 @@
-# app/camera_object_detection/websocket/connection_manager.py
+# app/utils/connection_manager.py
 # WebSocket connection manager for hardware detection real-time updates
 
 import json

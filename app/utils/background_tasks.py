@@ -1,4 +1,4 @@
-# app/camera_object_detection/websocket/background_tasks.py
+# app/utils/background_tasks.py
 # Background tasks for periodic WebSocket updates
 
 import asyncio
