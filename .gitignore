@@ -33,3 +33,4 @@ data/
 # Ignore test scripts
 tests/
 frontend/
+farmApp/
