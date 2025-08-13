@@ -12,7 +12,7 @@ from app.camera_object_detection.schemas.hardware_detection import (
     HardwareDetectionCreate, HardwareDetectionUpdate, HardwareDetectionFilter,
     LocationHardwareInventoryCreate, LocationHardwareInventoryUpdate,
     LocationStatusResponse, HardwareDetectionStats, BulkHardwareDetectionCreate,
-    HardwareValidationRequest
+    HardwareValidationRequest, HardwareDetectionSummaryResponse
 )
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
@@ -435,6 +435,110 @@ class HardwareDetectionService:
             average_confidence=average_confidence,
             detection_trend={}  # Implement trend analysis later if needed
         )
+    
+    def get_hardware_detection_summaries(
+        self, 
+        db: Session, 
+        location: Optional[str] = None
+    ) -> List[HardwareDetectionSummaryResponse]:
+        """Get hardware detection summaries, optionally filtered by location"""
+        try:
+            query = db.query(HardwareDetectionSummary)
+            
+            if location:
+                query = query.filter(HardwareDetectionSummary.location == location)
+            
+            # Order by most recent first
+            summaries = query.order_by(desc(HardwareDetectionSummary.summary_date)).all()
+            
+            # If no summaries exist, generate them from current detection data
+            if not summaries:
+                logger.info(f"No summaries found, generating from current data for location: {location}")
+                summaries = self._generate_summaries_from_detections(db, location)
+            
+            return summaries
+            
+        except Exception as e:
+            logger.error(f"Error getting hardware detection summaries: {e}")
+            raise
+    
+    def _generate_summaries_from_detections(
+        self, 
+        db: Session, 
+        location: Optional[str] = None
+    ) -> List[HardwareDetectionSummary]:
+        """Generate summary data from existing detections when no summaries exist"""
+        try:
+            # Get locations to summarize
+            if location:
+                locations = [location]
+            else:
+                locations_result = db.query(HardwareDetection.location).distinct().all()
+                locations = [loc[0] for loc in locations_result]
+            
+            summaries = []
+            current_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            for loc in locations:
+                # Get detections for this location from the last 24 hours
+                cutoff_date = current_date - timedelta(days=1)
+                detections = db.query(HardwareDetection).filter(
+                    HardwareDetection.location == loc,
+                    HardwareDetection.detected_at >= cutoff_date
+                ).all()
+                
+                if not detections:
+                    continue
+                
+                # Calculate summary statistics
+                total_detections = len(detections)
+                unique_hardware_types = len(set(d.hardware_type for d in detections))
+                validated_detections = len([d for d in detections if d.is_validated])
+                expected_present = len([d for d in detections if d.is_expected])
+                expected_missing = 0  # Would need inventory comparison
+                unexpected_present = len([d for d in detections if not d.is_expected])
+                
+                # Condition counts
+                good_condition = len([d for d in detections if d.condition_status == "good"])
+                damaged_condition = len([d for d in detections if d.condition_status == "damaged"])
+                unknown_condition = len([d for d in detections if d.condition_status in ["unknown", None]])
+                
+                # Hardware types detected
+                hardware_types_detected = list(set(d.hardware_type for d in detections))
+                
+                # Average confidence
+                confidences = [d.confidence for d in detections if d.confidence is not None]
+                detection_confidence_avg = sum(confidences) / len(confidences) if confidences else None
+                
+                # Create summary record
+                summary = HardwareDetectionSummary(
+                    location=loc,
+                    summary_date=current_date,
+                    total_detections=total_detections,
+                    unique_hardware_types=unique_hardware_types,
+                    validated_detections=validated_detections,
+                    expected_present=expected_present,
+                    expected_missing=expected_missing,
+                    unexpected_present=unexpected_present,
+                    good_condition=good_condition,
+                    damaged_condition=damaged_condition,
+                    unknown_condition=unknown_condition,
+                    hardware_types_detected=hardware_types_detected,
+                    detection_confidence_avg=detection_confidence_avg
+                )
+                
+                # Save to database
+                db.add(summary)
+                summaries.append(summary)
+            
+            db.commit()
+            logger.info(f"Generated {len(summaries)} summaries from detection data")
+            return summaries
+            
+        except Exception as e:
+            logger.error(f"Error generating summaries from detections: {e}")
+            db.rollback()
+            raise
     
     @staticmethod
     def enhance_detections_with_hardware_info(

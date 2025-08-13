@@ -14,7 +14,8 @@ from app.camera_object_detection.schemas.hardware_detection import (
     HardwareDetectionFilter, LocationStatusResponse, HardwareDetectionStats,
     BulkHardwareDetectionCreate, HardwareValidationRequest,
     LocationHardwareInventoryCreate, LocationHardwareInventoryResponse,
-    LocationHardwareInventoryUpdate, ConditionStatus, HardwareType
+    LocationHardwareInventoryUpdate, ConditionStatus, HardwareType,
+    HardwareDetectionSummaryResponse
 )
 from app.camera_object_detection.websocket.events import (
     broadcast_new_detection, broadcast_detection_validated, broadcast_bulk_detections,
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/hardware-detection", tags=["Hardware Detection"])
 
 
 # Hardware Detection Endpoints
-@router.post("/", response_model=HardwareDetectionResponse)
+@router.post("", response_model=HardwareDetectionResponse)
 async def create_hardware_detection(
     detection_data: HardwareDetectionCreate,
     db: Session = Depends(get_db)

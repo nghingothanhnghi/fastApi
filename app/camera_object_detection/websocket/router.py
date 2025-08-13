@@ -50,6 +50,13 @@ async def hardware_detection_websocket(
     - get_stats: Get current statistics
     - pong: Response to ping
     """
+
+        # Accept the WebSocket connection before doing anything else
+    try:
+        await websocket.accept()
+    except Exception as e:
+        logger.error(f"Failed to accept WebSocket connection: {e}")
+        return
     
     # Generate unique connection ID
     connection_id = str(uuid.uuid4())
