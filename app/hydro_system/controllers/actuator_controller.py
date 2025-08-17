@@ -61,24 +61,6 @@ def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
         "state_key": key
     }
 
-
-# --- Individual device control using combined logic ---
-
-# def turn_pump_on(db: Session, device_id: str = None): control_actuator(db, "pump", True, device_id)
-# def turn_pump_off(db: Session, device_id: str = None): control_actuator(db, "pump", False, device_id)
-
-# def turn_light_on(db: Session, device_id: str = None): control_actuator(db, "light", True, device_id)
-# def turn_light_off(db: Session, device_id: str = None): control_actuator(db, "light", False, device_id)
-
-# def turn_fan_on(db: Session, device_id: str = None): control_actuator(db, "fan", True, device_id)
-# def turn_fan_off(db: Session, device_id: str = None): control_actuator(db, "fan", False, device_id)
-
-# def turn_water_pump_on(db: Session, device_id: str = None): control_actuator(db, "water_pump", True, device_id)
-# def turn_water_pump_off(db: Session, device_id: str = None): control_actuator(db, "water_pump", False, device_id)
-
-# def open_valve(db: Session, device_id: str = None): control_actuator(db, "valve", True, device_id)
-# def close_valve(db: Session, device_id: str = None): control_actuator(db, "valve", False, device_id)
-
 # --- Automation handler for multiple actuators ---
 
 def handle_automation(db: Session, sensor_data: dict, device_id: str = None):

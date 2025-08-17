@@ -27,6 +27,13 @@ class DetectionWebSocketManager:
     ) -> bool:
         """Register an already-accepted WebSocket connection"""
         try:
+
+            logger.debug(f"[connect] Starting with connection_id={connection_id}, "
+                        f"websocket={websocket}, state={getattr(websocket, 'client_state', None)}")
+
+            # Make sure WebSocket is accepted before doing anything else
+            await self._ensure_already_accepted(websocket)
+
             # Store connection
             self.active_connections[connection_id] = websocket
             
@@ -74,6 +81,22 @@ class DetectionWebSocketManager:
         except Exception as e:
             logger.error(f"Error disconnecting {connection_id}: {e}")
     
+    def _ensure_already_accepted(self, websocket: WebSocket):
+        """
+        Strict mode: ensure the WebSocket is already accepted.
+        Raise an error if it isn't.
+        """
+        if websocket is None:
+            logger.error("[_ensure_already_accepted] websocket is None")
+            raise RuntimeError("WebSocket is None — cannot proceed")
+
+        logger.debug(f"[_ensure_already_accepted] state={websocket.client_state.name}")
+        if websocket.client_state.name != "CONNECTED":
+            raise RuntimeError(
+            "WebSocket has not been accepted. "
+            "Call 'await websocket.accept()' before passing it to DetectionWebSocketManager.connect()."
+        )
+
     async def send_to_connection(self, connection_id: str, data: Dict[str, Any]) -> bool:
         """Send data to a specific connection"""
         websocket = self.active_connections.get(connection_id)
