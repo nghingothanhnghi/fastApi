@@ -124,6 +124,8 @@ async def detect_objects_base64(
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
     """WebSocket endpoint for real-time object detection with hardware detection"""
+    detector = None
+    
     try:
         await websocket.accept()
         detector = ObjectDetector()
@@ -180,25 +182,77 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                         except Exception as enhance_error:
                             logger.warning(f"Could not enhance with hardware info: {enhance_error}")
                         
-                        await websocket.send_json(results)
+                        # Check if WebSocket is still connected before sending
+                        if websocket.client_state.name == "CONNECTED":
+                            await websocket.send_json(results)
+                        else:
+                            logger.warning("WebSocket disconnected, cannot send results")
+                            break
                     else:
-                        await websocket.send_json({"error": "Invalid image data"})
+                        # Check if WebSocket is still connected before sending error
+                        if websocket.client_state.name == "CONNECTED":
+                            await websocket.send_json({"error": "Invalid image data"})
+                        else:
+                            logger.warning("WebSocket disconnected, cannot send error message")
+                            break
                 else:
-                    await websocket.send_json({"error": "No image data provided"})
+                    # Check if WebSocket is still connected before sending error
+                    if websocket.client_state.name == "CONNECTED":
+                        await websocket.send_json({"error": "No image data provided"})
+                    else:
+                        logger.warning("WebSocket disconnected, cannot send error message")
+                        break
+                        
             except json.JSONDecodeError:
-                await websocket.send_json({"error": "Invalid JSON format"})
+                # Check if WebSocket is still connected before sending error
+                if websocket.client_state.name == "CONNECTED":
+                    try:
+                        await websocket.send_json({"error": "Invalid JSON format"})
+                    except Exception as send_error:
+                        logger.error(f"Failed to send JSON error message: {send_error}")
+                        break
+                else:
+                    logger.warning("WebSocket disconnected, cannot send JSON error message")
+                    break
+                    
+            except WebSocketDisconnect:
+                # WebSocket disconnected during message processing
+                logger.info("Object detection WebSocket disconnected during message processing")
+                break
+                
             except Exception as e:
                 logger.error(f"Error processing WebSocket message: {e}")
-                await websocket.send_json({"error": f"Processing error: {str(e)}"})
+                # Check if WebSocket is still connected before sending error
+                if websocket.client_state.name == "CONNECTED":
+                    try:
+                        await websocket.send_json({"error": f"Processing error: {str(e)}"})
+                    except Exception as send_error:
+                        logger.error(f"Failed to send processing error message: {send_error}")
+                        break
+                else:
+                    logger.warning("WebSocket disconnected, cannot send processing error message")
+                    break
                 
     except WebSocketDisconnect:
         logger.info("Object detection WebSocket disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        try:
-            await websocket.close()
-        except Exception as close_error:
-            logger.error(f"Error closing WebSocket: {close_error}")
+        # Only try to close if the WebSocket is still in a state where it can be closed
+        if websocket.client_state.name == "CONNECTED":
+            try:
+                await websocket.close()
+                logger.info("WebSocket closed successfully")
+            except Exception as close_error:
+                logger.error(f"Error closing WebSocket: {close_error}")
+    finally:
+        # Clean up detector if it was created
+        if detector:
+            try:
+                # If the detector has any cleanup methods, call them here
+                pass
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up detector: {cleanup_error}")
+        logger.info("Object detection WebSocket endpoint cleanup completed")
 
 @router.post("/train")
 async def train_model(

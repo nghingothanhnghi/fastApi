@@ -141,11 +141,13 @@ async def hardware_detection_websocket(
                                 "timestamp": None
                             })
                         except Exception as e:
-                            await detection_ws_manager.send_to_connection(connection_id, {
-                                "type": "error",
-                                "message": f"Could not get status for location {location}: {str(e)}",
-                                "timestamp": None
-                            })
+                            # Only send error if connection is still active
+                            if connection_id in detection_ws_manager.active_connections:
+                                await detection_ws_manager.send_to_connection(connection_id, {
+                                    "type": "error",
+                                    "message": f"Could not get status for location {location}: {str(e)}",
+                                    "timestamp": None
+                                })
                 
                 elif message_type == "get_stats":
                     try:
@@ -156,42 +158,54 @@ async def hardware_detection_websocket(
                             "timestamp": None
                         })
                     except Exception as e:
-                        await detection_ws_manager.send_to_connection(connection_id, {
-                            "type": "error",
-                            "message": f"Could not get stats: {str(e)}",
-                            "timestamp": None
-                        })
+                        # Only send error if connection is still active
+                        if connection_id in detection_ws_manager.active_connections:
+                            await detection_ws_manager.send_to_connection(connection_id, {
+                                "type": "error",
+                                "message": f"Could not get stats: {str(e)}",
+                                "timestamp": None
+                            })
                 
                 elif message_type == "pong":
                     # Client responded to ping
                     logger.debug(f"Received pong from connection {connection_id}")
                 
                 else:
-                    await detection_ws_manager.send_to_connection(connection_id, {
-                        "type": "error",
-                        "message": f"Unknown message type: {message_type}",
-                        "timestamp": None
-                    })
+                    # Only send error if connection is still active
+                    if connection_id in detection_ws_manager.active_connections:
+                        await detection_ws_manager.send_to_connection(connection_id, {
+                            "type": "error",
+                            "message": f"Unknown message type: {message_type}",
+                            "timestamp": None
+                        })
                     
             except json.JSONDecodeError:
-                await detection_ws_manager.send_to_connection(connection_id, {
-                    "type": "error",
-                    "message": "Invalid JSON format",
-                    "timestamp": None
-                })
+                # Only send error if connection is still active
+                if connection_id in detection_ws_manager.active_connections:
+                    await detection_ws_manager.send_to_connection(connection_id, {
+                        "type": "error",
+                        "message": "Invalid JSON format",
+                        "timestamp": None
+                    })
             except WebSocketDisconnect:
                 break
             except Exception as e:
                 logger.error(f"Error handling WebSocket message: {e}")
-                try:
-                    await detection_ws_manager.send_to_connection(connection_id, {
-                        "type": "error",
-                        "message": f"Server error: {str(e)}",
-                        "timestamp": None
-                    })
-                except Exception as send_error:
-                    logger.error(f"Failed to send error message to WebSocket {connection_id}: {send_error}")
-                    break  # Exit the loop if we can't send messages
+                # Only try to send error if connection is still active
+                if connection_id in detection_ws_manager.active_connections:
+                    try:
+                        await detection_ws_manager.send_to_connection(connection_id, {
+                            "type": "error",
+                            "message": f"Server error: {str(e)}",
+                            "timestamp": None
+                        })
+                    except Exception as send_error:
+                        logger.error(f"Failed to send error message to WebSocket {connection_id}: {send_error}")
+                        break  # Exit the loop if we can't send messages
+                else:
+                    # Connection is no longer active, exit the loop
+                    logger.warning(f"Connection {connection_id} is no longer active, exiting message loop")
+                    break
     
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {connection_id}")

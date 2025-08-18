@@ -32,24 +32,6 @@ class HydroActuatorService:
             .all()
         )
 
-    # def update_actuator(self, db: Session, actuator: HydroActuator, updates: HydroActuatorUpdate) -> HydroActuator:
-    #     try:
-    #         for field, value in updates.dict(exclude_unset=True).items():
-    #             setattr(actuator, field, value)
-    #         db.commit()
-    #         db.refresh(actuator)
-    #         return actuator
-    #     except SQLAlchemyError as e:
-    #         db.rollback()
-    #         raise e
-
-    # def delete_actuator(self, db: Session, actuator: HydroActuator) -> None:
-    #     try:
-    #         db.delete(actuator)
-    #         db.commit()
-    #     except SQLAlchemyError as e:
-    #         db.rollback()
-    #         raise e
     def update_actuator(self, db: Session, actuator_id: int, updates: HydroActuatorUpdate) -> Optional[HydroActuator]:
         actuator = self.get_actuator(db, actuator_id)
         if not actuator:

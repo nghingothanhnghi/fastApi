@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.device import HydroDeviceCreate, HydroDeviceUpdate
+from app.core.config import USE_MOCK_HYDROSYSTEMMAINBOARD
 from app.hydro_system.config import DEFAULT_ACTUATORS, DEVICE_IDS
 from app.core.logging_config import get_logger
 
@@ -27,17 +28,33 @@ class HydroDeviceService:
             db.flush()  # Get device.id before commit
             logger.info(f"Created base device entry with ID: {device.id}")
             # Create default actuators for this device
-            for act in DEFAULT_ACTUATORS:
-                actuator = HydroActuator(
-                    type=act["type"],
-                    name=act.get("name"),
-                    pin=act.get("pin"),
-                    port=act.get("port"),
-                    default_state=act.get("default_state", False),
-                    device_id=device.id,
-                )
-                db.add(actuator)
-                logger.debug(f"Added actuator for device {device.device_id}: {actuator.type}")
+            # for act in DEFAULT_ACTUATORS:
+            #     actuator = HydroActuator(
+            #         type=act["type"],
+            #         name=act.get("name"),
+            #         pin=act.get("pin"),
+            #         port=act.get("port"),
+            #         default_state=act.get("default_state", False),
+            #         device_id=device.id,
+            #     )
+            #     db.add(actuator)
+            #     logger.debug(f"Added actuator for device {device.device_id}: {actuator.type}")
+
+             # --- MOCK MODE ---
+            if USE_MOCK_HYDROSYSTEMMAINBOARD:
+                for act in DEFAULT_ACTUATORS:
+                    actuator = HydroActuator(
+                        type=act["type"],
+                        name=act.get("name"),
+                        pin=act.get("pin"),
+                        port=act.get("port"),
+                        default_state=act.get("default_state", False),
+                        device_id=device.id,
+                    )
+                    db.add(actuator)
+                    logger.debug(f"[MOCK] Added actuator for device {device.device_id}: {actuator.type}")
+            else:
+                logger.info(f"[REAL] Waiting for actuators from hardware for device {device.device_id}")
 
             db.commit()
             db.refresh(device)

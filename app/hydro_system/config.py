@@ -1,5 +1,6 @@
 # app/hydro_system/config.py
 # Configuration settings for the hydroponic system
+from app.core.config import USE_MOCK_HYDROSYSTEMMAINBOARD
 
 DEVICE_IDS = [
     "esp32-dev-001",
@@ -54,7 +55,7 @@ DEFAULT_ACTUATORS = [
         "port": 5,
         "default_state": False
     }
-]
+] if USE_MOCK_HYDROSYSTEMMAINBOARD else []
 
 # app/hydro_system/config.py (or a new config_actuators.py)
 

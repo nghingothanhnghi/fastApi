@@ -6,6 +6,7 @@ import random
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.hydro_system.models.device import HydroDevice
+from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.config import WATER_LEVEL_CONFIG
 from app.core.config import USE_MOCK_HYDROSYSTEMMAINBOARD
 
@@ -127,6 +128,7 @@ def _real_water_level(config=WATER_LEVEL_CONFIG):
 # ------------------------------
 # Public API (same names)
 # ------------------------------
+
 def read_temperature():
     return _mock_temperature() if USE_MOCK_HYDROSYSTEMMAINBOARD else _real_temperature()
 
@@ -145,7 +147,53 @@ def read_water_level(config=WATER_LEVEL_CONFIG):
 # ------------------------------
 # Aggregated read
 # ------------------------------
-def read_sensors(device_id: int = None):
+# def read_sensors(device_id: int = None):
+#     logger.info(f"📡 Reading sensors for device {device_id} (mock={USE_MOCK_HYDROSYSTEMMAINBOARD})")
+
+#     session: Session = SessionLocal()
+#     try:
+#         device_name = None
+#         if device_id:
+#             device = session.query(HydroDevice).filter(HydroDevice.id == device_id).first()
+#             if device:
+#                 device_name = device.name
+#             else:
+#                 logger.warning(f"No device found with ID {device_id}")
+
+#         sensor_data = {
+#             "device_id": device_id,
+#             "device_name": device_name,
+#             "temperature": read_temperature(),
+#             "humidity": read_humidity(),
+#             "light": read_light(),
+#             "moisture": read_moisture(),
+#             "water_level": read_water_level(),
+#         }
+
+#         logger.info(f"📈 Sensor readings: {sensor_data}")
+#         return sensor_data
+
+#     except Exception as e:
+#         logger.error(f"❌ Error reading sensors for device {device_id}: {e}")
+#         return {
+#             "device_id": device_id,
+#             "device_name": None,
+#             "temperature": None,
+#             "humidity": None,
+#             "light": None,
+#             "moisture": None,
+#             "water_level": None
+#         }
+#     finally:
+#         session.close()
+
+# ------------------------------
+# Aggregated read + persistence
+# ------------------------------
+def read_sensors(device_id: int = None, persist: bool = True):
+    """
+    Read all sensors, optionally persist to DB.
+    """
     logger.info(f"📡 Reading sensors for device {device_id} (mock={USE_MOCK_HYDROSYSTEMMAINBOARD})")
 
     session: Session = SessionLocal()
@@ -169,6 +217,22 @@ def read_sensors(device_id: int = None):
         }
 
         logger.info(f"📈 Sensor readings: {sensor_data}")
+
+        # Persist into DB
+        if persist and device_id:
+            db_record = SensorData(
+                device_id=device_id,
+                temperature=sensor_data["temperature"],
+                humidity=sensor_data["humidity"],
+                light=sensor_data["light"],
+                moisture=sensor_data["moisture"],
+                water_level=sensor_data["water_level"],
+            )
+            session.add(db_record)
+            session.commit()
+            session.refresh(db_record)
+            logger.info(f"✅ Sensor data saved with ID {db_record.id}")
+
         return sensor_data
 
     except Exception as e:

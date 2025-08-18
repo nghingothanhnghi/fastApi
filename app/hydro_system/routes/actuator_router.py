@@ -42,3 +42,8 @@ def delete_actuator(actuator_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Actuator not found")
     return {"detail": "Actuator deleted successfully"}
 
+# bulk create feature (instead of posting 4x times)
+@router.post("/bulk", response_model=list[HydroActuatorOut])
+def create_actuators_bulk(actuators_in: list[HydroActuatorCreate], db: Session = Depends(get_db)):
+    return [hydro_actuator_service.create_actuator(db, actuator) for actuator in actuators_in]
+
