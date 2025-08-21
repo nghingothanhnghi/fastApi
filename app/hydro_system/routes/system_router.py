@@ -2,7 +2,7 @@
 # Description: This module defines the API endpoints for controlling the hydroponic system.
 from fastapi import APIRouter, Query, Depends, Body, Path
 from app.database import get_db
-from app.utils.token import get_current_user
+from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from sqlalchemy.orm import Session
 # Import controllers with aliases for clarity

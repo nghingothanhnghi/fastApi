@@ -9,7 +9,7 @@ from app.user.services.role_service import RoleService
 from app.user.models.role import Role
 from app.user.models.user_role import UserRole
 from app.user.schemas.user import UserCreate, UserUpdate
-from app.utils.security import hash_password
+from app.user.utils.security import hash_password
 from datetime import datetime, timedelta
 from typing import List
 import secrets
@@ -122,7 +122,7 @@ def update_user(db: Session, user_id: int, user_update: UserUpdate):
     update_data = user_update.dict(exclude_unset=True)
     
     if "password" in update_data and update_data["password"]:
-        from app.utils.security import hash_password
+        from app.user.utils.security import hash_password
         update_data["hashed_password"] = hash_password(update_data.pop("password"))
     
     for key, value in update_data.items():

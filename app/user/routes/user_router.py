@@ -1,24 +1,26 @@
 # app/api/endpoints/user.py
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from uuid import uuid4
 import os
 from app.core import config
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import logging
+from app.database import get_db
 from app.user.schemas.user import UserCreate, UserUpdate, UserOut, UserWithRoles
 from app.user import user as crud_user
 from app.user.enums.role_enum import RoleEnum
-from app.database import get_db
-from app.utils.token import get_current_user, get_current_user_optional
-from app.utils.role_requirements import require_roles
+from app.user.utils.token import get_current_user, get_current_user_optional
+from app.user.utils.role_requirements import require_roles
 from app.user.models.user import User
+from app.user.utils.user_helpers import add_absolute_image_url
 
 from typing import List
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
 logger = logging.getLogger(__name__)
+
 
 @router.post("/", response_model=UserOut)
 def create_user(
@@ -54,41 +56,48 @@ def create_user(
 
 @router.get("/{user_id}", response_model=UserOut)
 def get_user(
-    user_id: int, 
+    user_id: int,
+    request: Request,
     db: Session = Depends(get_db)
     ):
     db_user = crud_user.get_user(db, user_id)
     if not db_user:
         logger.warning(f"User not found: {user_id}")
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found")  
     logger.info(f"User retrieved: {db_user.id}")
-    return db_user
+    return add_absolute_image_url(db_user, request)
 
 @router.get("/by-client/{client_id}", response_model=list[UserOut])
 def get_users_by_client(
     client_id: str,
+    request: Request,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
 ):
     users = crud_user.get_users_by_client(db, client_id, skip=skip, limit=limit)
+
     logger.info(f"{len(users)} users retrieved for client_id={client_id} (skip={skip}, limit={limit})")
-    return users
+    return [add_absolute_image_url(u, request) for u in users]
 
 @router.get("", response_model=List[UserWithRoles])
 def get_all_users(
+    request: Request,
     db: Session = Depends(get_db),
     # current_user: User = Depends(get_current_user)
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
 ):
-    return crud_user.get_all_users(db)
+    users = crud_user.get_all_users(db)
+
+    return [add_absolute_image_url(u, request) for u in users]
 
 
 @router.put("/{user_id}", response_model=UserOut)
 def update_user(
     user_id: int,
     user_update: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -99,8 +108,9 @@ def update_user(
         raise HTTPException(status_code=403, detail="Not authorized to update this user")
 
     updated_user = crud_user.update_user(db, user_id, user_update)
+
     logger.info(f"User updated: {user_id}")
-    return updated_user
+    return add_absolute_image_url(updated_user, request)
 
 @router.delete("/{user_id}")
 def delete_user(
@@ -121,6 +131,7 @@ def delete_user(
 def upload_user_image(
     user_id: int,
     file: UploadFile = File(...),
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -147,8 +158,9 @@ def upload_user_image(
         raise HTTPException(status_code=500, detail="Failed to upload image")
 
     user.image_url = f"{config.STATIC_URL_BASE}/{filename}"
+
     db.commit()
     db.refresh(user)
 
     logger.info(f"Image uploaded for user {user.id}: {user.image_url}")
-    return user
+    return add_absolute_image_url(user, request)

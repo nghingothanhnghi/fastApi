@@ -7,7 +7,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.database import get_db
-from app.utils.token import get_current_user
+from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from app.hydro_system.schemas.actuator_log import HydroActuatorLogOut
 from app.hydro_system.services.actuator_log_service import get_actuator_logs

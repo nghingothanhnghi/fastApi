@@ -9,8 +9,8 @@ from app.user import user as crud_user
 from app.user.models.user import User
 from app.user.schemas.user import UserOut
 from app.user.schemas.token import Token
-from app.utils.security import verify_password
-from app.utils.token import create_access_token, get_current_user
+from app.user.utils.security import verify_password
+from app.user.utils.token import create_access_token, get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

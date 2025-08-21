@@ -4,7 +4,7 @@
 from fastapi import Depends, HTTPException, status
 from typing import List, Callable
 from app.user.models.user import User
-from app.utils.token import get_current_user
+from app.user.utils.token import get_current_user
 from app.user.enums.role_enum import RoleEnum
 
 def require_roles(*required_roles: RoleEnum) -> Callable:

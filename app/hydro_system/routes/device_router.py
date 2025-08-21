@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 
 from app.database import get_db
-from app.utils.token import get_current_user
-from app.utils.role_requirements import require_roles
+from app.user.utils.token import get_current_user
+from app.user.utils.role_requirements import require_roles
 from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.hydro_system.schemas.device import (

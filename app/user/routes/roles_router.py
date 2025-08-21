@@ -5,7 +5,8 @@ from typing import List, Optional
 import logging
 
 from app.database import get_db
-from app.utils.token import get_current_user
+from app.user.utils.token import get_current_user
+from app.user.utils.role_requirements import require_roles
 from app.user.models.user import User
 from app.user.services.role_service import RoleService
 from app.user.schemas.role import (
@@ -13,10 +14,9 @@ from app.user.schemas.role import (
     UserRoleCreate, UserRoleOut, UserRoleWithDetails,
     BulkRoleAssignment, BulkRoleRemoval
 )
-
 from app.user.schemas.user import UserWithRoles
 from app.user.enums.role_enum import RoleEnum
-from app.utils.role_requirements import require_roles
+
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
 logger = logging.getLogger(__name__)

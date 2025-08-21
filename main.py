@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.api.endpoints import (
     devices, tap, health, scheduler_health , screen,
@@ -23,6 +25,7 @@ from app.utils.scheduler import start_scheduler, add_job
 from app.transform_data.jobs.transform_job import transform_unprocessed_data
 from app.hydro_system.scheduler import start_sensor_job
 from app.utils.background_tasks import start_hardware_detection_background_tasks
+from app.core import config
 
 app = FastAPI()
 
@@ -71,6 +74,19 @@ app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
 app.include_router(ingest_api.router)
 app.include_router(transform_api.router)
 app.include_router(template_api.router)
+
+# -----------------------------------------
+# Static File Mounts (profile images, etc.)
+# -----------------------------------------
+# Ensure upload folder exists
+os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+
+# Serve /uploads/profile_images/* → uploads/profile_images/
+app.mount(
+    config.STATIC_URL_BASE,
+    StaticFiles(directory=config.UPLOAD_DIR),
+    name="profile_images"
+)
 
 # -----------------------------------------
 # Scheduler Jobs

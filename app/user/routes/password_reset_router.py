@@ -6,7 +6,7 @@ from app.database import get_db
 from app.user import user as crud_user
 from app.utils.email import send_reset_code_email
 from app.user.schemas.password_reset import PasswordResetRequest, PasswordResetVerify, PasswordResetConfirm
-from app.utils.security import hash_password
+from app.user.utils.security import hash_password
 import random
 
 router = APIRouter(prefix="/password", tags=["Password Reset"])
