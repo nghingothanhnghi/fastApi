@@ -335,8 +335,14 @@ class HardwareDetectionService:
         location: str
     ) -> List[LocationHardwareInventory]:
         """
-        Automatically create inventory items based on hydro devices and actuators
-        at the specified location
+        Idempotent sync: ensure inventory entries exist for hydro devices/actuators
+        at the specified location without creating duplicates.
+        Matching rules:
+        - Device entry: match by (location, hydro_device_id, hardware_type='controller')
+        - Actuator entry: match by (location, hydro_actuator_id)
+        Updates:
+        - If exists, ensure is_active=True and update name/notes if changed.
+        - If not exists, create a new inventory entry.
         """
         
         # Get hydro devices at this location
@@ -345,44 +351,93 @@ class HardwareDetectionService:
             HydroDevice.is_active == True
         ).all()
         
-        created_inventory = []
+        synced_inventory: List[LocationHardwareInventory] = []
         
         for device in hydro_devices:
-            # Create inventory item for the device itself
-            device_inventory = LocationHardwareInventoryCreate(
-                location=location,
-                hardware_type="controller",
-                hardware_name=f"{device.name} Controller",
-                expected_quantity=1,
-                hydro_device_id=device.id,
-                notes=f"Auto-synced from hydro device: {device.device_id}"
-            )
+            # Upsert inventory item for the device itself (controller)
+            existing_device_item = db.query(LocationHardwareInventory).filter(
+                LocationHardwareInventory.location == location,
+                LocationHardwareInventory.hydro_device_id == device.id,
+                LocationHardwareInventory.hardware_type == "controller",
+            ).first()
+            device_name = f"{device.name} Controller"
+            device_notes = f"Auto-synced from hydro device: {device.device_id}"
+
+            if existing_device_item:
+                # Update minimal fields if needed
+                updated = False
+                if existing_device_item.hardware_name != device_name:
+                    existing_device_item.hardware_name = device_name
+                    updated = True
+                if existing_device_item.notes != device_notes:
+                    existing_device_item.notes = device_notes
+                    updated = True
+                if existing_device_item.is_active is False:
+                    existing_device_item.is_active = True
+                    updated = True
+                if updated:
+                    db.commit()
+                    db.refresh(existing_device_item)
+                synced_inventory.append(existing_device_item)
+            else:
+                device_inventory = LocationHardwareInventoryCreate(
+                    location=location,
+                    hardware_type="controller",
+                    hardware_name=device_name,
+                    expected_quantity=1,
+                    hydro_device_id=device.id,
+                    notes=device_notes,
+                )
+                inventory_item = HardwareDetectionService.create_location_inventory(db, device_inventory)
+                synced_inventory.append(inventory_item)
             
-            inventory_item = HardwareDetectionService.create_location_inventory(
-                db, device_inventory
-            )
-            created_inventory.append(inventory_item)
-            
-            # Create inventory items for each actuator
-            for actuator in device.actuators:
-                if actuator.is_active:
+            # Upsert inventory items for each actuator
+            for actuator in getattr(device, "actuators", []):
+                if not actuator.is_active:
+                    continue
+                existing_act_item = db.query(LocationHardwareInventory).filter(
+                    LocationHardwareInventory.location == location,
+                    LocationHardwareInventory.hydro_actuator_id == actuator.id,
+                ).first()
+                act_name = actuator.name or f"{actuator.type.title()} {actuator.port}"
+                act_notes = f"Auto-synced from actuator: {actuator.type} on pin {actuator.pin}"
+
+                if existing_act_item:
+                    updated = False
+                    if existing_act_item.hardware_type != actuator.type:
+                        existing_act_item.hardware_type = actuator.type
+                        updated = True
+                    if existing_act_item.hardware_name != act_name:
+                        existing_act_item.hardware_name = act_name
+                        updated = True
+                    if existing_act_item.notes != act_notes:
+                        existing_act_item.notes = act_notes
+                        updated = True
+                    if existing_act_item.is_active is False:
+                        existing_act_item.is_active = True
+                        updated = True
+                    if existing_act_item.expected_quantity != 1:
+                        existing_act_item.expected_quantity = 1
+                        updated = True
+                    if updated:
+                        db.commit()
+                        db.refresh(existing_act_item)
+                    synced_inventory.append(existing_act_item)
+                else:
                     actuator_inventory = LocationHardwareInventoryCreate(
                         location=location,
                         hardware_type=actuator.type,
-                        hardware_name=actuator.name or f"{actuator.type.title()} {actuator.port}",
+                        hardware_name=act_name,
                         expected_quantity=1,
                         hydro_device_id=device.id,
                         hydro_actuator_id=actuator.id,
-                        notes=f"Auto-synced from actuator: {actuator.type} on pin {actuator.pin}"
+                        notes=act_notes,
                     )
-                    
-                    inventory_item = HardwareDetectionService.create_location_inventory(
-                        db, actuator_inventory
-                    )
-                    created_inventory.append(inventory_item)
+                    inventory_item = HardwareDetectionService.create_location_inventory(db, actuator_inventory)
+                    synced_inventory.append(inventory_item)
         
-        logger.info(f"Synced {len(created_inventory)} inventory items for location {location}")
-        return created_inventory
+        logger.info(f"Synced {len(synced_inventory)} inventory items for location {location}")
+        return synced_inventory
     
     @staticmethod
     def get_hardware_detection_stats(db: Session) -> HardwareDetectionStats:

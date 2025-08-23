@@ -9,7 +9,7 @@ import cv2
 from fastapi import HTTPException
 from ultralytics import YOLO
 
-from app.utils.image_processing import encode_image_to_base64
+from app.camera_object_detection.utils.image_processing import encode_image_to_base64
 from app.camera_object_detection.config import MODELS_DIR, DEFAULT_MODEL_NAME, YOLO_FALLBACK_MODEL
 from app.core.logging_config import get_logger
 
