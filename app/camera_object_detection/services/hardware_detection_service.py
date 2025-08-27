@@ -54,6 +54,7 @@ class HardwareDetectionService:
     }
     @staticmethod
     def get_camera_sources_by_location(db: Session, location: str) -> List[str]:
+        logger.info(f"Looking up camera sources for location={location}")
         sources = (
             db.query(HardwareDetection.camera_source)
             .filter(HardwareDetection.location == location)
@@ -61,6 +62,7 @@ class HardwareDetectionService:
             .distinct()
             .all()
         )
+        logger.info(f"Found sources: {sources}")
         return [source[0] for source in sources]
     
     @staticmethod

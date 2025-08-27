@@ -8,6 +8,7 @@ from datetime import datetime
 import asyncio
 
 from app.database import get_db
+from app.camera_object_detection.models.hardware_detection import HardwareDetection
 from app.camera_object_detection.services.hardware_detection_service import hardware_detection_service
 from app.camera_object_detection.schemas.hardware_detection import (
     HardwareDetectionCreate, HardwareDetectionUpdate, HardwareDetectionResponse,
@@ -86,7 +87,7 @@ async def process_detection_for_hardware(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/", response_model=List[HardwareDetectionResponse])
+@router.get("", response_model=List[HardwareDetectionResponse])
 async def get_hardware_detections(
     location: Optional[str] = Query(None, description="Filter by location"),
     hardware_type: Optional[str] = Query(None, description="Filter by hardware type"),
@@ -281,9 +282,13 @@ async def validate_location_hardware(
     try:
         # Get recent detections
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-        recent_detections = db.query(hardware_detection_service.HardwareDetection).filter(
-            hardware_detection_service.HardwareDetection.location == location,
-            hardware_detection_service.HardwareDetection.detected_at >= cutoff
+        # recent_detections = db.query(hardware_detection_service.HardwareDetection).filter(
+        #     hardware_detection_service.HardwareDetection.location == location,
+        #     hardware_detection_service.HardwareDetection.detected_at >= cutoff
+        # ).all()
+        recent_detections = db.query(HardwareDetection).filter(
+            HardwareDetection.location == location,
+            HardwareDetection.detected_at >= cutoff
         ).all()
         
         validation_report = hydro_integration.validate_detection_against_hydro_system(
