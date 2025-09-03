@@ -9,8 +9,8 @@ from app.api.endpoints import (
 
 from app.user.routes import (user_router, roles_router, auth_router, password_reset_router)
 
-from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router)
-from app.camera_object_detection.websocket import router as hardware_ws_router
+from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router, ws_router)
+# from app.camera_object_detection.websocket import router as hardware_ws_router
 
 from app.hydro_system.routes import ( system_router, sensor_router, actuator_router)
 
@@ -63,7 +63,7 @@ app.include_router(scheduler_health.router)  # /scheduler/health
 
 app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(hardware_detection_router.router)
-app.include_router(hardware_ws_router.router)
+app.include_router(ws_router.router)
 
 
 app.include_router(system_router.router)  # Handles /hydro/ endpoints

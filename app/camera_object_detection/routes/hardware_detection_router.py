@@ -18,7 +18,7 @@ from app.camera_object_detection.schemas.hardware_detection import (
     LocationHardwareInventoryUpdate, ConditionStatus, HardwareType,
     HardwareDetectionSummaryResponse
 )
-from app.camera_object_detection.websocket.events import (
+from app.camera_object_detection.utils.events import (
     broadcast_new_detection, broadcast_detection_validated, broadcast_bulk_detections,
     broadcast_detection_processed, broadcast_location_status_change, 
     broadcast_inventory_updated, broadcast_hydro_device_matched, broadcast_stats_updated

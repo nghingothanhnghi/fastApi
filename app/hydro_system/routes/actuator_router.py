@@ -35,6 +35,19 @@ def update_actuator(actuator_id: int, actuator_in: HydroActuatorUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Actuator not found")
     return actuator
 
+# PATCH is used to partially update an existing resource. It allows you to modify only a subset of fields without affecting other fields.
+@router.patch("/{actuator_id}", response_model=HydroActuatorOut)
+def patch_actuator(
+    actuator_id: int,
+    actuator_in: HydroActuatorUpdate,
+    db: Session = Depends(get_db)
+):
+    actuator = hydro_actuator_service.update_actuator(db, actuator_id, actuator_in)
+    if not actuator:
+        raise HTTPException(status_code=404, detail="Actuator not found")
+    return actuator
+
+
 @router.delete("/{actuator_id}")
 def delete_actuator(actuator_id: int, db: Session = Depends(get_db)):
     actuator = hydro_actuator_service.delete_actuator(db, actuator_id)

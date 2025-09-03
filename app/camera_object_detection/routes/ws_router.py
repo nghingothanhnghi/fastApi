@@ -1,4 +1,4 @@
-# app/camera_object_detection/websocket/router.py
+# app/camera_object_detection/routes/ws_router.py
 # WebSocket router for hardware detection real-time updates
 
 import json

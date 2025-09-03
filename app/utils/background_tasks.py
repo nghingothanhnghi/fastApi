@@ -8,7 +8,7 @@ from typing import Dict, Any
 
 from app.database import SessionLocal
 from .connection_manager import detection_ws_manager
-from app.camera_object_detection.websocket.events import hardware_detection_broadcaster
+from app.camera_object_detection.utils.events import hardware_detection_broadcaster
 from app.camera_object_detection.services.hardware_detection_service import hardware_detection_service
 
 logger = logging.getLogger(__name__)
