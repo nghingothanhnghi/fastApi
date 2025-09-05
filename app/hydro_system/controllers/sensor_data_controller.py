@@ -28,29 +28,37 @@ def update_thresholds(thresholds: dict):
     logger.info(f"Thresholds updated: {thresholds}")
     return DEFAULT_THRESHOLDS
 
-
 def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
     device = None
-    if payload.device_id:
+
+    # Handle external_id / code (string) or int FK
+    if isinstance(payload.device_id, str):
         device = hydro_device_service.get_device_by_external_id(db, payload.device_id)
+    elif isinstance(payload.device_id, int):
+        device = db.query(HydroDevice).filter(HydroDevice.id == payload.device_id).first()
+
     if not device:
-        device = hydro_device_service.get_first_active_device(db)
-        raise HTTPException(status_code=404, detail=f"Device with external_id '{payload.device_id}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Device not found for identifier '{payload.device_id}'"
+        )
 
     new_data = SensorData(
-        temperature=payload.temperature,
-        humidity=payload.humidity,
-        light=payload.light,
-        moisture=payload.moisture,
-        water_level=payload.water_level,
-        device_id=device.id,
+        temperature=payload.data.temperature,
+        humidity=payload.data.humidity,
+        light=payload.data.light,
+        moisture=payload.data.moisture,
+        water_level=payload.data.water_level,
+        device_id=device.id,   # ✅ Always store DB FK
         created_at=datetime.utcnow(),
     )
     db.add(new_data)
     db.commit()
     db.refresh(new_data)
+
     logger.info(
-        f"New sensor data created: ID={new_data.id}, water_level={new_data.water_level}%, device_id={device.id}"
+        f"✅ New sensor data created: ID={new_data.id}, device_id={device.id}, "
+        f"T={new_data.temperature}°C, H={new_data.humidity}%, WL={new_data.water_level}%"
     )
     return new_data
 

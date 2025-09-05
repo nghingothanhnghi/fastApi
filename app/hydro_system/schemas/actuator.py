@@ -20,11 +20,11 @@ class HydroActuatorCreate(HydroActuatorBase):
     device_id: int = Field(..., json_schema_extra={"example": 1})
 
 class HydroActuatorUpdate(BaseModel):
-    name: Optional[str]
+    name: Optional[str] = None
     port: Optional[int] = None
-    type: Optional[str]
-    pin: Optional[str]
-    is_active: Optional[bool]
+    type: Optional[str] = None
+    pin: Optional[str] = None
+    is_active: Optional[bool] = None
     default_state: Optional[bool] = None
     sensor_key: Optional[str] = Field(
         None,

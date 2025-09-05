@@ -136,21 +136,37 @@ class RoleService:
         return db_role
 
 
+    # def delete_role(self, role_id: int) -> bool:
+    #     """Delete a role (soft delete by setting is_active=False for system roles)"""
+    #     db_role = self.get_role_by_id(role_id)
+    #     if not db_role:
+    #         return False
+        
+    #     if db_role.is_system_role:
+    #         # Soft delete system roles
+    #         db_role.is_active = False
+    #         self.db.commit()
+    #     else:
+    #         # Hard delete non-system roles
+    #         self.db.delete(db_role)
+    #         self.db.commit()
+        
+    #     return True
     def delete_role(self, role_id: int) -> bool:
-        """Delete a role (soft delete by setting is_active=False for system roles)"""
+        """Delete a role (system roles cannot be deleted)"""
         db_role = self.get_role_by_id(role_id)
         if not db_role:
             return False
-        
+
         if db_role.is_system_role:
-            # Soft delete system roles
-            db_role.is_active = False
-            self.db.commit()
-        else:
-            # Hard delete non-system roles
-            self.db.delete(db_role)
-            self.db.commit()
-        
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete a system role"
+            )
+
+        # Hard delete non-system roles
+        self.db.delete(db_role)
+        self.db.commit()
         return True
 
     def assign_role_to_user(self, user_id: int, role_id: int, assigned_by: Optional[int] = None) -> UserRole:
@@ -194,18 +210,45 @@ class RoleService:
         self.db.refresh(user_role)
         return user_role
 
+    # def remove_role_from_user(self, user_id: int, role_id: int) -> bool:
+    #     """Remove a role from a user"""
+    #     user_role = self.db.query(UserRole).filter(
+    #         and_(UserRole.user_id == user_id, UserRole.role_id == role_id)
+    #     ).first()
+        
+    #     if not user_role:
+    #         return False
+        
+    #     self.db.delete(user_role)
+    #     self.db.commit()
+    #     return True
     def remove_role_from_user(self, user_id: int, role_id: int) -> bool:
-        """Remove a role from a user"""
+        """Remove a role from a user (prevent removing last super_admin)"""
+        role = self.get_role_by_id(role_id)
+        if not role:
+            return False
+
+        # Prevent removing the last super_admin
+        if role.name == "super_admin":
+            super_admins = self.get_users_with_role(role.id)
+            if len(super_admins) <= 1 and any(u.id == user_id for u in super_admins):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove the last super_admin"
+                )
+
         user_role = self.db.query(UserRole).filter(
             and_(UserRole.user_id == user_id, UserRole.role_id == role_id)
         ).first()
-        
+    
         if not user_role:
             return False
-        
+
         self.db.delete(user_role)
         self.db.commit()
         return True
+
+
 
     def get_user_roles(self, user_id: int) -> List[Role]:
         """Get all roles for a specific user"""
@@ -244,31 +287,65 @@ class RoleService:
         
         return results
 
+    # def bulk_remove_roles(self, bulk_removal: BulkRoleRemoval) -> Dict[str, Any]:
+    #     """Remove multiple roles from multiple users"""
+    #     results = {
+    #         "successful_removals": [],
+    #         "failed_removals": [],
+    #         "total_processed": 0
+    #     }
+        
+    #     for user_id in bulk_removal.user_ids:
+    #         for role_id in bulk_removal.role_ids:
+    #             success = self.remove_role_from_user(user_id, role_id)
+    #             if success:
+    #                 results["successful_removals"].append({
+    #                     "user_id": user_id,
+    #                     "role_id": role_id
+    #                 })
+    #             else:
+    #                 results["failed_removals"].append({
+    #                     "user_id": user_id,
+    #                     "role_id": role_id,
+    #                     "error": "Role assignment not found"
+    #                 })
+    #             results["total_processed"] += 1
+        
+    #     return results
+
     def bulk_remove_roles(self, bulk_removal: BulkRoleRemoval) -> Dict[str, Any]:
-        """Remove multiple roles from multiple users"""
+        """Remove multiple roles from multiple users (with super_admin safeguard)"""
         results = {
             "successful_removals": [],
             "failed_removals": [],
             "total_processed": 0
         }
-        
+
         for user_id in bulk_removal.user_ids:
             for role_id in bulk_removal.role_ids:
-                success = self.remove_role_from_user(user_id, role_id)
-                if success:
-                    results["successful_removals"].append({
-                        "user_id": user_id,
-                        "role_id": role_id
-                    })
-                else:
+                try:
+                    success = self.remove_role_from_user(user_id, role_id)
+                    if success:
+                        results["successful_removals"].append({
+                            "user_id": user_id,
+                            "role_id": role_id
+                        })
+                    else:
+                        results["failed_removals"].append({
+                            "user_id": user_id,
+                            "role_id": role_id,
+                            "error": "Role assignment not found"
+                        })
+                except HTTPException as e:
                     results["failed_removals"].append({
                         "user_id": user_id,
                         "role_id": role_id,
-                        "error": "Role assignment not found"
+                        "error": str(e.detail)
                     })
                 results["total_processed"] += 1
-        
+
         return results
+
 
     def create_default_roles(self) -> List[Role]:
         """Create default system roles"""
