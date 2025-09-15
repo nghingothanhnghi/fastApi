@@ -238,6 +238,34 @@ class HardwareDetectionService:
         
         logger.info(f"Validated hardware detection {detection_id}: {validation_data.is_validated}")
         return detection
+
+    @staticmethod
+    def update_hardware_detection(
+        db: Session,
+        detection_id: int,
+        update_data: HardwareDetectionUpdate
+    ) -> Optional[HardwareDetection]:
+        """Update a hardware detection fields, including hardware_type/detected_class."""
+        detection = db.query(HardwareDetection).filter(HardwareDetection.id == detection_id).first()
+        if not detection:
+            return None
+        # Update simple fields if provided
+        for field in [
+            "hardware_name",
+            "is_expected",
+            "is_validated",
+            "validation_notes",
+            "condition_status",
+            "condition_notes",
+            "hardware_type",
+            "detected_class",
+        ]:
+            value = getattr(update_data, field, None)
+            if value is not None:
+                setattr(detection, field, value)
+        db.commit()
+        db.refresh(detection)
+        return detection
     
     @staticmethod
     def get_location_status(

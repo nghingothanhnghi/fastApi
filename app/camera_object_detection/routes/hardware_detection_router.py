@@ -121,6 +121,19 @@ async def get_hardware_detections(
     return detections
 
 
+@router.patch("/{detection_id}", response_model=HardwareDetectionResponse)
+async def patch_hardware_detection(
+    detection_id: int,
+    payload: HardwareDetectionUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update fields in a hardware detection (including hardware_type/detected_class)."""
+    updated = hardware_detection_service.update_hardware_detection(db, detection_id, payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Hardware detection not found")
+    return updated
+
+
 @router.put("/{detection_id}/validate", response_model=HardwareDetectionResponse)
 async def validate_hardware_detection(
     detection_id: int = Path(..., description="Hardware detection ID"),

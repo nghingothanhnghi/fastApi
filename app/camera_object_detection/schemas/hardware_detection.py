@@ -59,6 +59,9 @@ class HardwareDetectionUpdate(BaseModel):
     validation_notes: Optional[str] = None
     condition_status: Optional[ConditionStatus] = None
     condition_notes: Optional[str] = None
+    # Allow updating classification fields
+    hardware_type: Optional[str] = None
+    detected_class: Optional[str] = None
 
 
 class HardwareDetectionResponse(HardwareDetectionBase):
