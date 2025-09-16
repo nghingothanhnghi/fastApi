@@ -12,6 +12,7 @@ from .camera_object_detection.models.detection import DetectionResult, Detection
 from .camera_object_detection.models.hardware_detection import HardwareDetection, LocationHardwareInventory, HardwareDetectionSummary
 from .migration.models.base_data import RawData
 from .transform_data.models.template import Template
+from .payments.models.payment import PaymentTransaction
 def init_db():
 # ✅ This registers all imported models and creates the tables
     Base.metadata.create_all(bind=engine)

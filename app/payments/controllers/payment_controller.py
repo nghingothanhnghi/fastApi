@@ -3,11 +3,19 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from app.payments.services.payment_service import payment_service
 from app.payments.schemas.payment import PaymentCreate, PaymentUpdate, StripePaymentCreate, StripePaymentResponse, PaymentOut
-from typing import Dict, Any
-from app.payments.services.stripe_service import stripe_service
+from app.payments.services.provider_registry import payment_provider_registry
 
 def create_payment(db: Session, payload: PaymentCreate):
-    return payment_service.create_payment(db, payload)
+    # 🔑 Use registry to dynamically select provider service
+    provider_service = payment_provider_registry.get_provider(payload.provider)
+    return provider_service.create_payment(
+        db,
+        user_id=payload.user_id,
+        client_id=payload.client_id,
+        amount=payload.amount,
+        currency=payload.currency,
+        extra_metadata=payload.extra_metadata,
+    )
 
 
 def update_payment_status(db: Session, payment_id: int, payload: PaymentUpdate):
@@ -57,8 +65,11 @@ def get_user_payments(
         offset=offset,
     )
 
+
+# Stripe-specific controller functions stay as-is
 def create_stripe_payment(db: Session, payload: StripePaymentCreate) -> StripePaymentResponse:
-    return stripe_service.create_payment(
+    provider_service = payment_provider_registry.get_provider("stripe")
+    return provider_service.create_payment(
         db,
         user_id=payload.user_id,
         client_id=payload.client_id,
@@ -69,8 +80,10 @@ def create_stripe_payment(db: Session, payload: StripePaymentCreate) -> StripePa
 
 
 def confirm_stripe_payment(db: Session, reference_id: str) -> PaymentOut | None:
-    return stripe_service.confirm_payment(db, reference_id)
+    provider_service = payment_provider_registry.get_provider("stripe")
+    return provider_service.confirm_payment(db, reference_id)
 
 
 def refund_stripe_payment(db: Session, reference_id: str, amount: float = None) -> PaymentOut | None:
-    return stripe_service.refund_payment(db, reference_id, amount)
+    provider_service = payment_provider_registry.get_provider("stripe")
+    return provider_service.refund_payment(db, reference_id, amount)
