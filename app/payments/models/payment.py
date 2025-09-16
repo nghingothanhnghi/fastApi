@@ -24,7 +24,8 @@ class PaymentTransaction(Base):
     currency = Column(String, default="USD")
     status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING)
     reference_id = Column(String, unique=True, index=True)  # external payment id
-    metadata = Column(JSON, nullable=True)
+    # ✅ Rename attribute but keep database column name
+    extra_metadata = Column("extra_metadata", JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -1,10 +1,12 @@
-from typing import Optional, List
+# app/payments/services/payment_service.py
+# PaymentService handles generic DB operations (CRUD), StripeService handles Stripe logic.
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from app.payments.models.payment import PaymentTransaction
+from app.payments.models.payment import PaymentTransaction, PaymentStatus
 from app.payments.schemas.payment import PaymentCreate, PaymentUpdate
-
+from app.payments.utils.payment_query_utils import apply_payment_filters
 
 class PaymentService:
 
@@ -28,22 +30,14 @@ class PaymentService:
         db: Session,
         user_id: int,
         status: Optional[str] = None,
+        provider: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> List[PaymentTransaction]:
         query = db.query(PaymentTransaction).filter(PaymentTransaction.user_id == user_id)
-        if status:
-            query = query.filter(PaymentTransaction.status == status)
-        if start_date:
-            query = query.filter(PaymentTransaction.created_at >= start_date)
-        if end_date:
-            query = query.filter(PaymentTransaction.created_at <= end_date)
-        if offset:
-            query = query.offset(offset)
-        if limit:
-            query = query.limit(limit)
+        query = apply_payment_filters(query, status, provider, start_date, end_date, limit, offset)
         return query.all()
 
     def get_payments_by_client_id(
@@ -51,22 +45,14 @@ class PaymentService:
         db: Session,
         client_id: str,
         status: Optional[str] = None,
+        provider: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> List[PaymentTransaction]:
         query = db.query(PaymentTransaction).filter(PaymentTransaction.client_id == client_id)
-        if status:
-            query = query.filter(PaymentTransaction.status == status)
-        if start_date:
-            query = query.filter(PaymentTransaction.created_at >= start_date)
-        if end_date:
-            query = query.filter(PaymentTransaction.created_at <= end_date)
-        if offset:
-            query = query.offset(offset)
-        if limit:
-            query = query.limit(limit)
+        query = apply_payment_filters(query, status, provider, start_date, end_date, limit, offset)
         return query.all()
 
     def get_payment_by_reference(self, db: Session, reference_id: str) -> Optional[PaymentTransaction]:
@@ -99,7 +85,6 @@ class PaymentService:
         except SQLAlchemyError as e:
             db.rollback()
             raise e
-
 
 # ✅ Export singleton instance
 payment_service = PaymentService()

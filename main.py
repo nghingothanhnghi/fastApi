@@ -14,6 +14,8 @@ from app.camera_object_detection.routes import ( object_detection_router, hardwa
 
 from app.hydro_system.routes import ( system_router, sensor_router, actuator_router)
 
+from app.payments.routes import payment_router
+
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
@@ -69,6 +71,9 @@ app.include_router(ws_router.router)
 app.include_router(system_router.router)  # Handles /hydro/ endpoints
 app.include_router(sensor_router.router)   # Handles /sensor/ endpoints
 app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
+
+
+app.include_router(payment_router.router)  # Handles /payments/ endpoints
 
 
 app.include_router(ingest_api.router)
