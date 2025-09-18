@@ -18,7 +18,7 @@ class StripeService:
         amount: float,
         currency: str = "usd",
         extra_metadata: Optional[Dict[str, Any]] = None,
-    ) -> StripePaymentResponse:
+    ) -> Dict[str, Any]:
         """Creates a Stripe PaymentIntent and logs it to DB."""
         intent = stripe_provider.create_payment_intent(amount, currency, extra_metadata)
 
@@ -37,10 +37,11 @@ class StripeService:
         db.commit()
         db.refresh(payment)
 
-        return StripePaymentResponse(
-            payment=PaymentOut.model_validate(payment),
-            stripe=intent,
-        )
+        # 2. Return dict matching StripePaymentResponse schema
+        return {
+            "payment": PaymentOut.model_validate(payment),
+            "stripe": intent,
+        }
 
     def confirm_payment(self, db: Session, reference_id: str) -> Optional[PaymentTransaction]:
         """Retrieves Stripe PaymentIntent and updates status in DB."""

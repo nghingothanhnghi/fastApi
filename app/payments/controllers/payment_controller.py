@@ -17,7 +17,6 @@ def create_payment(db: Session, payload: PaymentCreate):
         extra_metadata=payload.extra_metadata,
     )
 
-
 def update_payment_status(db: Session, payment_id: int, payload: PaymentUpdate):
     return payment_service.update_payment_status(db, payment_id, payload)
 
@@ -65,7 +64,17 @@ def get_user_payments(
         offset=offset,
     )
 
-
+def get_all_payments(db, status=None, provider=None, start_date=None, end_date=None, limit=None, offset=None):
+    payments, total = payment_service.get_all_payments(
+        db=db,
+        status=status,
+        provider=provider,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
+    )
+    return {"results": payments, "total": total}
 # Stripe-specific controller functions stay as-is
 def create_stripe_payment(db: Session, payload: StripePaymentCreate) -> StripePaymentResponse:
     provider_service = payment_provider_registry.get_provider("stripe")
@@ -77,7 +86,6 @@ def create_stripe_payment(db: Session, payload: StripePaymentCreate) -> StripePa
         currency=payload.currency,
         extra_metadata=payload.extra_metadata,
     )
-
 
 def confirm_stripe_payment(db: Session, reference_id: str) -> PaymentOut | None:
     provider_service = payment_provider_registry.get_provider("stripe")

@@ -13,6 +13,7 @@ from .camera_object_detection.models.hardware_detection import HardwareDetection
 from .migration.models.base_data import RawData
 from .transform_data.models.template import Template
 from .payments.models.payment import PaymentTransaction
+from .jackpot.models.draw import Draw, Ticket, PrizeResult
 def init_db():
 # ✅ This registers all imported models and creates the tables
     Base.metadata.create_all(bind=engine)

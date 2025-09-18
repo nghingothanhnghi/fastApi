@@ -31,18 +31,3 @@ class SensorDataCreateSchema(BaseModel):
     client_id: Optional[str] = None
     data: SensorPayloadSchema
     
-    # temperature: Optional[float] = Field(
-    #     None, description="Temperature in Celsius", ge=-50, le=100
-    # )
-    # humidity: Optional[float] = Field(
-    #     None, description="Humidity percentage (0-100%)", ge=0, le=100
-    # )
-    # light: Optional[float] = Field(
-    #     None, description="Light intensity in lux", ge=0
-    # )
-    # moisture: Optional[float] = Field(
-    #     None, description="Soil moisture percentage (0-100%)", ge=0, le=100
-    # )
-    # water_level: Optional[float] = Field(
-    #     None, description="Water level percentage (0-100%)", ge=0, le=100
-    # )

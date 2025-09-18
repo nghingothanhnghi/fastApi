@@ -1,6 +1,7 @@
 # app/payments/services/payment_service.py
 # PaymentService handles generic DB operations (CRUD), StripeService handles Stripe logic.
-from typing import Optional, List, Dict, Any
+from uuid import uuid4
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,7 +13,17 @@ class PaymentService:
 
     def create_payment(self, db: Session, payment_in: PaymentCreate) -> PaymentTransaction:
         try:
-            payment = PaymentTransaction(**payment_in.dict())
+            data = payment_in.dict()
+
+            # ✅ Auto-generate reference_id if missing
+            if not data.get("reference_id"):
+                data["reference_id"] = str(uuid4())
+
+            # ✅ Optional: set default client_id if missing/empty
+            if not data.get("client_id"):
+                data["client_id"] = "default-client"
+
+            payment = PaymentTransaction(**data)
             db.add(payment)
             db.commit()
             db.refresh(payment)
@@ -23,7 +34,6 @@ class PaymentService:
 
     def get_payment(self, db: Session, payment_id: int) -> Optional[PaymentTransaction]:
         return db.query(PaymentTransaction).filter(PaymentTransaction.id == payment_id).first()
-
 
     def get_payments_by_user(
         self,
@@ -55,6 +65,32 @@ class PaymentService:
         query = apply_payment_filters(query, status, provider, start_date, end_date, limit, offset)
         return query.all()
 
+    def get_all_payments(
+        self,
+        db: Session,
+        status: Optional[str] = None,
+        provider: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Tuple[List[PaymentTransaction], int]:
+        """
+        ✅ Fetch all payments (admin-level). Returns (results, total_count) for pagination.
+        """
+        query = db.query(PaymentTransaction)
+        query = apply_payment_filters(query, status, provider, start_date, end_date, limit, offset)
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination if needed
+        if offset:
+            query = query.offset(offset)
+        if limit:
+            query = query.limit(limit)
+
+        return query.all(), total
     def get_payment_by_reference(self, db: Session, reference_id: str) -> Optional[PaymentTransaction]:
         return db.query(PaymentTransaction).filter(PaymentTransaction.reference_id == reference_id).first()
 

@@ -1,5 +1,7 @@
+# app/payments/services/provider_registry.py
+# Registry for payment provider services.
+from app.payments.services.manual_service import manual_payment_service
 from app.payments.services.stripe_service import stripe_service
-
 
 class PaymentProviderRegistry:
     """Registry for available payment provider services."""
@@ -7,6 +9,7 @@ class PaymentProviderRegistry:
     def __init__(self):
         # Register available providers here
         self.providers = {
+            "manual": manual_payment_service,
             "stripe": stripe_service,
             # "paypal": paypal_service (future)
         }

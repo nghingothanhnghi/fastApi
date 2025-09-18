@@ -1,6 +1,6 @@
 # app/payments/schemas/payment.py
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum
 
@@ -14,11 +14,11 @@ class PaymentStatus(str, Enum):
 
 class PaymentCreate(BaseModel):
     user_id: int
-    client_id: str
+    client_id: Optional[str] = None
     provider: str
     amount: float
     currency: str = "VND"
-    reference_id: str
+    reference_id: Optional[str] = None 
     extra_metadata: Optional[Dict] = None
 
 
@@ -44,7 +44,9 @@ class PaymentOut(BaseModel):
         "from_attributes": True
     }
 
-
+class PaginatedPayments(BaseModel):
+    results: List[PaymentOut]
+    total: int
 
 # ─────────────────────────────
 # 🟦 Stripe-Specific Schemas
