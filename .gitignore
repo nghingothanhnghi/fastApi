@@ -34,3 +34,6 @@ data/
 tests/
 frontend/
 farmApp/
+
+# Ignore scripts
+scripts/
