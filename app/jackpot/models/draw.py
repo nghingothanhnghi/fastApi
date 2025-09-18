@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, Enum, Numeric, ARRAY, String
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, Enum, Numeric, ARRAY, String, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
@@ -15,7 +15,7 @@ class Draw(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     draw_date = Column(DateTime)
-    numbers = Column(ARRAY(Integer))
+    numbers = Column(JSON, nullable=False)
     bonus_number = Column(Integer)
 
     tickets = relationship("Ticket", back_populates="draw")
@@ -25,7 +25,7 @@ class Ticket(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    numbers = Column(ARRAY(Integer))
+    numbers = Column(JSON, nullable=False)
     play_type = Column(Enum(PlayType))
     draw_id = Column(Integer, ForeignKey("jackpot_draws.id"))
 
