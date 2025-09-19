@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.jackpot.controllers import jackpot_controller
+from app.jackpot.controllers.jackpot_controller import jackpot_controller
 from app.jackpot.schemas.draw import DrawSchema
 from app.jackpot.schemas.ticket import TicketCreateSchema, TicketSchema
-from app.jackpot.schemas.prize import PrizeResultSchema
+from app.jackpot.schemas.prize import PrizeResultSchema, PrizeHistorySummarySchema
+from app.jackpot.schemas.rules import JackpotRuleSchema
 
 router = APIRouter(prefix="/jackpot", tags=["Jackpot 6/55"])
 
@@ -34,3 +35,14 @@ def get_latest_draw(db: Session = Depends(get_db)):
     if not draw:
         raise HTTPException(status_code=404, detail="No draws found")
     return draw
+
+@router.get("/rules", response_model=JackpotRuleSchema)
+def get_rules():
+    return jackpot_controller.get_rules()
+
+@router.get("/prizes/history", response_model=PrizeHistorySummarySchema)
+def get_prize_history(
+    range: str = Query("month", enum=["month", "quarter", "year"]),
+    db: Session = Depends(get_db)
+):
+    return jackpot_controller.get_prize_history(db, range)

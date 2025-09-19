@@ -1,3 +1,4 @@
+# app/jackpot/services/ticket_service.py
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError

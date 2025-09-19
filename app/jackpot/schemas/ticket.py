@@ -1,3 +1,4 @@
+# app/jackpot/schemas/ticket.py
 from pydantic import BaseModel
 from typing import List
 from enum import Enum

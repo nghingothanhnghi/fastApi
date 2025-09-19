@@ -1,3 +1,4 @@
+# app/jackpot/models/draw.py
 from sqlalchemy import Column, Integer, DateTime, ForeignKey, Enum, Numeric, ARRAY, String, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
