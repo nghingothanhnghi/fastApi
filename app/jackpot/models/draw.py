@@ -4,6 +4,16 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
 
+class DrawType(str, enum.Enum):
+    automatic = "automatic"
+    smart_auto = "smart_auto"
+    manual = "manual"
+
+class DrawStatus(str, enum.Enum):
+    scheduled = "scheduled"
+    completed = "completed"
+    cancelled = "cancelled"
+
 class PlayType(str, enum.Enum):
     basic = "basic"
     bao5 = "bao5"
@@ -18,6 +28,9 @@ class Draw(Base):
     draw_date = Column(DateTime)
     numbers = Column(JSON, nullable=False)
     bonus_number = Column(Integer)
+
+    draw_type = Column(Enum(DrawType), default=DrawType.automatic)
+    status = Column(Enum(DrawStatus), default=DrawStatus.scheduled)
 
     tickets = relationship("Ticket", back_populates="draw")
 

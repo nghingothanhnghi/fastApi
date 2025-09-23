@@ -6,11 +6,23 @@ from app.jackpot.services.rule_service import rule_service
 
 from app.jackpot.schemas.prize import PrizeHistorySummarySchema
 from app.jackpot.schemas.ticket import TicketWithPrizeSchema
-
+from app.jackpot.models.draw import DrawType
+from typing import Optional, List
 class JackpotController:
 
-    def create_draw(self, db: Session):
-        return draw_service.create_draw(db)
+    def create_draw(
+        self,
+        db: Session,
+        draw_type: DrawType = DrawType.automatic,
+        numbers: Optional[List[int]] = None,
+        bonus_number: Optional[int] = None
+    ):
+        return draw_service.create_draw(
+            db,
+            draw_type=draw_type,
+            numbers=numbers,
+            bonus_number=bonus_number
+        )
     
     def get_latest_draw(self, db: Session):
         return draw_service.get_latest_draw(db)

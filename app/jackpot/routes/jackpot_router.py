@@ -2,16 +2,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.jackpot.controllers.jackpot_controller import jackpot_controller
-from app.jackpot.schemas.draw import DrawSchema
+from app.jackpot.schemas.draw import DrawSchema, DrawCreateSchema
 from app.jackpot.schemas.ticket import TicketCreateSchema, TicketSchema, TicketWithPrizeSchema
 from app.jackpot.schemas.prize import PrizeResultSchema, PrizeHistorySummarySchema
 from app.jackpot.schemas.rules import JackpotRuleSchema
 
 router = APIRouter(prefix="/jackpot", tags=["Jackpot 6/55"])
 
+# @router.post("/draw", response_model=DrawSchema)
+# def create_draw(db: Session = Depends(get_db)):
+#     return jackpot_controller.create_draw(db)
+
 @router.post("/draw", response_model=DrawSchema)
-def create_draw(db: Session = Depends(get_db)):
-    return jackpot_controller.create_draw(db)
+def create_draw(draw_in: DrawCreateSchema, db: Session = Depends(get_db)):
+    try:
+        return jackpot_controller.create_draw(
+            db,
+            draw_type=draw_in.draw_type,
+            numbers=draw_in.numbers,
+            bonus_number=draw_in.bonus_number
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/ticket", response_model=TicketSchema)
 def buy_ticket(ticket_in: TicketCreateSchema, db: Session = Depends(get_db)):
