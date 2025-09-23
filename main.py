@@ -25,8 +25,9 @@ from app.init_db import init_db
 from app.migration.controllers import ingest_api
 from app.transform_data.controllers import transform_api, template_api
 
-from app.utils.scheduler import start_scheduler, add_job
+from app.utils.scheduler import start_scheduler, add_job, add_cron_job
 from app.transform_data.jobs.transform_job import transform_unprocessed_data
+from app.jackpot.jobs.draw_job import draw_job
 from app.hydro_system.scheduler import start_sensor_job
 from app.utils.background_tasks import start_hardware_detection_background_tasks
 from app.core import config
@@ -104,7 +105,8 @@ try:
     start_scheduler()  # Start global scheduler
     start_sensor_job() # Register hydro system sensor job
     add_job(transform_unprocessed_data, seconds=10, job_id="transform_job") # Register data transformation job
-    
+    # Tue/Thu/Sat at 18:00 local time
+    add_cron_job(draw_job, job_id="jackpot_draw_job", day_of_week="tue,thu,sat", hour=18, minute=0, job_name="Jackpot Draw Job")
     # Start hardware detection WebSocket background tasks
     import asyncio
     asyncio.create_task(start_hardware_detection_background_tasks())

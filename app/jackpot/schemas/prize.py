@@ -8,6 +8,7 @@ class PrizeProbabilities(BaseModel):
     three_numbers: float
 
 class PrizeResultSchema(BaseModel):
+    id: int
     ticket_id: int
     category: str
     prize_value: float

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.jackpot.controllers.jackpot_controller import jackpot_controller
 from app.jackpot.schemas.draw import DrawSchema
-from app.jackpot.schemas.ticket import TicketCreateSchema, TicketSchema
+from app.jackpot.schemas.ticket import TicketCreateSchema, TicketSchema, TicketWithPrizeSchema
 from app.jackpot.schemas.prize import PrizeResultSchema, PrizeHistorySummarySchema
 from app.jackpot.schemas.rules import JackpotRuleSchema
 
@@ -46,3 +46,7 @@ def get_prize_history(
     db: Session = Depends(get_db)
 ):
     return jackpot_controller.get_prize_history(db, range)
+
+@router.get("/tickets/user/{user_id}", response_model=list[TicketWithPrizeSchema])
+def get_user_tickets(user_id: int, db: Session = Depends(get_db)):
+    return jackpot_controller.get_user_tickets(db, user_id)

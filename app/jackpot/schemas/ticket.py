@@ -1,7 +1,9 @@
 # app/jackpot/schemas/ticket.py
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from enum import Enum
+
+from app.jackpot.schemas.prize import PrizeResultSchema
 
 class PlayType(str, Enum):
     basic = "basic"
@@ -25,3 +27,11 @@ class TicketSchema(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+class TicketWithPrizeSchema(BaseModel):
+    ticket: TicketSchema
+    prize: Optional[PrizeResultSchema]
+
+    model_config = {
+        "from_attributes": True
+    }    

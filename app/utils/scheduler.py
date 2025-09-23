@@ -1,12 +1,14 @@
 # app/utils/scheduler.py
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
+from tzlocal import get_localzone
 import threading
 import logging
 
 logger = logging.getLogger(__name__)
 
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone=get_localzone())
 scheduler_lock = threading.Lock()
 
 KNOWN_JOBS = [
@@ -73,3 +75,22 @@ def remove_job(job_id: str):
         if job:
             scheduler.remove_job(job_id)
             logger.info(f"Removed job '{job_id}'")          
+
+
+def add_cron_job(func, job_id: str, day_of_week: str, hour: int, minute: int = 0, job_name: str = None):
+    """
+    Register a job using a cron schedule. Example day_of_week: "tue,thu,sat".
+    """
+    with scheduler_lock:
+        existing = scheduler.get_job(job_id)
+        if existing:
+            logger.info(f"[Scheduler] Job '{job_id}' already exists.")
+            return
+
+        trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute)
+        scheduler.add_job(func, trigger, id=job_id, replace_existing=True)
+        JOB_REGISTRY[job_id] = {
+            "id": job_id,
+            "name": job_name or job_id
+        }
+        logger.info(f"[Scheduler] Job '{job_id}' added (cron {day_of_week} {hour:02d}:{minute:02d})")

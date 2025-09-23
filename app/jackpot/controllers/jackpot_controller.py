@@ -5,6 +5,7 @@ from app.jackpot.services.prize_service import prize_service
 from app.jackpot.services.rule_service import rule_service
 
 from app.jackpot.schemas.prize import PrizeHistorySummarySchema
+from app.jackpot.schemas.ticket import TicketWithPrizeSchema
 
 class JackpotController:
 
@@ -34,7 +35,14 @@ class JackpotController:
         Return aggregated prize history summary for the given range (month/quarter/year).
         """
         summary = prize_service.get_prizes_in_range(db, range)
-        return PrizeHistorySummarySchema(**summary)   
+        return PrizeHistorySummarySchema(**summary)
+    
+    def get_user_tickets(self, db: Session, user_id: int) -> list[TicketWithPrizeSchema]:
+        tickets = ticket_service.get_tickets_by_user(db, user_id)
+        results = []
+        for t in tickets:
+            results.append(TicketWithPrizeSchema(ticket=t, prize=t.result))
+        return results    
 
 # Export singleton
 jackpot_controller = JackpotController()
