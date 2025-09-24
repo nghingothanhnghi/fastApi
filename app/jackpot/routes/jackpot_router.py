@@ -9,10 +9,6 @@ from app.jackpot.schemas.rules import JackpotRuleSchema
 
 router = APIRouter(prefix="/jackpot", tags=["Jackpot 6/55"])
 
-# @router.post("/draw", response_model=DrawSchema)
-# def create_draw(db: Session = Depends(get_db)):
-#     return jackpot_controller.create_draw(db)
-
 @router.post("/draw", response_model=DrawSchema)
 def create_draw(draw_in: DrawCreateSchema, db: Session = Depends(get_db)):
     try:
