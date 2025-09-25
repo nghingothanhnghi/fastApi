@@ -2,7 +2,8 @@
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from app.jackpot.models.draw import Ticket, PlayType
+from app.jackpot.models.draw import Ticket, PlayType, Draw
+from datetime import datetime
 from app.jackpot.services.draw_service import draw_service
 class TicketService:
 
@@ -27,23 +28,62 @@ class TicketService:
         play_type: PlayType, 
         draw_id: Optional[int] = None
     ) -> Ticket:
-        """
-        Create a ticket for the user.
-        If draw_id is not given, attach to the current or next active draw.
-        """
+        # """
+        # Create a ticket for the user.
+        # If draw_id is not given, attach to the current or next active draw.
+        # """
+        # if play_type != PlayType.basic and len(numbers) < int(play_type[-1]):
+        #     raise ValueError("Not enough numbers for selected Bao play type.")
+
+        # try:
+        #     # pick or create current draw if not explicitly given
+        #     if draw_id is None:
+        #         draw = draw_service.get_or_create_current_draw(db)
+        #         draw_id = draw.id
+
+        #     ticket = Ticket(
+        #         user_id=user_id, 
+        #         numbers=numbers, 
+        #         play_type=play_type, 
+        #         draw_id=draw_id
+        #     )
+        #     db.add(ticket)
+        #     db.commit()
+        #     db.refresh(ticket)
+        #     return ticket
+        # except SQLAlchemyError as e:
+        #     db.rollback()
+        #     raise e
+        # ✅ 1. Resolve which draw this ticket should belong to
+        if draw_id is None:
+            # Find the next available draw (future draw_date)
+            next_draw = (
+                db.query(Draw)
+                .filter(Draw.draw_date >= datetime.utcnow())
+                .order_by(Draw.draw_date.asc())
+                .first()
+            )
+            if not next_draw:
+                raise ValueError("No upcoming draw available.")
+            draw_id = next_draw.id
+        else:
+            # Validate provided draw_id is still valid (future draw)
+            selected_draw = db.query(Draw).filter(Draw.id == draw_id).first()
+            if not selected_draw:
+                raise ValueError(f"Draw {draw_id} not found.")
+            if selected_draw.draw_date < datetime.utcnow():
+                raise ValueError(f"Draw {draw_id} is already closed.")
+
+        # ✅ 2. Validate Bao play type requires enough numbers
         if play_type != PlayType.basic and len(numbers) < int(play_type[-1]):
             raise ValueError("Not enough numbers for selected Bao play type.")
 
+        # ✅ 3. Create ticket safely
         try:
-            # pick or create current draw if not explicitly given
-            if draw_id is None:
-                draw = draw_service.get_or_create_current_draw(db)
-                draw_id = draw.id
-
             ticket = Ticket(
-                user_id=user_id, 
-                numbers=numbers, 
-                play_type=play_type, 
+                user_id=user_id,
+                numbers=numbers,
+                play_type=play_type,
                 draw_id=draw_id
             )
             db.add(ticket)
@@ -52,7 +92,7 @@ class TicketService:
             return ticket
         except SQLAlchemyError as e:
             db.rollback()
-            raise e
+            raise e        
 
     def get_ticket(self, db: Session, ticket_id: int) -> Optional[Ticket]:
         return db.query(Ticket).filter(Ticket.id == ticket_id).first()

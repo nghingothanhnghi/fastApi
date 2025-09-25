@@ -84,7 +84,11 @@ class DrawService:
         return db.query(Draw).filter(Draw.id == draw_id).first()
 
     def get_latest_draw(self, db: Session) -> Optional[Draw]:
-        return db.query(Draw).order_by(Draw.draw_date.desc()).first()
+        return (
+            db.query(Draw)
+            .filter(Draw.status == DrawStatus.completed)
+            .order_by(Draw.draw_date.desc())
+            .first())
 
     def get_all_draws(self, db: Session) -> List[Draw]:
         return db.query(Draw).order_by(Draw.draw_date.desc()).all()
@@ -107,7 +111,7 @@ class DrawService:
                 numbers=[],
                 bonus_number=None,
                 draw_type=DrawType.automatic,
-                status=DrawStatus.pending
+                status=DrawStatus.scheduled
             )
             db.add(draw)
             db.commit()
