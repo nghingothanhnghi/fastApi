@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 from app.jackpot.models.draw import Draw, DrawType, DrawStatus, Ticket
-from app.jackpot.utils.helpers import generate_draw_numbers
+from app.jackpot.utils.helpers import generate_draw_numbers, get_next_draw_date
+from app.jackpot.services.rule_service import rule_service
 import random
 
 class DrawService:
@@ -87,6 +88,33 @@ class DrawService:
 
     def get_all_draws(self, db: Session) -> List[Draw]:
         return db.query(Draw).order_by(Draw.draw_date.desc()).all()
+    
+
+    def get_or_create_current_draw(self, db: Session) -> Draw:
+        """
+        Return the current active (upcoming) draw. 
+        If latest is in the past, create a new one.
+        """
+        latest = db.query(Draw).order_by(Draw.draw_date.desc()).first()
+        rules = rule_service.get_rules()
+        now = datetime.utcnow()
+
+        if not latest or latest.draw_date <= now:
+            # Calculate next valid draw datetime
+            next_date = get_next_draw_date(now, rules["draw_days"], rules["draw_time"])
+            draw = Draw(
+                draw_date=next_date,
+                numbers=[],
+                bonus_number=None,
+                draw_type=DrawType.automatic,
+                status=DrawStatus.pending
+            )
+            db.add(draw)
+            db.commit()
+            db.refresh(draw)
+            return draw
+
+        return latest    
 
 # Export singleton
 draw_service = DrawService()

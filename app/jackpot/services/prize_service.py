@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timedelta
 from typing import List
 from sqlalchemy import func
-from app.jackpot.models.draw import PrizeResult, Ticket, Draw
+from app.jackpot.models.draw import PrizeResult, Ticket, Draw, DrawStatus
 from app.jackpot.utils.helpers import count_matches, calculate_jackpot_probabilities
 
 PRIZE_TABLE_BASIC = {
@@ -26,6 +26,15 @@ class PrizeService:
         jackpot1_value: float = 30_000_000_000,
         jackpot2_value: float = 3_000_000_000
     ) -> Optional[PrizeResult]:
+        
+        """
+        Check a ticket against a completed draw.
+        Returns a PrizeResult if ticket wins, otherwise None.
+        """
+        if draw.status != DrawStatus.completed:
+            # 🚫 Skip tickets for draws that are not finished yet
+            return None
+
         matched = count_matches(ticket.numbers, draw.numbers)
         has_bonus = draw.bonus_number in ticket.numbers
         prize_info = PRIZE_TABLE_BASIC.get((matched, has_bonus))
@@ -68,6 +77,7 @@ class PrizeService:
             .join(Ticket)
             .join(Draw)
             .filter(Draw.draw_date >= start_date)
+            .filter(Draw.status == DrawStatus.completed)  # ✅ only completed
             .group_by(PrizeResult.category)
             .all()
         )

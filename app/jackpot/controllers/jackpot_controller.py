@@ -3,6 +3,7 @@ from app.jackpot.services.draw_service import draw_service
 from app.jackpot.services.ticket_service import ticket_service
 from app.jackpot.services.prize_service import prize_service
 from app.jackpot.services.rule_service import rule_service
+from app.jackpot.services.analytics_service import jackpot_analytics_service
 
 from app.jackpot.schemas.prize import PrizeHistorySummarySchema
 from app.jackpot.schemas.ticket import TicketWithPrizeSchema
@@ -54,7 +55,18 @@ class JackpotController:
         results = []
         for t in tickets:
             results.append(TicketWithPrizeSchema(ticket=t, prize=t.result))
-        return results    
+        return results
+    def get_ticket_count_by_draw(self, db: Session):
+        return jackpot_analytics_service.ticket_count_by_draw(db)
+
+    def get_number_frequency(self, db: Session, limit: int = 10):
+        return jackpot_analytics_service.number_frequency(db, limit)
+
+    def get_sales_summary(self, db: Session):
+        return jackpot_analytics_service.sales_summary(db)
+
+    def suggest_next_numbers(self, db: Session, top_k: int = 20):
+        return jackpot_analytics_service.suggest_next_numbers(db, top_k)
 
 # Export singleton
 jackpot_controller = JackpotController()
