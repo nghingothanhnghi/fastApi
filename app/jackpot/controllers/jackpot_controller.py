@@ -27,9 +27,13 @@ class JackpotController:
     
     def get_latest_draw(self, db: Session):
         return draw_service.get_latest_draw(db)
+    
+    def get_current_draw(self, db: Session):
+        """Return or create the active scheduled draw (for ticket purchase)."""
+        return draw_service.get_or_create_current_draw(db)    
 
     def buy_ticket(self, db: Session, user_id: int, numbers: list[int], play_type):
-        draw = draw_service.get_latest_draw(db)
+        draw = draw_service.get_or_create_current_draw(db)  # 🔑 scheduled or create one
         if not draw:
             raise ValueError("No active draw available.")
         return ticket_service.create_ticket(db, user_id, numbers, play_type, draw.id)

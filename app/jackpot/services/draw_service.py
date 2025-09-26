@@ -10,24 +10,14 @@ import random
 
 class DrawService:
 
-    def create_draw(self, db: Session) -> Draw:
-        try:
-            numbers, bonus_number = generate_draw_numbers()
-            draw = Draw(draw_date=datetime.utcnow(), numbers=numbers, bonus_number=bonus_number)
-            db.add(draw)
-            db.commit()
-            db.refresh(draw)
-            return draw
-        except SQLAlchemyError as e:
-            db.rollback()
-            raise e
-        
     def create_draw(
         self,
         db: Session,
         draw_type: DrawType = DrawType.automatic,
         numbers: Optional[List[int]] = None,
-        bonus_number: Optional[int] = None
+        bonus_number: Optional[int] = None,
+        status: DrawStatus = DrawStatus.completed,
+        draw_date: Optional[datetime] = None,
     ) -> Draw:
         """
         Creates a draw. If numbers are not provided, will auto-generate based on draw_type.
@@ -40,15 +30,20 @@ class DrawService:
                     raise ValueError("Manual draw must include bonus number")
             elif draw_type == DrawType.smart_auto:
                 numbers, bonus_number = self.generate_smart_numbers(db)
-            else:
+            elif not numbers or bonus_number is None:
                 numbers, bonus_number = generate_draw_numbers()
 
+            # Always compute scheduled draw_date if not provided
+            if not draw_date:
+                rules = rule_service.get_rules()
+                draw_date = get_next_draw_date(datetime.utcnow(), rules["draw_days"], rules["draw_time"])
+
             draw = Draw(
-                draw_date=datetime.utcnow(),
-                numbers=numbers,
+                draw_date=draw_date or datetime.utcnow(),
+                numbers=numbers or [],
                 bonus_number=bonus_number,
                 draw_type=draw_type,
-                status=DrawStatus.completed
+                status=status,
             )
             db.add(draw)
             db.commit()
@@ -96,29 +91,32 @@ class DrawService:
 
     def get_or_create_current_draw(self, db: Session) -> Draw:
         """
-        Return the current active (upcoming) draw. 
-        If latest is in the past, create a new one.
+        Ensure there is always a scheduled draw.
+        - If DB is empty → create first scheduled draw.
+        - If latest is completed or past its draw_date → schedule a new one.
         """
         latest = db.query(Draw).order_by(Draw.draw_date.desc()).first()
         rules = rule_service.get_rules()
         now = datetime.utcnow()
 
-        if not latest or latest.draw_date <= now:
-            # Calculate next valid draw datetime
+        # No draws yet OR last draw is completed/expired
+        if (
+            not latest
+            or latest.status == DrawStatus.completed
+            or latest.status == DrawStatus.cancelled
+            or latest.draw_date <= now
+        ):
             next_date = get_next_draw_date(now, rules["draw_days"], rules["draw_time"])
-            draw = Draw(
-                draw_date=next_date,
+            return self.create_draw(
+                db,
+                draw_type=DrawType.automatic,
                 numbers=[],
                 bonus_number=None,
-                draw_type=DrawType.automatic,
-                status=DrawStatus.scheduled
+                status=DrawStatus.scheduled,
+                draw_date=next_date,
             )
-            db.add(draw)
-            db.commit()
-            db.refresh(draw)
-            return draw
 
-        return latest    
+        return latest
 
 # Export singleton
 draw_service = DrawService()

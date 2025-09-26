@@ -33,11 +33,20 @@ def get_latest_draw(db: Session = Depends(get_db)):
     draw = jackpot_controller.get_latest_draw(db)
     if not draw:
         raise HTTPException(status_code=404, detail="No draws found")
-    return draw    
+    return draw
+
+@router.get("/draw/current", response_model=DrawSchema)
+def get_current_draw(db: Session = Depends(get_db)):
+    """
+    Returns the active scheduled draw (creates one if none exists).
+    Use this for buying tickets.
+    """
+    return jackpot_controller.get_current_draw(db)
 
 # -------------------- TICKET --------------------
 @router.post("/ticket", response_model=TicketSchema)
 def buy_ticket(ticket_in: TicketCreateSchema, db: Session = Depends(get_db)):
+
     try:
         return jackpot_controller.buy_ticket(
             db, ticket_in.user_id, ticket_in.numbers, ticket_in.play_type
