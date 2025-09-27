@@ -13,6 +13,14 @@ class PrizeResultSchema(BaseModel):
     category: str
     prize_value: float
 
+class PrizeCategorySchema(BaseModel):
+    count: int
+    value: float
+
+
+class TotalsSchema(BaseModel):
+    winners: int
+    value: float
 
 class PrizeHistorySummarySchema(BaseModel):
     totalJackpot1: int
@@ -21,4 +29,14 @@ class PrizeHistorySummarySchema(BaseModel):
     totalSecond: int
     totalThird: int
     totalPrizeValue: float
+
+    # --nested category structure ---
+    Jackpot1: PrizeCategorySchema
+    Jackpot2: PrizeCategorySchema
+    First: PrizeCategorySchema
+    Second: PrizeCategorySchema
+    Third: PrizeCategorySchema
+
+    totals: TotalsSchema
+
     probabilities: PrizeProbabilities

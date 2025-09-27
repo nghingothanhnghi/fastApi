@@ -7,46 +7,72 @@ from typing import List
 from sqlalchemy import func
 from app.jackpot.models.draw import PrizeResult, Ticket, Draw, DrawStatus
 from app.jackpot.utils.helpers import count_matches, calculate_jackpot_probabilities
-
-PRIZE_TABLE_BASIC = {
-    (6, False): ("Jackpot1", None),
-    (5, True): ("Jackpot2", None),
-    (5, False): ("First", 40_000_000),
-    (4, False): ("Second", 500_000),
-    (3, False): ("Third", 50_000),
-}
+from app.jackpot.services.rule_service import rule_service  # ✅ import rules
 
 class PrizeService:
-
     def check_ticket(
         self,
         db: Session,
         ticket: Ticket,
         draw: Draw,
-        jackpot1_value: float = 30_000_000_000,
-        jackpot2_value: float = 3_000_000_000
     ) -> Optional[PrizeResult]:
-        
         """
         Check a ticket against a completed draw.
         Returns a PrizeResult if ticket wins, otherwise None.
         """
         if draw.status != DrawStatus.completed:
-            # 🚫 Skip tickets for draws that are not finished yet
             return None
 
         matched = count_matches(ticket.numbers, draw.numbers)
         has_bonus = draw.bonus_number in ticket.numbers
-        prize_info = PRIZE_TABLE_BASIC.get((matched, has_bonus))
 
-        if not prize_info:
+        # ✅ fetch rules dynamically from RuleService
+        prize_tables = rule_service.get_prize_tables()
+        play_type = ticket.play_type or "basic"
+        table = prize_tables.get(play_type, {})
+
+        prize_rule = table.get((matched, has_bonus))
+        if not prize_rule:
             return None
 
-        category, base_value = prize_info
-        prize_value = base_value or (jackpot1_value if category == "Jackpot1" else jackpot2_value)
+        # ✅ resolve value: int or lambda
+        jackpot1_value = float(draw.current_jackpot1)
+        jackpot2_value = float(draw.current_jackpot2)
+        if callable(prize_rule):
+            try:
+                argcount = prize_rule.__code__.co_argcount
+                if argcount == 1:
+                    # could be jackpot1 OR jackpot2
+                    prize_value = prize_rule(jackpot1_value)
+                elif argcount == 2:
+                    prize_value = prize_rule(jackpot1_value, jackpot2_value)
+                else:
+                    prize_value = prize_rule(jackpot2_value)
+            except Exception:
+                return None
+        else:
+            prize_value = prize_rule
+
+        # ✅ assign category
+        if matched == 6 and not has_bonus:
+            category = "Jackpot1"
+        elif matched == 5 and has_bonus:
+            category = "Jackpot2"
+        elif matched == 5:
+            category = "First"
+        elif matched == 4:
+            category = "Second"
+        elif matched == 3:
+            category = "Third"
+        else:
+            return None  # no prize    
 
         try:
-            result = PrizeResult(ticket_id=ticket.id, category=category, prize_value=prize_value)
+            result = PrizeResult(
+                ticket_id=ticket.id,
+                category=category,
+                prize_value=prize_value,
+            )
             db.add(result)
             db.commit()
             db.refresh(result)
@@ -54,7 +80,7 @@ class PrizeService:
         except SQLAlchemyError as e:
             db.rollback()
             raise e
-        
+
     def get_prizes_in_range(self, db: Session, range: str) -> dict:
         """
         Returns aggregated prize statistics for a given time range.
@@ -71,13 +97,13 @@ class PrizeService:
         rows = (
             db.query(
                 PrizeResult.category,
-                func.count(PrizeResult.id),  # ensure count() never returns None
-                func.sum(PrizeResult.prize_value)
+                func.count(PrizeResult.id),
+                func.sum(PrizeResult.prize_value),
             )
             .join(Ticket)
             .join(Draw)
             .filter(Draw.draw_date >= start_date)
-            .filter(Draw.status == DrawStatus.completed)  # ✅ only completed
+            .filter(Draw.status == DrawStatus.completed)  # ✅ only completed draws
             .group_by(PrizeResult.category)
             .all()
         )
@@ -89,11 +115,33 @@ class PrizeService:
             "totalSecond": 0,
             "totalThird": 0,
             "totalPrizeValue": 0.0,
-            "probabilities": calculate_jackpot_probabilities(n=55, k=6, bonus=True)  # ✅ add theoretical probabilities
+
+            
+            # new nested structure
+            "Jackpot1": {"count": 0, "value": 0.0},
+            "Jackpot2": {"count": 0, "value": 0.0},
+            "First": {"count": 0, "value": 0.0},
+            "Second": {"count": 0, "value": 0.0},
+            "Third": {"count": 0, "value": 0.0},
+
+            # totals
+            "totals": {"winners": 0, "value": 0.0},
+            
+            "probabilities": calculate_jackpot_probabilities(
+                n=55, k=6, bonus=True
+            ),  # ✅ keep theoretical probabilities
         }
 
         for category, count, total_value in rows:
             count = int(count or 0)
+            value = float(total_value or 0.0)
+
+            # ✅ update new nested structure
+            if category in summary:
+                summary[category]["count"] = count
+                summary[category]["value"] = value
+
+            # ✅ update old flat keys for backward compatibility
             if category == "Jackpot1":
                 summary["totalJackpot1"] = count
             elif category == "Jackpot2":
@@ -105,10 +153,13 @@ class PrizeService:
             elif category == "Third":
                 summary["totalThird"] = count
 
-            if total_value:
-                summary["totalPrizeValue"] += float(total_value)
+            # ✅ update overall totals
+            summary["totals"]["winners"] += count
+            summary["totals"]["value"] += value
+            summary["totalPrizeValue"] += value  # keep old format in sync
 
-        return summary  
+        return summary
+
 
 # Export singleton
 prize_service = PrizeService()

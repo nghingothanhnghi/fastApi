@@ -91,7 +91,9 @@ def get_ticket_count_by_draw(db: Session = Depends(get_db)):
 @router.get("/analytics/number-frequency", response_model=NumberFrequencyResponse)
 def get_number_frequency(limit: int = Query(10, ge=1, le=55), db: Session = Depends(get_db)):
     """
-    Returns hot/cold number frequencies from past draws.
+    Returns hot and cold numbers based on the previous spin (latest draw).
+    - Hot: Numbers that appeared in the previous spin.
+    - Cold: Numbers that did not appear in the previous spin, sorted by least frequency.
     """
     return jackpot_controller.get_number_frequency(db, limit)
 

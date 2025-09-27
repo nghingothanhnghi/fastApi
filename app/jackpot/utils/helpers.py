@@ -53,22 +53,21 @@ def calculate_jackpot_probabilities(n: int = 55, k: int = 6, bonus: bool = True)
     return probabilities
 
 # --- NEW CODE for draw scheduling ---
-def get_next_draw_date(now: datetime, draw_days: list[str], draw_time: str) -> datetime:
+def get_next_draw_date(base_time: datetime, draw_days: list[str], draw_time: str) -> datetime:
     """
-    Find the next scheduled draw datetime based on rules.
+    Find the next scheduled draw datetime strictly after base_time.
     draw_days: ["Tuesday", "Thursday", "Saturday"]
     draw_time: "18:00"
     """
     hour, minute = map(int, draw_time.split(":"))
-    # Normalize current datetime
-    now = now.replace(second=0, microsecond=0)
+    base_time = base_time.replace(second=0, microsecond=0)
 
-    for i in range(0, 8):  # look up to 1 week ahead
-        candidate = now + timedelta(days=i)
+    for i in range(1, 8):  # 🔑 start from +1 day to avoid repeating same-day draw
+        candidate = base_time + timedelta(days=i)
         weekday_name = calendar.day_name[candidate.weekday()]
         if weekday_name in draw_days:
             candidate = candidate.replace(hour=hour, minute=minute)
-            if candidate > now:  # must be in the future
+            if candidate > base_time:
                 return candidate
 
     raise RuntimeError("No valid draw day found in rules!")

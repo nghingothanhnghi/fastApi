@@ -3,7 +3,7 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
-from app.jackpot.models.draw import Draw, DrawType, DrawStatus, Ticket
+from app.jackpot.models.draw import Draw, DrawType, DrawStatus, Ticket, PrizeResult
 from app.jackpot.utils.helpers import generate_draw_numbers, get_next_draw_date
 from app.jackpot.services.rule_service import rule_service
 import random
@@ -16,8 +16,10 @@ class DrawService:
         draw_type: DrawType = DrawType.automatic,
         numbers: Optional[List[int]] = None,
         bonus_number: Optional[int] = None,
-        status: DrawStatus = DrawStatus.completed,
+        status: DrawStatus = DrawStatus.scheduled,
         draw_date: Optional[datetime] = None,
+        current_jackpot1: Optional[float] = None,
+        current_jackpot2: Optional[float] = None,
     ) -> Draw:
         """
         Creates a draw. If numbers are not provided, will auto-generate based on draw_type.
@@ -44,6 +46,8 @@ class DrawService:
                 bonus_number=bonus_number,
                 draw_type=draw_type,
                 status=status,
+                current_jackpot1=current_jackpot1,
+                current_jackpot2=current_jackpot2,
             )
             db.add(draw)
             db.commit()
@@ -87,36 +91,80 @@ class DrawService:
 
     def get_all_draws(self, db: Session) -> List[Draw]:
         return db.query(Draw).order_by(Draw.draw_date.desc()).all()
-    
 
     def get_or_create_current_draw(self, db: Session) -> Draw:
         """
         Ensure there is always a scheduled draw.
         - If DB is empty → create first scheduled draw.
-        - If latest is completed or past its draw_date → schedule a new one.
+        - If latest is completed/expired → schedule a new one in the FUTURE.
+        - Always guarantee current draw_date > now.
         """
-        latest = db.query(Draw).order_by(Draw.draw_date.desc()).first()
         rules = rule_service.get_rules()
         now = datetime.utcnow()
 
-        # No draws yet OR last draw is completed/expired
-        if (
-            not latest
-            or latest.status == DrawStatus.completed
-            or latest.status == DrawStatus.cancelled
-            or latest.draw_date <= now
-        ):
-            next_date = get_next_draw_date(now, rules["draw_days"], rules["draw_time"])
-            return self.create_draw(
-                db,
-                draw_type=DrawType.automatic,
-                numbers=[],
-                bonus_number=None,
-                status=DrawStatus.scheduled,
-                draw_date=next_date,
-            )
+        latest_completed = self.get_latest_draw(db)
+        latest_any = db.query(Draw).order_by(Draw.draw_date.desc()).first()
 
-        return latest
+        # ✅ If there’s already a scheduled draw in the future → return it
+        if latest_any and latest_any.status == DrawStatus.scheduled and latest_any.draw_date > now:
+            return latest_any
+
+        # Otherwise compute the next future draw date
+        base_time = latest_completed.draw_date if latest_completed else now
+        next_date = get_next_draw_date(base_time, rules["draw_days"], rules["draw_time"])
+
+        # ✅ Ensure draw_date is strictly in the future
+        while next_date <= now:
+            next_date = get_next_draw_date(next_date, rules["draw_days"], rules["draw_time"])
+
+        # Calculate jackpots
+        base_jackpot1 = rules["jackpot1_min"]
+        base_jackpot2 = rules["jackpot2_min"]
+        if latest_completed and not self._has_jackpot_winner(db, latest_completed):
+            # Rollover jackpots
+            base_jackpot1 += float(latest_completed.current_jackpot1)
+            base_jackpot2 += float(latest_completed.current_jackpot2)
+
+        return self.create_draw(
+            db,
+            draw_type=DrawType.automatic,
+            numbers=[],
+            bonus_number=None,
+            status=DrawStatus.scheduled,
+            draw_date=next_date,
+            current_jackpot1=base_jackpot1,
+            current_jackpot2=base_jackpot2,
+        )
+
+    def _has_jackpot_winner(self, db: Session, draw: Draw) -> bool:
+        """Check if the draw has any Jackpot1 or Jackpot2 winners."""
+        return db.query(PrizeResult).filter(
+            PrizeResult.ticket_id.in_(
+                db.query(Ticket.id).filter(Ticket.draw_id == draw.id)
+            ),
+            PrizeResult.category.in_(["Jackpot1", "Jackpot2"])
+        ).first() is not None
+    
+    def decide_next_draw_type(self, db: Session) -> Optional[DrawType]:
+        """
+        Decide which type the next draw should be, based on the last completed draw.
+        Returns None if the next draw must be created manually from the frontend.
+        """
+        latest_draw = self.get_latest_draw(db)
+        if not latest_draw:
+            return DrawType.automatic
+
+        if latest_draw.draw_type == DrawType.smart_auto:
+            return DrawType.smart_auto
+
+        if latest_draw.draw_type == DrawType.manual:
+            # Manual draws are only created via frontend
+            # return None
+            # Manual chỉ áp dụng kỳ hiện tại, kỳ tiếp theo quay lại auto
+            return DrawType.automatic
+
+        return DrawType.automatic
+
 
 # Export singleton
 draw_service = DrawService()

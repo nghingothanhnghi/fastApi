@@ -32,6 +32,9 @@ class Draw(Base):
     draw_type = Column(Enum(DrawType), default=DrawType.automatic)
     status = Column(Enum(DrawStatus), default=DrawStatus.scheduled)
 
+    current_jackpot1 = Column(Numeric, default=30000000000)  # 30 billion
+    current_jackpot2 = Column(Numeric, default=3000000000)   # 3 billion
+
     tickets = relationship("Ticket", back_populates="draw")
 
 class Ticket(Base):

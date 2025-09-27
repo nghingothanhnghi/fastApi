@@ -31,7 +31,11 @@ class JackpotAnalyticsService:
         draws = db.query(Draw).all()
         counter = Counter()
         for draw in draws:
-            counter.update(draw.numbers)
+            # Count both main numbers and bonus numbers
+            numbers = list(draw.numbers) if draw.numbers else []
+            if draw.bonus_number:
+                numbers.append(draw.bonus_number)
+            counter.update(numbers)
 
         # Include zero-count numbers in the population
         number_range = rule_service.get_rules()["number_range"]
@@ -41,7 +45,7 @@ class JackpotAnalyticsService:
 
         # Sort for hot and cold
         hot = counter.most_common(limit)
-        cold = sorted(counter.items(), key=lambda x: x[1])[:limit]
+        cold = sorted(counter.items(), key=lambda x: (x[1], x[0]))[:limit]
 
         return {
             "hot_numbers": [{"number": n, "count": c} for n, c in hot],
@@ -69,11 +73,18 @@ class JackpotAnalyticsService:
         """
         # Frequency map (with zeros ensured)
         draws = db.query(Draw).order_by(Draw.draw_date.desc()).all()
-        latest_draw_numbers = set(draws[0].numbers) if draws else set()
+        latest_draw_numbers = set()
+        if draws:
+            latest_draw_numbers.update(draws[0].numbers or [])
+            if draws[0].bonus_number:
+                latest_draw_numbers.add(draws[0].bonus_number)
 
         counter = Counter()
         for d in draws:
-            counter.update(d.numbers)
+            numbers = list(d.numbers) if d.numbers else []
+            if d.bonus_number:
+                numbers.append(d.bonus_number)
+            counter.update(numbers)
 
         number_range = rule_service.get_rules()["number_range"]
         for n in number_range:
@@ -94,7 +105,7 @@ class JackpotAnalyticsService:
         suggestion = sorted(pool[:6])
         return {
             "suggested_numbers": suggestion,
-            "strategy": "cold-first (avoid latest draw)",
+            "strategy": "cold-first (avoid latest draw incl. bonus)",
         }
 
 

@@ -37,7 +37,8 @@ def draw_job():
         # Only run after configured draw time (local)
         if now_local.time() < draw_time_local:
             logger.debug(
-                f"[Jackpot] Skipping — current time {now_local.strftime('%H:%M')} < draw time {draw_time_local}."
+                f"[Jackpot] Skipping — current time {now_local.strftime('%H:%M')} "
+                f"< draw time {draw_time_local}."
             )
             return
 
@@ -52,10 +53,19 @@ def draw_job():
                 )
                 return
 
-        # Create a new draw (stored in UTC)
-        new_draw = draw_service.create_draw(db)
+        # Decide draw type via service
+        draw_type = draw_service.decide_next_draw_type(db)
+        if not draw_type:
+            logger.info(
+                "[Jackpot] Last draw was manual — waiting for frontend to create next."
+            )
+            return
+
+        # Create new draw
+        new_draw = draw_service.create_draw(db, draw_type=draw_type)
         logger.info(
-            f"[Jackpot] ✅ Created new draw (id={new_draw.id}) at {new_draw.draw_date.isoformat()}"
+            f"[Jackpot] ✅ Created new {draw_type.value} draw "
+            f"(id={new_draw.id}) at {new_draw.draw_date.isoformat()}"
         )
 
     except Exception as e:
