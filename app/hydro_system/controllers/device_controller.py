@@ -19,14 +19,17 @@ def get_device(db: Session, device_id: int) -> HydroDevice:
     return device
 
 def get_devices_by_user(db: Session, user_id: int):
-    return hydro_device_service.get_devices_by_user(db, user_id)
+    devices = hydro_device_service.get_devices_by_user(db, user_id)
+    return devices or []   # Always return a list
 
 def get_devices_by_client(db: Session, client_id: str, skip: int = 0, limit: int = 100):
-    return hydro_device_service.get_devices_by_client(db, client_id, skip=skip, limit=limit)
+    devices = hydro_device_service.get_devices_by_client(db, client_id, skip=skip, limit=limit)
+    return devices or []
 
 
 def get_all_devices(db: Session, skip: int = 0, limit: int = 100):
-    return hydro_device_service.get_all_devices(db, skip, limit)
+    devices = hydro_device_service.get_all_devices(db, skip, limit)
+    return devices or []
 
 def update_device(db: Session, device_id: int, updates: HydroDeviceUpdate):
     device = hydro_device_service.get_device(db, device_id)

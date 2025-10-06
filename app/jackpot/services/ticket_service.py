@@ -1,6 +1,6 @@
 # app/jackpot/services/ticket_service.py
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from app.jackpot.models.draw import Ticket, PlayType, Draw
 from datetime import datetime
@@ -61,7 +61,16 @@ class TicketService:
         return db.query(Ticket).filter(Ticket.draw_id == draw_id).all()
 
     def get_tickets_by_user(self, db: Session, user_id: int) -> List[Ticket]:
-        return db.query(Ticket).filter(Ticket.user_id == user_id).all()
+        # return db.query(Ticket).filter(Ticket.user_id == user_id).all()
+        return (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.draw),       # load the related draw
+                joinedload(Ticket.result)      # load prize result if you need it
+            )
+            .filter(Ticket.user_id == user_id)
+            .all()
+        )
 
 # Export singleton
 ticket_service = TicketService()

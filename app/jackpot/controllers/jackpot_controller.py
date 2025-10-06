@@ -56,10 +56,9 @@ class JackpotController:
     
     def get_user_tickets(self, db: Session, user_id: int) -> list[TicketWithPrizeSchema]:
         tickets = ticket_service.get_tickets_by_user(db, user_id)
-        results = []
-        for t in tickets:
-            results.append(TicketWithPrizeSchema(ticket=t, prize=t.result))
-        return results
+        return [TicketWithPrizeSchema(ticket=t, prize=t.result) for t in tickets]
+   
+
     def get_ticket_count_by_draw(self, db: Session):
         return jackpot_analytics_service.ticket_count_by_draw(db)
 

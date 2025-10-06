@@ -6,7 +6,10 @@ from datetime import datetime
 from app.jackpot.models.draw import Draw, DrawType, DrawStatus, Ticket, PrizeResult
 from app.jackpot.utils.helpers import generate_draw_numbers, get_next_draw_date
 from app.jackpot.services.rule_service import rule_service
+from app.core.logging_config import get_logger
 import random
+
+logger = get_logger(__name__)
 
 class DrawService:
 
@@ -96,11 +99,23 @@ class DrawService:
         """
         Ensure there is always a scheduled draw.
         - If DB is empty → create first scheduled draw.
+        - Complete any past scheduled draws that should have happened
         - If latest is completed/expired → schedule a new one in the FUTURE.
         - Always guarantee current draw_date > now.
         """
         rules = rule_service.get_rules()
         now = datetime.utcnow()
+
+        # 🔧 First, complete any past scheduled draws that have passed their time
+        past_scheduled_draws = db.query(Draw).filter(
+            Draw.status == DrawStatus.scheduled,
+            Draw.draw_date <= now
+        ).all()
+
+        for draw in past_scheduled_draws:
+            logger.info(f"Auto-completing past scheduled draw ID {draw.id} (date: {draw.draw_date})")
+            draw.status = DrawStatus.completed
+            db.commit()
 
         latest_completed = self.get_latest_draw(db)
         latest_any = db.query(Draw).order_by(Draw.draw_date.desc()).first()

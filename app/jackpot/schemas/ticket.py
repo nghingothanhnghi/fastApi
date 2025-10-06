@@ -4,6 +4,7 @@ from typing import List, Optional
 from enum import Enum
 
 from app.jackpot.schemas.prize import PrizeResultSchema
+from app.jackpot.schemas.draw import DrawSchema
 
 class PlayType(str, Enum):
     basic = "basic"
@@ -23,6 +24,7 @@ class TicketSchema(BaseModel):
     numbers: List[int]
     play_type: PlayType
     draw_id: int
+    draw: Optional[DrawSchema]
 
     model_config = {
         "from_attributes": True
