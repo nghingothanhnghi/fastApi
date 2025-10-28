@@ -18,6 +18,8 @@ from app.payments.routes import payment_router
 
 from app.jackpot.routes import jackpot_router
 
+from app.product.routes import product_router
+
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
@@ -79,6 +81,8 @@ app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
 app.include_router(payment_router.router)  # Handles /payments/ endpoints
 
 app.include_router(jackpot_router.router)  # Handles /jackpot/ endpoints
+
+app.include_router(product_router.router)  # Handles /product/ endpoints
 
 
 app.include_router(ingest_api.router)

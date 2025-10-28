@@ -20,6 +20,9 @@ USE_MOCK_AI = os.getenv("USE_MOCK_AI", "true").lower() in ("true", "1", "yes")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads/profile_images")
 STATIC_URL_BASE = os.getenv("STATIC_URL_BASE", "/static/profile_images")
 
+MEDIA_DIR = os.getenv("MEDIA_DIR", "uploads/products")
+MEDIA_URL = os.getenv("MEDIA_URL", "/static/products")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
