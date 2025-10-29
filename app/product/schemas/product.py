@@ -35,8 +35,14 @@ class ProductCreate(ProductBase):
     variants: Optional[List[ProductVariantCreate]] = []
 
 
-class ProductUpdate(ProductBase):
-    variants: Optional[List[ProductVariantCreate]] = []
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    base_price: Optional[float] = None
+    sku: Optional[str] = None
+    is_active: Optional[bool] = None
+    image_url: Optional[str] = None
+    variants: Optional[List[ProductVariantCreate]] = None
 
 
 class ProductOut(ProductBase):
