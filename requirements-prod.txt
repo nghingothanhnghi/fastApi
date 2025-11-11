@@ -11,3 +11,4 @@ stripe
 python-jose
 passlib[bcrypt]
 requests
+adbutils
