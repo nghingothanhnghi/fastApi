@@ -8,11 +8,11 @@ from app.product.controllers.product_controller import ProductController
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-@router.post("/", response_model=ProductOut)
+@router.post("", response_model=ProductOut)
 def create_product(data: ProductCreate, db: Session = Depends(get_db)):
     return ProductController.create_product(data, db)
 
-@router.get("/", response_model=List[ProductOut])
+@router.get("", response_model=List[ProductOut])
 def get_products(db: Session = Depends(get_db)):
     return ProductController.get_all_products(db)
 

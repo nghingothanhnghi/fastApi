@@ -30,4 +30,5 @@ class ImageService:
             logger.exception("Failed to save image", extra={"path": file_path})
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to save file")
         logger.info("Image saved", extra={"path": file_path})
-        return f"{config.MEDIA_URL}/{folder}/{filename}"
+        url_path = f"{config.MEDIA_URL.rstrip('/')}/{filename}"
+        return url_path
