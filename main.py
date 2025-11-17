@@ -53,6 +53,7 @@ app.add_middleware(
 )
 app.middleware("http")(catch_exceptions_middleware)
 
+
 # -----------------------------------------
 # Routers
 # -----------------------------------------
@@ -90,16 +91,24 @@ app.include_router(transform_api.router)
 app.include_router(template_api.router)
 
 # -----------------------------------------
-# Static File Mounts (profile images, etc.)
+# Static File Mounts (profile images, products, etc.)
 # -----------------------------------------
 # Ensure upload folder exists
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+os.makedirs(config.MEDIA_DIR, exist_ok=True)
 
 # Serve /uploads/profile_images/* → uploads/profile_images/
 app.mount(
     config.STATIC_URL_BASE,
     StaticFiles(directory=config.UPLOAD_DIR),
     name="profile_images"
+)
+
+# Serve /static/products/* → uploads/products/
+app.mount(
+    config.MEDIA_URL,
+    StaticFiles(directory=config.MEDIA_DIR),
+    name="products"
 )
 
 # -----------------------------------------
