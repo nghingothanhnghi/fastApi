@@ -3,9 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
-from app.api.endpoints import (
-    devices, tap, health, scheduler_health , screen,
-)
+from app.android_system.routes import ( devices_router, tap_router, screen_router, health_router, scheduler_health_router)
 
 from app.user.routes import (user_router, roles_router, auth_router, password_reset_router)
 
@@ -62,12 +60,12 @@ app.include_router(user_router.router)
 app.include_router(roles_router.router)
 app.include_router(password_reset_router.router)
 
-app.include_router(devices.router, prefix="/devices", tags=["devices"])
-app.include_router(tap.router, prefix="/tap")
-app.include_router(health.router, prefix="/health")
-app.include_router(screen.router, prefix="/screen")
+app.include_router(devices_router.router, prefix="/devices", tags=["devices"])
+app.include_router(tap_router.router, prefix="/tap")
+app.include_router(health_router.router, prefix="/health")
+app.include_router(screen_router.router, prefix="/screen")
 
-app.include_router(scheduler_health.router)  # /scheduler/health
+app.include_router(scheduler_health_router.router)  # /scheduler/health
 
 app.include_router(object_detection_router.router, prefix="/object-detection", tags=["object-detection"])
 app.include_router(hardware_detection_router.router)

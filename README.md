@@ -270,7 +270,6 @@ python train_model.py
 ```
 fastApi/
 ├── app/
-│   ├── api/endpoints/          # API route handlers
 │   ├── data/          # Database
 │   ├── android_system/         # Android device management
 │   ├── camera_object_detection/# Computer vision module
