@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.schemas.device import HydroDeviceCreate, HydroDeviceUpdate
 from app.hydro_system.models.device import HydroDevice
+from app.hydro_system.controllers.actuator_controller import control_actuator_by_id
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def create_device(db: Session, device_in: HydroDeviceCreate) -> HydroDevice:
     return hydro_device_service.create_device(db, device_in)
@@ -43,3 +47,15 @@ def delete_device(db: Session, device_id: int):
         raise HTTPException(status_code=404, detail="Device not found")
     hydro_device_service.delete_device(db, device)
     return {"detail": "Device deleted successfully"}
+
+# Activation helpers
+def activate_device(db: Session, device_id: int):
+    return hydro_device_service.set_device_active(db, device_id, True)
+
+def deactivate_device(db: Session, device_id: int):
+    return hydro_device_service.set_device_active(db, device_id, False)
+
+
+# High-level device control (delegates to service)
+def control_devices_by_location(db: Session, location: str, on: bool) -> dict:
+    return hydro_device_service.control_devices_by_location(db, location, on)

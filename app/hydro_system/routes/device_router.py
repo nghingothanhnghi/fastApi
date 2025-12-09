@@ -86,3 +86,28 @@ def delete_device(
 ):
     """Delete a device by ID"""
     return device_controller.delete_device(db, device_id)
+
+@device_router.post("/{device_id}/activate")
+def activate_device(
+    device_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    ):
+    """Activate a specific device (enable heartbeat + hardware activation)"""
+    return device_controller.activate_device(db, device_id)
+
+@device_router.post("/{device_id}/deactivate")
+def deactivate_device(
+    device_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    ):
+    """Deactivate a specific device (disable heartbeat + shut down hardware)"""
+    return device_controller.deactivate_device(db, device_id)
+
+@device_router.post("/location/{location}/control")
+def control_devices_by_location(
+    location: str = Path(..., min_length=1),
+    on: bool = Query(..., description="true to turn ON, false to turn OFF"),
+    db: Session = Depends(get_db),
+):
+    """Control all devices at a specific location (turns on/off all actuators on those devices)"""
+    return device_controller.control_devices_by_location(db, location, on)

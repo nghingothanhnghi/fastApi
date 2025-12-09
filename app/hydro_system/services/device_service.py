@@ -135,6 +135,10 @@ class HydroDeviceService:
         logger.debug(f"Fetching all devices (skip={skip}, limit={limit})")
         return db.query(HydroDevice).offset(skip).limit(limit).all()
 
+    def get_devices_by_location(self, db: Session, location: str) -> List[HydroDevice]:
+        logger.debug(f"Fetching devices by location: {location}")
+        return db.query(HydroDevice).filter(HydroDevice.location == location).all()
+
     def update_device(self, db: Session, device: HydroDevice, updates: HydroDeviceUpdate) -> HydroDevice:
         logger.info(f"Updating device ID: {device.id}")
         try:
@@ -160,6 +164,82 @@ class HydroDeviceService:
             db.rollback()
             logger.error(f"Failed to delete device ID {device.id}: {e}")
             raise e
+
+    def set_device_active(self, db: Session, device_id: int, active: bool) -> HydroDevice:
+        device = self.get_device(db, device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        try:
+            device.is_active = active
+            db.commit()
+            db.refresh(device)
+            logger.info(f"Set device {device.device_id} active={active}")
+            return device
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to set device active flag: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update device status.")
+
+
+    # --- Actuator control moved into service ---
+    def control_devices_by_location(self, db: Session, location: str, on: bool) -> dict:
+        devices = self.get_devices_by_location(db, location)
+        if not devices:
+            raise HTTPException(status_code=404, detail=f"No devices found at location: {location}")
+        results = []
+        state_str = "ON" if on else "OFF"
+
+        for device in devices:
+            # ensure actuators relationship loaded
+            actuators = list(device.actuators or [])
+            if not actuators:
+                logger.warning(f"Device '{device.name}' at location '{location}' has no actuators")
+                continue
+
+            device_result = {
+                "device_id": device.id,
+                "device_name": device.name,
+                "location": location,
+                "actuators_controlled": []
+            }
+
+            for actuator in actuators:
+                try:
+                    # call actuator controller (keeps separation) - it may raise HTTPException
+                    from app.hydro_system.controllers.actuator_controller import control_actuator_by_id
+                    control_actuator_by_id(db, actuator.id, on)
+                    device_result["actuators_controlled"].append({
+                        "actuator_id": actuator.id,
+                        "name": actuator.name or actuator.type,
+                        "type": actuator.type,
+                        "state": state_str
+                })
+                except Exception as e:
+                    logger.error(f"Failed to control actuator {actuator.id}: {e}")
+                    # continue other actuators but note failure
+                    device_result["actuators_controlled"].append({
+                    "actuator_id": actuator.id,
+                    "error": str(e)
+                })
+                    
+        results.append(device_result)
+        logger.info(f"Controlled {len(results)} device(s) at location '{location}' -> {state_str}")
+        return {
+            "location": location,
+            "state": state_str,
+            "devices_controlled": len(results),
+            "details": results
+    }
+
+    # Placeholder: real hardware sync hook
+    def sync_device_actuators_from_hardware(self, db: Session, device_id: int) -> None:
+        """Implement integration with the ESP32 that reports actuators. This is a stub for production.
+        - Could be implemented as a background task or a queue worker
+        - Should create HydroActuator rows and validate pin/port uniqueness
+        """
+        logger.info(f"Sync requested for device_id={device_id}")
+        # TODO: implement hardware communication
+        return      
 
 # Export a single instance (singleton-style)
 hydro_device_service = HydroDeviceService()
