@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.product.schemas.product import ProductOut, ProductCreate, ProductUpdate
+from app.product.schemas.product import ProductOut, ProductCreate, ProductUpdate, ProductVariantCreate
 from app.product.controllers.product_controller import ProductController
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -123,23 +123,31 @@ def upload_product_image(product_id: int, file: UploadFile = File(...), db: Sess
     return ProductController.upload_product_image(product_id, file, db)
 
 
+# --- VARIANT ENDPOINTS ---
+@router.post("/{product_id}/variants", response_model=dict)
+def create_variant(product_id: int, data: ProductVariantCreate, db: Session = Depends(get_db)):
+    """
+    Create a new variant for a product.
+    """
+    return ProductController.create_variant(product_id, data, db)
+
+@router.put("/variants/{variant_id}", response_model=dict)
+def update_variant(variant_id: int, data: ProductVariantCreate, db: Session = Depends(get_db)):
+    """
+    Update an existing variant.
+    """
+    return ProductController.update_variant(variant_id, data, db)
+
+@router.delete("/variants/{variant_id}")
+def delete_variant(variant_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a variant.
+    """
+    return ProductController.delete_variant(variant_id, db)
+
 @router.post("/variants/{variant_id}/upload-image")
 def upload_variant_image(variant_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     Upload and save a variant image.
-
-    The image is saved to the file system (variants folder) and the variant
-    is updated with the image URL.
-
-    Args:
-        variant_id (int): The ID of the variant to upload image for
-        file (UploadFile): The image file to upload
-        db (Session): Database session injected by FastAPI dependency
-
-    Returns:
-        ProductVariant: The updated variant with new image URL
-
-    Raises:
-        HTTPException: 404 if variant not found, or 400 if upload fails
     """
     return ProductController.upload_variant_image(variant_id, file, db)

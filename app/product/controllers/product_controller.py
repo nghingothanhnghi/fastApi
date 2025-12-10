@@ -8,7 +8,7 @@ creating, retrieving, updating, and deleting products and variants.
 
 from sqlalchemy.orm import Session
 from app.product.services.product_service import ProductService
-from app.product.schemas.product import ProductCreate, ProductUpdate
+from app.product.schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate
 from app.product.services.image_service import ImageService
 
 
@@ -118,21 +118,20 @@ class ProductController:
         url = ImageService.save_image(file)
         return ProductService.update_product(db, product_id, {"image_url": url})
 
+    # --- VARIANT CRUD ---
+    @staticmethod
+    def create_variant(product_id: int, variant_data: ProductVariantCreate, db: Session):
+        return ProductService.create_variant(db, product_id, variant_data)
+
+    @staticmethod
+    def update_variant(variant_id: int, variant_data: ProductVariantCreate, db: Session):
+        return ProductService.update_variant(db, variant_id, variant_data)
+
+    @staticmethod
+    def delete_variant(variant_id: int, db: Session):
+        return ProductService.delete_variant(db, variant_id)
+
     @staticmethod
     def upload_variant_image(variant_id: int, file, db: Session):
-        """
-        Upload and save a variant image, then update the variant record.
-
-        Args:
-            variant_id (int): The ID of the variant to update with the image
-            file (UploadFile): The image file to upload
-            db (Session): Database session for ORM operations
-
-        Returns:
-            ProductVariant: The updated variant object with new image URL
-
-        Raises:
-            HTTPException: If variant is not found (404) or upload fails
-        """
         url = ImageService.save_image(file, folder="variants")
         return ProductService.update_variant_image(db, variant_id, url)
