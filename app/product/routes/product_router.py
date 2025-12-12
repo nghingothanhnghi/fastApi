@@ -124,6 +124,14 @@ def upload_product_image(product_id: int, file: UploadFile = File(...), db: Sess
 
 
 # --- VARIANT ENDPOINTS ---
+@router.get("/variants/skus", response_model=List[str])
+def get_variant_skus(db: Session = Depends(get_db)):
+    """
+    Return all variant SKUs in the system so the frontend can ensure uniqueness.
+    """
+    return ProductController.get_all_variant_skus(db)
+
+
 @router.post("/{product_id}/variants", response_model=dict)
 def create_variant(product_id: int, data: ProductVariantCreate, db: Session = Depends(get_db)):
     """

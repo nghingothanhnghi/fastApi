@@ -13,7 +13,7 @@ class ImageService:
         if not file or not file.filename:
             logger.warning("Missing upload file metadata")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file provided")
-        upload_dir = os.path.join(config.MEDIA_DIR, folder)
+        upload_dir = config.MEDIA_DIR if folder == "products" else os.path.join(config.MEDIA_DIR, folder)
         try:
             os.makedirs(upload_dir, exist_ok=True)
         except Exception:

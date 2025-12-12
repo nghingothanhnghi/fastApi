@@ -104,18 +104,68 @@ class ProductService:
         db.refresh(product)
         logger.info("Product updated", extra={"product_id": product_id})
         return product
+    
+    @staticmethod
+    def delete_product(db: Session, product_id: int):
+        product = ProductService.get_product_by_id(db, product_id)
+        db.delete(product)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to delete product", extra={"product_id": product_id})
+            raise
+        logger.info("Product deleted", extra={"product_id": product_id})
+        return {"message": "Product deleted successfully"}
 
        # --- VARIANT METHODS ---
     @staticmethod
+    def get_all_variant_skus(db: Session):
+        rows = db.query(ProductVariant.sku).all()
+        return [r[0] for r in rows if r[0]]
+
+    @staticmethod
     def create_variant(db: Session, product_id: int, variant_data: ProductVariantCreate):
         product = ProductService.get_product_by_id(db, product_id)
+
+        # Trim inputs
+        name = (variant_data.name or "").strip()
+        sku = (variant_data.sku or "").strip()
+
+        # --- Validate required fields ---
+        if not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Variant name cannot be empty."
+            )
+    
+        if not sku:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Variant SKU cannot be empty."
+            )
+
+        existing = db.query(ProductVariant).filter(ProductVariant.sku == sku).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Variant SKU '{sku}' already exists. Please use a different SKU."
+            )
+
+        # Assign trimmed values back
+        variant_data.name = name
+        variant_data.sku = sku  # assign cleaned SKU
+
         variant = ProductVariant(product_id=product.id, **variant_data.model_dump())
         db.add(variant)
         try:
             db.commit()
         except Exception:
             db.rollback()
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create variant due to a server error."
+            )
         db.refresh(variant)
         return variant
 
@@ -124,13 +174,35 @@ class ProductService:
         variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
         if not variant:
             raise HTTPException(status_code=404, detail="Variant not found")
+
+        # --- Validation: SKU required and unique if changed ---
+        sku = (variant_data.sku or "").strip()
+        if not sku:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Variant SKU cannot be empty."
+            )
+
+        existing = db.query(ProductVariant).filter(ProductVariant.sku == sku).first()
+        if existing and existing.id != variant_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Variant SKU '{sku}' already exists. Please use a different SKU."
+            )
+
+        variant_data.sku = sku
         for k, v in variant_data.model_dump().items():
             setattr(variant, k, v)
+
         try:
             db.commit()
         except Exception:
             db.rollback()
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update variant due to a server error."
+            )
+
         db.refresh(variant)
         return variant
 
@@ -147,39 +219,50 @@ class ProductService:
             raise
         return {"message": "Variant deleted successfully"}    
 
+    
     @staticmethod
-    def _replace_variants(db: Session, product: Product, variants_data: Iterable[Dict[str, Any]]):
+    def _replace_variants(db: Session, product: Product, variants_data: Iterable[Any]):
+        incoming_skus = []
+        for v in variants_data or []:
+            sku = v.sku.strip() if isinstance(v, ProductVariantCreate) else v.get("sku", "").strip()
+            if not sku:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="All variants must have a SKU."
+                )
+            incoming_skus.append(sku)
+
+        # Check duplicates in payload
+        duplicates = set([sku for sku in incoming_skus if incoming_skus.count(sku) > 1])
+        if duplicates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate SKU(s) in submitted variants: {', '.join(duplicates)}"
+            )
+
+        # Check duplicates in DB (other products)
+        for sku in incoming_skus:
+            existing = db.query(ProductVariant).filter(ProductVariant.sku == sku).first()
+            if existing and existing.product_id != product.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Variant SKU '{sku}' already exists in another product."
+                )
+
+        # Delete old variants and add new ones
         db.query(ProductVariant).filter(ProductVariant.product_id == product.id).delete()
         for variant_data in variants_data or []:
-            if isinstance(variant_data, dict):
-                payload = variant_data
-            else:
-                payload = variant_data.model_dump(exclude_none=True)
-            variant = ProductVariant(product_id=product.id, **payload)
-            db.add(variant)
+            payload = variant_data.model_dump() if isinstance(variant_data, ProductVariantCreate) else variant_data
+            db.add(ProductVariant(product_id=product.id, **payload))
 
-    @staticmethod
-    def delete_product(db: Session, product_id: int):
-        product = ProductService.get_product_by_id(db, product_id)
-        db.delete(product)
         try:
             db.commit()
         except Exception:
             db.rollback()
-            logger.exception("Failed to delete product", extra={"product_id": product_id})
-            raise
-        logger.info("Product deleted", extra={"product_id": product_id})
-        return {"message": "Product deleted successfully"}
-    
-    @staticmethod
-    def _replace_variants(db: Session, product: Product, variants_data: Iterable[Any]):
-        db.query(ProductVariant).filter(ProductVariant.product_id == product.id).delete()
-        for variant_data in variants_data or []:
-            if isinstance(variant_data, ProductVariantCreate):
-                payload = variant_data.model_dump()
-            else:
-                payload = variant_data
-            db.add(ProductVariant(product_id=product.id, **payload))    
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to replace variants due to a server error."
+            )
 
     @staticmethod
     def update_variant_image(db: Session, variant_id: int, image_url: str):

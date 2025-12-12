@@ -120,6 +120,10 @@ class ProductController:
 
     # --- VARIANT CRUD ---
     @staticmethod
+    def get_all_variant_skus(db: Session):
+        return ProductService.get_all_variant_skus(db)
+
+    @staticmethod
     def create_variant(product_id: int, variant_data: ProductVariantCreate, db: Session):
         return ProductService.create_variant(db, product_id, variant_data)
 
