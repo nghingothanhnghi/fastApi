@@ -31,15 +31,23 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
 
     results = []
 
+    # --- Loop through each device and gather its data ---
     for device in devices:
+        # 1️⃣ Read current sensor values
         sensor_data = sensors.read_sensors(device_id=device.id)
+
+        # 2️⃣ Determine thresholds for automation
         thresholds = device.thresholds if hasattr(device, "thresholds") and device.thresholds else DEFAULT_THRESHOLDS
+
+        # 3️⃣ Evaluate automation rules based on sensor values and thresholds
         rules_result = check_rules(sensor_data, thresholds)
 
+        # 4️⃣ Get all actuators assigned to this device
         actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
 
         actuators_state = []
 
+        # --- Map each actuator's info and current state ---
         for actuator in actuators:
             sensor_value = None
             if actuator.sensor_key and actuator.sensor_key in sensor_data:
@@ -55,9 +63,11 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "default_state": actuator.default_state,
                 "sensor_key": actuator.sensor_key,
                 "linked_sensor_value": sensor_value,
+                # Get last known state from state_manager (True=ON, False=OFF)
                 "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
             })      
 
+        # --- Compile full device status ---
         results.append({
             "device_id": device.id,
             "device_name": device.name,
