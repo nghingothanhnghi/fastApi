@@ -129,10 +129,14 @@ Historical readings from sensors (temperature, humidity, moisture, water level).
 |-------|------|-------------|
 | `id` | Integer | Primary key |
 | `device_id` | Integer (FK) | Parent device |
-| `sensor_type` | String | Type of sensor (temperature, humidity, moisture, water_level) |
-| `value` | Float | Sensor reading value |
-| `unit` | String | Measurement unit (°C, %, cm, lux, etc.) |
-| `timestamp` | DateTime | When reading was taken |
+| `temperature` | Float | Temperature reading (°C) |
+| `humidity` | Float | Humidity reading (%) |
+| `light` | Float | Light intensity (lux) |
+| `moisture` | Float | Soil moisture (%) |
+| `water_level` | Float | Water level (%) |
+| `ec` | Float | Electrical Conductivity (mS/cm) |
+| `ppm` | Float | Parts Per Million (PPM) |
+| `created_at` | DateTime | When reading was taken |
 
 ## API Endpoints
 
@@ -437,7 +441,9 @@ GET /hydro/status?device_id=1
     "temperature": 22.5,
     "humidity": 65,
     "moisture": 45,
-    "water_level": 75
+    "water_level": 75,
+    "ec": 1.8,
+    "ppm": 900
   },
   "actuator_states": {
     "pump_1_1": false,
@@ -469,7 +475,11 @@ DEFAULT_THRESHOLDS = {
     "light_min": 300,          # lux - light intensity
     "temperature_max": 28,     # °C - max temperature
     "water_level_min": 20,     # % - min water level
-    "water_level_critical": 10 # % - emergency alert level
+    "water_level_critical": 10, # % - emergency alert level
+    "ec_min": 1.2,             # mS/cm - min EC
+    "ec_max": 2.5,             # mS/cm - max EC
+    "ppm_min": 600,            # ppm - min PPM
+    "ppm_max": 1500            # ppm - max PPM
 }
 ```
 

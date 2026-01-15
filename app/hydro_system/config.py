@@ -14,7 +14,11 @@ DEFAULT_THRESHOLDS = {
     "light_min": 300,          # lux - minimum light intensity
     "temperature_max": 28,     # degrees Celsius - maximum temperature
     "water_level_min": 20,     # percentage - minimum water level in tank
-    "water_level_critical": 10 # percentage - critical water level (emergency alert)
+    "water_level_critical": 10, # percentage - critical water level (emergency alert)
+    "ec_min": 1.2,             # mS/cm - minimum electrical conductivity
+    "ec_max": 2.5,             # mS/cm - maximum electrical conductivity
+    "ppm_min": 600,            # ppm - minimum parts per million
+    "ppm_max": 1500            # ppm - maximum parts per million
 }
 
 # Optional: Default actuator templates per device type

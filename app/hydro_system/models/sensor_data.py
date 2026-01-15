@@ -16,6 +16,8 @@ class SensorData(Base):
     light = Column(Float)
     moisture = Column(Float)
     water_level = Column(Float)  # Water level in percentage (0-100%)
+    ec = Column(Float, nullable=True)  # Electrical Conductivity (mS/cm)
+    ppm = Column(Float, nullable=True) # Parts Per Million
     created_at = Column(DateTime, default=datetime.utcnow)
 
     device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=True)

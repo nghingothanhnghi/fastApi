@@ -8,6 +8,8 @@ class SensorPayloadSchema(BaseModel):
     light: Optional[float] = Field(None, description="Light intensity in lux", ge=0)
     moisture: Optional[float] = Field(None, description="Soil moisture percentage (0-100%)", ge=0, le=100)
     water_level: Optional[float] = Field(None, description="Water level percentage (0-100%)", ge=0, le=100)
+    ec: Optional[float] = Field(None, description="Electrical Conductivity (mS/cm)", ge=0)
+    ppm: Optional[float] = Field(None, description="Parts Per Million", ge=0)
 
 class SensorDataSchema(BaseModel):
     id: int
@@ -16,6 +18,8 @@ class SensorDataSchema(BaseModel):
     light: Optional[float] = Field(None, description="Light intensity in lux")
     moisture: Optional[float] = Field(None, description="Soil moisture percentage (0-100%)")
     water_level: Optional[float] = Field(None, description="Water level percentage (0-100%)")
+    ec: Optional[float] = Field(None, description="Electrical Conductivity (mS/cm)")
+    ppm: Optional[float] = Field(None, description="Parts Per Million")
     created_at: datetime
 
     model_config = {
