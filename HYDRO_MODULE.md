@@ -103,6 +103,7 @@ Represents individual hardware components (pumps, lights, fans, valves, water se
 - `fan` - Exhaust/circulation fans
 - `water_pump` - Water circulation/refill
 - `valve` - Water valve control
+- `nutrient_pump` - Nutrient dosing pump
 
 **Example:**
 ```json
@@ -479,7 +480,7 @@ DEFAULT_THRESHOLDS = {
     "ec_min": 1.2,             # mS/cm - min EC
     "ec_max": 2.5,             # mS/cm - max EC
     "ppm_min": 600,            # ppm - min PPM
-    "ppm_max": 1500            # ppm - max PPM
+    "ppm_max": 1000            # ppm - max PPM
 }
 ```
 
@@ -501,6 +502,7 @@ ACTUATOR_TYPES = {
     "fan": {"emoji_on": "🌪️", "label": "Fan"},
     "water_pump": {"emoji_on": "💧", "label": "Water Pump"},
     "valve": {"emoji_on": "🔓", "label": "Valve"},
+    "nutrient_pump": {"emoji_on": "🧪", "label": "Nutrient Pump"},
 }
 ```
 
@@ -678,7 +680,7 @@ log_actuator_action()
 - **Frequency:** Every 60 seconds
 - **Trigger:** Reads all sensors on active devices
 - **Actions:**
-  1. Collects sensor data (temperature, humidity, moisture, water level)
+  1. Collects sensor data (temperature, humidity, moisture, water level, ec, ppm)
   2. Persists readings to `SensorData` table
   3. Evaluates automation rules based on thresholds
   4. Controls actuators if conditions are met

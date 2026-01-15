@@ -5,9 +5,11 @@
 | - Light           |        +------------------------+
 | - Moisture        |                 ^
 | - Water Level     |                 |
+| - PPM             |                 |
+| - EC              |                 |
 +--------+----------+                 |
          | Sends sensor data          | GPIO HIGH/LOW
-         v                             |
+         v                            |
 +-------------------+        +------------------------+
 |       ESP32       |        |  relay.py update_relays |
 | - Reads sensors   |        |  Maps ACTUATOR_STATES   |

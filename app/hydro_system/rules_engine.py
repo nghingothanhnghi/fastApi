@@ -91,6 +91,23 @@ def should_open_valve(sensor_data: dict, thresholds: dict) -> bool:
 
     return moisture < thresholds.get("moisture_min", 30)
 
+def should_dose_nutrients(sensor_data: dict, thresholds: dict) -> bool:
+    """
+    Determine if the nutrient pump should be turned on.
+    Logic: dose if EC or PPM is below the minimum threshold.
+    """
+    ec = sensor_data.get("ec", 0)
+    ppm = sensor_data.get("ppm", 0)
+    
+    # Priority on EC, fallback to PPM if EC is 0 (missing)
+    if ec > 0:
+        return ec < thresholds.get("ec_min", 1.2)
+    
+    if ppm > 0:
+        return ppm < thresholds.get("ppm_min", 600)
+    
+    return False
+
 def check_rules(
     sensor_data: dict,
     thresholds: dict = DEFAULT_THRESHOLDS,
@@ -129,6 +146,8 @@ def check_rules(
             should_activate = should_open_valve(sensor_data, actuator_thresholds)
         elif actuator_type == "water_pump":
             should_activate = should_turn_on_water_pump(sensor_data, actuator_thresholds)
+        elif actuator_type == "nutrient_pump":
+            should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
 
         actions.append({
             "actuator_id": actuator_id,
@@ -138,6 +157,43 @@ def check_rules(
         })
 
     # Global/system alerts
+    ec = sensor_data.get("ec", 0)
+    ppm = sensor_data.get("ppm", 0)
+
+    if ec > thresholds.get("ec_max", 2.5):
+        alerts.append({
+            "type": "warning",
+            "message": "EC level high",
+            "sensor": "ec",
+            "value": ec,
+            "action_required": "Dilute with fresh water"
+        })
+    elif ec > 0 and ec < thresholds.get("ec_min", 1.2):
+        alerts.append({
+            "type": "info",
+            "message": "EC level low",
+            "sensor": "ec",
+            "value": ec,
+            "action_required": "Nutrient dosing required"
+        })
+
+    if ppm > thresholds.get("ppm_max", 1500):
+        alerts.append({
+            "type": "warning",
+            "message": "PPM level high",
+            "sensor": "ppm",
+            "value": ppm,
+            "action_required": "Dilute with fresh water"
+        })
+    elif ppm > 0 and ppm < thresholds.get("ppm_min", 600):
+        alerts.append({
+            "type": "info",
+            "message": "PPM level low",
+            "sensor": "ppm",
+            "value": ppm,
+            "action_required": "Nutrient dosing recommended"
+        })
+
     if is_water_level_critical(sensor_data, thresholds):
         alerts.append({
             "type": "critical",

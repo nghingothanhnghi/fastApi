@@ -18,7 +18,7 @@ DEFAULT_THRESHOLDS = {
     "ec_min": 1.2,             # mS/cm - minimum electrical conductivity
     "ec_max": 2.5,             # mS/cm - maximum electrical conductivity
     "ppm_min": 600,            # ppm - minimum parts per million
-    "ppm_max": 1500            # ppm - maximum parts per million
+    "ppm_max": 1000            # ppm - maximum parts per million
 }
 
 # Optional: Default actuator templates per device type
@@ -69,9 +69,10 @@ ACTUATOR_TYPES = {
     "fan": {"emoji_on": "🌪️", "emoji_off": "🔇", "label": "Fan"},
     "water_pump": {"emoji_on": "💧", "emoji_off": "🚰", "label": "Water Pump"},
     "valve": {"emoji_on": "🔓", "emoji_off": "🔒", "label": "Valve"},
+    "nutrient_pump": {"emoji_on": "🧪", "emoji_off": "✖️", "label": "Nutrient Pump"},
 }
 
-SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve"]
+SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve", "nutrient_pump"]
 
 
 # Water level sensor configuration
