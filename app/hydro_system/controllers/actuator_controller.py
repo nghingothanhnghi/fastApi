@@ -82,8 +82,11 @@ def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
             # Per-actuator or per-device thresholds
             thresholds_override = actuator.device.thresholds or {}
 
-            rules_result = check_rules(sensor_data, overrides=thresholds_override)
-            should_activate = rules_result.get("actions", {}).get(device_type)
+            rules_result = check_rules(sensor_data, overrides=thresholds_override, actuators=[actuator])
+            
+            # Find the action for this specific actuator
+            action = next((a for a in rules_result.get("actions", []) if a["actuator_id"] == actuator.id), None)
+            should_activate = action["on"] if action else None
 
             actuator_key = f"{device_type}_{actuator.device_id}_{actuator.port}"
             prev_state = get_state(actuator_key)

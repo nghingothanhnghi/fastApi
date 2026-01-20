@@ -124,7 +124,7 @@ Represents individual hardware components (pumps, lights, fans, valves, water se
 
 **Table:** `sensor_data`
 
-Historical readings from sensors (temperature, humidity, moisture, water level).
+Historical readings from sensors (temperature, humidity, moisture, water level, ec, ppm).
 
 | Field | Type | Description |
 |-------|------|-------------|

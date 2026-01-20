@@ -160,6 +160,8 @@ def read_sensors(device_id: int = None, persist: bool = True):
             "humidity": None,
             "light": None,
             "moisture": None,
+            "ec": None,
+            "ppm": None,
             "water_level": None
         }
     finally:

@@ -106,6 +106,12 @@ def control_fan(db: Session, on: bool, user_id: int, device_id: Optional[int] = 
 def control_water_pump(db: Session, on: bool, user_id: int, device_id: Optional[int] = None):
     control_actuator(db, "water_pump", on, user_id, device_id)
 
+def control_nutrient_pump(db: Session, on: bool, user_id: int, device_id: Optional[int] = None):
+    control_actuator(db, "nutrient_pump", on, user_id, device_id)
+
+def control_valve(db: Session, on: bool, user_id: int, device_id: Optional[int] = None):
+    control_actuator(db, "valve", on, user_id, device_id)
+
 def refill_water_tank(db: Session, user_id: int, device_id: Optional[int] = None, duration_seconds: int = 300):
     logger.info(f"User {user_id} - Starting water tank refill for {duration_seconds} seconds on device {device_id or 'default'}")
     control_water_pump(db, True, user_id, device_id)
@@ -123,7 +129,8 @@ def emergency_stop(db: Session, user_id: int):
 
     devices = hydro_device_service.get_devices_by_user(db, user_id)
     for device in devices:
-        for actuator_type in ["pump", "light", "fan", "water_pump"]:
+        from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES
+        for actuator_type in SUPPORTED_ACTUATOR_TYPES:
             try:
                 actuator_controller.control_actuator(db, actuator_type, on=False, device_id=str(device.id))
             except Exception as e:
