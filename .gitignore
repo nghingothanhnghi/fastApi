@@ -38,3 +38,6 @@ farmApp/
 # Ignore scripts
 scripts/
 
+# Ignore scripts for ESP32
+esp32/
+
