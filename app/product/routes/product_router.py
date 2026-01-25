@@ -159,3 +159,11 @@ def upload_variant_image(variant_id: int, file: UploadFile = File(...), db: Sess
     Upload and save a variant image.
     """
     return ProductController.upload_variant_image(variant_id, file, db)
+
+
+@router.post("/{product_id}/qr-code", response_model=ProductOut)
+def regenerate_qr_code(product_id: int, db: Session = Depends(get_db)):
+    """
+    Regenerate the QR code for a specific product.
+    """
+    return ProductController.regenerate_qr_code(product_id, db)

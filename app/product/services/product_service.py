@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.product.models.product import Product, ProductVariant
 from app.product.schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate
+from app.product.services.qr_service import QRService
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -42,6 +43,13 @@ class ProductService:
         )
         db.add(product)
         db.flush()
+        
+        # Generate QR code
+        try:
+            product.qr_code_url = QRService.generate_product_qr(product.id)
+        except Exception:
+            logger.warning("Failed to generate QR code during product creation", extra={"product_id": product.id})
+
         for variant_data in data.variants or []:
             variant = ProductVariant(product_id=product.id, **variant_data.model_dump())
             db.add(variant)
@@ -280,3 +288,16 @@ class ProductService:
         db.refresh(variant)
         logger.info("Variant image updated", extra={"variant_id": variant_id})
         return variant
+
+    @staticmethod
+    def regenerate_qr_code(db: Session, product_id: int):
+        product = ProductService.get_product_by_id(db, product_id)
+        product.qr_code_url = QRService.generate_product_qr(product.id)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to regenerate QR code", extra={"product_id": product_id})
+            raise
+        db.refresh(product)
+        return product

@@ -88,6 +88,7 @@ class ProductBase(BaseModel):
     sku: Optional[str]
     is_active: Optional[bool] = True
     image_url: Optional[str] = None
+    qr_code_url: Optional[str] = None
 
 
 class ProductCreate(ProductBase):

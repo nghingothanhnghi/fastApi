@@ -139,3 +139,7 @@ class ProductController:
     def upload_variant_image(variant_id: int, file, db: Session):
         url = ImageService.save_image(file, folder="variants")
         return ProductService.update_variant_image(db, variant_id, url)
+
+    @staticmethod
+    def regenerate_qr_code(product_id: int, db: Session):
+        return ProductService.regenerate_qr_code(db, product_id)
