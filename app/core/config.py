@@ -23,8 +23,8 @@ STATIC_URL_BASE = os.getenv("STATIC_URL_BASE", "/static/profile_images")
 MEDIA_DIR = os.getenv("MEDIA_DIR", "uploads/products")
 MEDIA_URL = os.getenv("MEDIA_URL", "/static/products")
 
-QR_CODE_DIR = os.path.join(MEDIA_DIR, "qrcodes")
-QR_CODE_URL = f"{MEDIA_URL}/qrcodes"
+QR_CODE_DIR = os.getenv("QR_CODE_DIR", "uploads/qr_codes")
+QR_CODE_URL = os.getenv("QR_CODE_URL", "/static/qr_codes")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 

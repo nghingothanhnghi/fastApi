@@ -94,6 +94,7 @@ app.include_router(template_api.router)
 # Ensure upload folder exists
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 os.makedirs(config.MEDIA_DIR, exist_ok=True)
+os.makedirs(config.QR_CODE_DIR, exist_ok=True)
 
 # Serve /uploads/profile_images/* → uploads/profile_images/
 app.mount(
@@ -107,6 +108,13 @@ app.mount(
     config.MEDIA_URL,
     StaticFiles(directory=config.MEDIA_DIR),
     name="products"
+)
+
+# Serve /static/qr_codes/* → uploads/qr_codes/
+app.mount(
+    config.QR_CODE_URL,
+    StaticFiles(directory=config.QR_CODE_DIR),
+    name="qr_codes"
 )
 
 # -----------------------------------------
