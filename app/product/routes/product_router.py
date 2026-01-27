@@ -6,10 +6,12 @@ Routes are mounted at /products prefix and include CRUD operations for products
 and variants, as well as image upload functionality.
 """
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
+from app.core import config
 from app.product.schemas.product import ProductOut, ProductCreate, ProductUpdate, ProductVariantCreate
 from app.product.controllers.product_controller import ProductController
 
@@ -167,3 +169,14 @@ def regenerate_qr_code(product_id: int, db: Session = Depends(get_db)):
     Regenerate the QR code for a specific product.
     """
     return ProductController.regenerate_qr_code(product_id, db)
+
+
+@router.get("/{product_id}/scan")
+def scan_product_qr(product_id: int):
+    """
+    Endpoint for QR code scans.
+    Redirects the user to the frontend product detail page.
+    """
+    # In a real app, you might log analytics here (who scanned, when, etc.)
+    frontend_url = f"{config.FRONTEND_URL}/products/{product_id}"
+    return RedirectResponse(url=frontend_url)

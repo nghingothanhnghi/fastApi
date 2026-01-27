@@ -13,9 +13,8 @@ class QRService:
         If data is not provided, it defaults to a URL pointing to the product info.
         """
         if not data:
-            # Default to a mock URL or just the product ID
-            # In a real scenario, this would be a frontend URL
-            data = f"https://your-frontend-domain.com/product/{product_id}"
+            # Point to the backend scan/redirect endpoint
+            data = f"{config.BACKEND_URL}/products/{product_id}/scan"
 
         qr = qrcode.QRCode(
             version=1,
