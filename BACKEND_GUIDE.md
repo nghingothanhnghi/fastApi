@@ -117,6 +117,14 @@ Related files:
 - **ADB**: clients/setup helpers.
 - **Email**: SMTP-based email sending (used for password reset etc.).
 
+### 7.7 Product Module (`app/product`)
+- **Routes**: `/products` for CRUD and QR operations.
+- **Scan QR Flow**:
+  - `GET /products/:id/scan` → Backend endpoint for QR code scanning.
+  - **Redirect**: Backend redirects the browser to the Frontend URL `/products/:id`.
+  - **Result**: Frontend displays the Product detail UI.
+- **Services**: `product_service.py` for DB logic, `qr_service.py` for QR generation/handling.
+
 ## 8) Background Jobs & Health
 
 - **Global Scheduler**: started on app startup (`start_scheduler`).
@@ -138,6 +146,7 @@ Related files:
   - **/devices**, **/tap**, **/screen** — Android device operations.
   - **/object-detection** — CV endpoints.
   - **/hydro**, **/sensor**, **/actuator** — hydro system.
+  - **/products** — product management and QR scanning.
 
 ## 11) Logging (`app/core/logging_config.py`)
 
@@ -205,4 +214,5 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `app/utils/scheduler.py` — APScheduler wrapper + health
 - `app/hydro_system/scheduler.py` — sensor collection job
 - `app/user/routes/auth_router.py` — login and current-user endpoints
+- `app/product/routes/product_router.py` — product and QR endpoints
 - `app/middleware/error_handler.py` — exception handling middleware
