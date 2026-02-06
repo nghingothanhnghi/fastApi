@@ -26,9 +26,6 @@ MEDIA_URL = os.getenv("MEDIA_URL", "/static/products")
 QR_CODE_DIR = os.getenv("QR_CODE_DIR", "uploads/qr_codes")
 QR_CODE_URL = os.getenv("QR_CODE_URL", "/static/qr_codes")
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:

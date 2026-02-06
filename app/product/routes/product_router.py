@@ -175,8 +175,7 @@ def regenerate_qr_code(product_id: int, db: Session = Depends(get_db)):
 def scan_product_qr(product_id: int):
     """
     Endpoint for QR code scans.
-    Redirects the user to the frontend product detail page.
+    Redirects to the product API detail endpoint.
     """
-    # In a real app, you might log analytics here (who scanned, when, etc.)
-    frontend_url = f"{config.FRONTEND_URL}/products/{product_id}"
-    return RedirectResponse(url=frontend_url)
+    return RedirectResponse(url=f"/products/{product_id}")
+
