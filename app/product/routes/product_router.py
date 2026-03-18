@@ -178,15 +178,17 @@ def scan_product_qr(product_id: int, request: Request):
     Always redirects to frontend product detail page.
     """
 
-    # Backend origin (e.g. http://localhost:8000)
-    backend_origin = str(request.base_url).rstrip("/")
-
-    # DEV mapping (api → frontend)
-    if "localhost:8000" in backend_origin:
-        frontend_origin = "http://localhost:5173"
-    else:
-        # PROD: same domain (or reverse proxy handles it)
-        frontend_origin = backend_origin
+    # Use configured frontend URL, or fallback to request base
+    frontend_origin = config.FRONTEND_URL.rstrip("/") if config.FRONTEND_URL else None
+    
+    if not frontend_origin:
+        backend_origin = str(request.base_url).rstrip("/")
+        # DEV mapping (api:8000 → frontend:5173)
+        if "localhost:8000" in backend_origin:
+            frontend_origin = "http://localhost:5173"
+        else:
+            # PROD: same domain (or reverse proxy handles it)
+            frontend_origin = backend_origin
 
     redirect_url = f"{frontend_origin}/products/{product_id}"
 

@@ -16,21 +16,22 @@ class QRService:
         """
         Generate (or regenerate) a QR code for a product.
 
-        The QR payload is intentionally domain-agnostic.
-        It encodes a relative resource identifier, not a full URL.
+        The QR payload encodes a full URL pointing to the backend scan endpoint,
+        which then redirects to the frontend.
 
         Args:
             product_id (int): Product ID
             payload (str | None): Custom QR payload.
-                                   Defaults to `/products/{id}/scan`.
+                                   Defaults to `{BACKEND_URL}/products/{id}/scan`.
 
         Returns:
             str: Public QR image URL (relative, frontend-safe)
         """
 
-        # Default payload (NO domain)
+        # Default payload (WITH domain for scanning)
         if not payload:
-            payload = f"/products/{product_id}/scan"
+            base = config.BACKEND_URL.rstrip("/")
+            payload = f"{base}/products/{product_id}/scan"
 
         # Ensure QR directory exists
         os.makedirs(config.QR_CODE_DIR, exist_ok=True)
