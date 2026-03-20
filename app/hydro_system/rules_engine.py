@@ -1,6 +1,7 @@
 # File: app/hydro_system/rules_engine.py
 # Description: Rules engine to determine actions based on sensor data
 
+from datetime import datetime
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.models.actuator import HydroActuator
 from app.core.logging_config import get_logger
@@ -108,6 +109,35 @@ def should_dose_nutrients(sensor_data: dict, thresholds: dict) -> bool:
     
     return False
 
+def is_in_schedule(actuator) -> bool:
+    """Check if current time is within any active schedule for the actuator"""
+    if not hasattr(actuator, "schedules") or not actuator.schedules:
+        return False
+
+    now = datetime.now()
+    current_time = now.time()
+    current_day = now.strftime("%a").lower()  # mon, tue, etc.
+
+    for schedule in actuator.schedules:
+        if not schedule.is_active:
+            continue
+
+        # Check day
+        days = [d.strip().lower() for d in schedule.repeat_days.split(",")]
+        if current_day not in days:
+            continue
+
+        # Check time range
+        if schedule.start_time <= schedule.end_time:
+            if schedule.start_time <= current_time <= schedule.end_time:
+                return True
+        else:
+            # Over-night schedule (e.g., 22:00 to 06:00)
+            if current_time >= schedule.start_time or current_time <= schedule.end_time:
+                return True
+
+    return False
+
 def check_rules(
     sensor_data: dict,
     thresholds: dict = DEFAULT_THRESHOLDS,
@@ -134,6 +164,9 @@ def check_rules(
         # Use thresholds from device, fallback to global
         actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
 
+        # Check schedule first
+        scheduled_on = is_in_schedule(actuator)
+
         should_activate = False
 
         if actuator_type == "pump":
@@ -149,11 +182,15 @@ def check_rules(
         elif actuator_type == "nutrient_pump":
             should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
 
+        # Actuator is ON if either scheduled OR rule-based
+        final_on = scheduled_on or should_activate
+
         actions.append({
             "actuator_id": actuator_id,
-            "on": should_activate,
+            "on": final_on,
             "type": actuator_type,
             "thresholds_used": actuator_thresholds,
+            "scheduled": scheduled_on
         })
 
     # Global/system alerts

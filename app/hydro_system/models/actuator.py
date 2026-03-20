@@ -37,6 +37,7 @@ class HydroActuator(Base):
     device = relationship("HydroDevice", back_populates="actuators")
 
     logs = relationship("HydroActuatorLog", back_populates="actuator", cascade="all, delete")
+    schedules = relationship("HydroSchedule", back_populates="actuator", cascade="all, delete")
 
     sensor_key = Column(String, nullable=True)
 
