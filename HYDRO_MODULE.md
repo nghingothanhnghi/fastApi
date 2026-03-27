@@ -11,10 +11,15 @@ app/hydro_system/
 ├── models/              # SQLAlchemy ORM models
 │   ├── device.py        # HydroDevice (ESP32 mainboard)
 │   ├── actuator.py      # HydroActuator (pump, light, fan, valve, water_pump)
+│   ├── schedule.py      # HydroSchedule (time-based rules)
+│   ├── actuator_log.py  # HydroActuatorLog (historical actions)
 │   └── sensor_data.py   # SensorData (temperature, humidity, moisture, water level)
 ├── schemas/             # Pydantic validation schemas
 │   ├── device.py        # HydroDeviceCreate, HydroDeviceUpdate, HydroDeviceOut
-│   └── actuator.py      # HydroActuatorCreate, HydroActuatorUpdate, HydroActuatorOut
+│   ├── actuator.py      # HydroActuatorCreate, HydroActuatorUpdate, HydroActuatorOut
+│   ├── schedule.py      # HydroScheduleCreate, HydroScheduleUpdate, HydroScheduleOut
+│   ├── actuator_log.py  # HydroActuatorLogOut
+│   └── sensor_data.py   # SensorDataOut
 ├── controllers/         # Business logic
 │   ├── device_controller.py        # Device CRUD + control logic
 │   ├── actuator_controller.py      # Actuator state management
@@ -22,12 +27,16 @@ app/hydro_system/
 ├── services/            # Data access layer
 │   ├── device_service.py           # Database queries for devices
 │   ├── actuator_service.py         # Database queries for actuators
+│   ├── actuator_log_service.py     # Database queries for logs
+│   ├── schedule_service.py         # Database queries for schedules
 │   └── sensor_data_service.py      # Database queries for sensor readings
 ├── routes/              # API endpoints
 │   ├── device_router.py            # Device CRUD + location control
 │   ├── actuator_router.py          # Actuator control endpoints
+│   ├── actuator_logs_router.py     # Actuator logs endpoints
+│   ├── schedule_router.py          # Schedule management endpoints
 │   ├── sensor_router.py            # Sensor data endpoints
-│   └── system_router.py            # System status endpoints
+│   └── system_router.py            # System status + control endpoints
 ├── config.py            # Configuration (device IDs, thresholds, actuator types)
 ├── rules_engine.py      # Automation rules for actuator control
 ├── scheduler.py         # Background sensor collection job
@@ -92,6 +101,8 @@ Represents individual hardware components (pumps, lights, fans, valves, water se
 | `port` | Integer | GPIO pin number on ESP32 |
 | `is_active` | Boolean | Whether actuator is enabled for control |
 | `default_state` | Boolean | Initial/default state (ON=true, OFF=false) |
+| `control_mode` | String | Control mode: `binary`, `pulse`, `pwm` |
+| `control_params` | JSON | Parameters for pulse/pwm mode |
 | `device_id` | Integer (FK) | Parent device |
 | `sensor_key` | String (Optional) | Linked sensor type (e.g., "temperature", "humidity") |
 | `created_at` | DateTime | Creation timestamp |
@@ -138,6 +149,37 @@ Historical readings from sensors (temperature, humidity, moisture, water level, 
 | `ec` | Float | Electrical Conductivity (mS/cm) |
 | `ppm` | Float | Parts Per Million (PPM) |
 | `created_at` | DateTime | When reading was taken |
+
+### HydroSchedule (Time-based Rules)
+
+**Table:** `hydro_schedules`
+
+Defines specific times when an actuator should be automatically turned on or off.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `actuator_id` | Integer (FK) | Linked actuator |
+| `start_time` | Time | When to turn ON |
+| `end_time` | Time | When to turn OFF |
+| `repeat_days` | String | Comma-separated days (e.g., "mon,tue,wed") |
+| `is_active` | Boolean | Whether schedule is enabled |
+
+### HydroActuatorLog (Historical Actions)
+
+**Table:** `hydro_actuator_logs`
+
+Audit trail of all actuator state changes.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `actuator_id` | Integer (FK) | Linked actuator |
+| `action` | String | Action taken ("on", "off", "toggle") |
+| `state` | String | Resulting state ("ON", "OFF") |
+| `source` | String | Who triggered ("user", "scheduler", "rule_engine") |
+| `note` | String | Optional reason or context |
+| `timestamp` | DateTime | When action occurred |
 
 ## API Endpoints
 
@@ -350,12 +392,12 @@ curl -X POST "http://localhost:8000/hydro/devices/location/Greenhouse%20A/contro
 curl -X POST "http://localhost:8000/hydro/devices/location/Farm%20Building%202/control?on=false"
 ```
 
-### Actuator Control
+### Actuator Management
 
 #### Get Actuators by Device
 
 ```http
-GET /hydro/actuators/device/{device_id}
+GET /actuator/device/{device_id}
 ```
 
 **Path Parameters:**
@@ -366,7 +408,7 @@ GET /hydro/actuators/device/{device_id}
 #### Create Actuator
 
 ```http
-POST /hydro/actuators
+POST /actuator
 Content-Type: application/json
 
 {
@@ -388,7 +430,7 @@ Content-Type: application/json
 #### Update Actuator
 
 ```http
-PUT /hydro/actuators/{actuator_id}
+PUT /actuator/{actuator_id}
 ```
 
 **Path Parameters:**
@@ -398,30 +440,55 @@ PUT /hydro/actuators/{actuator_id}
 
 **Response:** `HydroActuatorOut`
 
-### Sensor Data
-
-#### Get Sensor Data
-
-```http
-GET /hydro/sensors?device_id=1&limit=100&skip=0
-```
-
-**Query Parameters:**
-- `device_id` (int, optional): Filter by device
-- `limit` (int, default=100): Items per page
-- `skip` (int, default=0): Pagination offset
-
-**Response:** `List[SensorDataOut]`
+### Sensor Data & Analytics
 
 #### Get Latest Sensor Data
 
 ```http
-GET /hydro/sensors/latest?device_id=1
+GET /sensor/data
+```
+Returns the latest readings for all sensors.
+
+#### Get Thresholds
+
+```http
+GET /sensor/thresholds
 ```
 
-**Response:** `SensorDataOut`
+#### Update Thresholds
 
-### System Status
+```http
+POST /sensor/thresholds
+```
+
+#### Submit Sensor Data
+
+```http
+POST /sensor/data
+```
+Submit new readings (typically used by ESP32 devices).
+
+#### Water Level Status
+
+```http
+GET /sensor/water-level/status
+```
+Returns current water level with analysis and recommendations.
+
+#### Water Level History
+
+```http
+GET /sensor/water-level/history?hours=24
+```
+
+#### Water Consumption Analysis
+
+```http
+GET /sensor/water-level/consumption?hours=24
+```
+Predicts when the tank will be empty based on usage.
+
+### System Control & Status
 
 #### Get System Status
 
@@ -430,31 +497,80 @@ GET /hydro/status?device_id=1
 ```
 
 **Query Parameters:**
-- `device_id` (int, optional): If not provided, uses first active device
+- `device_id` (int, optional): Filter by device. If not provided, returns all devices for user's client.
 
-**Response:**
-```json
-{
-  "device_id": 1,
-  "device_name": "Greenhouse A Controller",
-  "is_active": true,
-  "last_reading": {
-    "temperature": 22.5,
-    "humidity": 65,
-    "moisture": 45,
-    "water_level": 75,
-    "ec": 1.8,
-    "ppm": 900
-  },
-  "actuator_states": {
-    "pump_1_1": false,
-    "light_1_2": true,
-    "fan_1_3": false
-  },
-  "automation_active": true,
-  "last_automation_run": "2025-01-15T14:20:00Z"
-}
+**Response:** `List[dict]` containing sensor data, actuator states, and automation status per device.
+
+#### Individual Actuator Control
+
+```http
+POST /hydro/{actuator_type}/on?device_id=1
+POST /hydro/{actuator_type}/off?device_id=1
 ```
+
+**Supported Types:** `pump`, `light`, `fan`, `water-pump`
+
+#### Water Tank Refill
+
+```http
+POST /hydro/water-tank/refill?device_id=1&duration=300
+```
+
+**Query Parameters:**
+- `duration` (int, default=300): Refill time in seconds (30s to 1800s).
+
+#### Emergency Stop
+
+```http
+POST /hydro/emergency-stop
+```
+Turns OFF all actuators for all devices belonging to the user.
+
+#### Control Actuator by ID
+
+```http
+POST /hydro/actuator/{actuator_id}/on
+POST /hydro/actuator/{actuator_id}/off
+```
+
+#### Scheduler Control
+
+```http
+POST /hydro/scheduler/start
+POST /hydro/scheduler/stop
+POST /hydro/scheduler/restart
+```
+Starts, stops, or restarts the background sensor collection and automation job.
+
+### Schedule Management
+
+#### Create Schedule
+```http
+POST /hydro/schedules
+```
+
+#### List Schedules by Actuator
+```http
+GET /hydro/schedules/actuator/{actuator_id}
+```
+
+#### Update Schedule
+```http
+PATCH /hydro/schedules/{schedule_id}
+```
+
+#### Delete Schedule
+```http
+DELETE /hydro/schedules/{schedule_id}
+```
+
+### Actuator Logs
+
+#### Fetch Logs
+```http
+GET /hydro/actuator-logs?actuator_id=1&device_id=esp32-001&start_time=ISO_TIMESTAMP&end_time=ISO_TIMESTAMP
+```
+Retrieves historical actions taken on actuators.
 
 ## Configuration
 
@@ -506,6 +622,21 @@ ACTUATOR_TYPES = {
 }
 ```
 
+#### Supported Actuator Types
+```python
+SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve", "nutrient_pump"]
+```
+
+#### Water Level Config
+```python
+WATER_LEVEL_CONFIG = {
+    "sensor_type": "ultrasonic",
+    "tank_height_cm": 50,
+    "max_volume_liters": 100,
+    "calibration_offset": 2
+}
+```
+
 ## Service Layer
 
 ### HydroDeviceService
@@ -518,15 +649,18 @@ ACTUATOR_TYPES = {
 |--------|-----------|---------|
 | `create_device()` | `(db, device_in: HydroDeviceCreate) -> HydroDevice` | Create new device, auto-create default actuators |
 | `get_device()` | `(db, device_id: int) -> HydroDevice` | Fetch by internal ID |
-| `get_device_by_external_id()` | `(db, external_id: str) -> HydroDevice` | Fetch by device_id |
-| `get_devices_by_location()` | `(db, location: str) -> List[HydroDevice]` | **NEW** - Fetch all devices at a location |
+| `get_device_by_external_id()` | `(db, external_id: str) -> HydroDevice` | Fetch by device_id (mac/uuid) |
+| `get_device_for_user()` | `(db, device_id: int, user_id: int) -> HydroDevice` | Fetch device for specific user |
+| `get_devices_by_location()` | `(db, location: str) -> List[HydroDevice]` | Fetch all devices at a location |
 | `get_devices_by_user()` | `(db, user_id: int) -> List[HydroDevice]` | Fetch user's devices |
 | `get_devices_by_client()` | `(db, client_id: str) -> List[HydroDevice]` | Fetch client's devices |
 | `get_first_active_device()` | `(db) -> HydroDevice` | Get the first active device for fallback |
+| `get_fallback_device_id()` | `(db) -> str` | Get a valid device ID from DB or config |
+| `get_or_create_default_device()` | `(db) -> HydroDevice` | Ensure at least one device exists |
 | `update_device()` | `(db, device: HydroDevice, updates) -> HydroDevice` | Update device fields |
 | `delete_device()` | `(db, device: HydroDevice) -> None` | Delete device and cascading actuators |
 | `set_device_active()` | `(db, device_id: int, active: bool) -> HydroDevice` | Toggle device active status |
-| `control_devices_by_location()` | `(db, location: str, on: bool) -> dict` | **NEW** - Control all devices at location |
+| `control_devices_by_location()` | `(db, location: str, on: bool) -> dict` | Control all devices at location |
 
 ### HydroActuatorService
 
@@ -538,9 +672,11 @@ ACTUATOR_TYPES = {
 | `get_actuator()` | `(db, actuator_id: int) -> HydroActuator` | Fetch by ID |
 | `get_actuators_by_device()` | `(db, device_id: int) -> List[HydroActuator]` | Fetch device's actuators |
 | `get_actuators_by_device_and_type()` | `(db, device_id, type) -> List[HydroActuator]` | Filter by device and type |
+| `get_all_actuators_by_type()` | `(db, type, device_id)` | Fetch all of a specific type |
+| `get_active_actuators_by_type()` | `(db, type, device_id)` | Fetch only active actuators of type |
 | `update_actuator()` | `(db, actuator_id, updates) -> HydroActuator` | Update actuator |
 | `delete_actuator()` | `(db, actuator_id: int) -> bool` | Delete actuator |
-| `update_actuators_by_type()` | `(db, device_id, type, value) -> List[HydroActuator]` | Bulk toggle by type |
+| `update_actuators_by_type()` | `(db, device_id, type, value) -> List[HydroActuator]` | Bulk toggle default state |
 
 ## Controllers
 
@@ -580,6 +716,21 @@ control_actuator_by_id(db, actuator_id, on)
 # Automation
 handle_automation(db, sensor_data, device_id)
 log_device_action(name, device_type, state, ...)
+```
+
+### system_controller.py
+
+Orchestrates complex system actions and provides status summaries.
+
+**Key Functions:**
+
+```python
+get_system_status(db, user_id, device_id)
+control_actuator(db, actuator_type, on, user_id, device_id)
+control_actuator_by_id(db, actuator_id, on)
+refill_water_tank(db, user_id, device_id, duration)
+emergency_stop(db, user_id)
+scheduler_control(action, user_id, device_id) # action: start|stop|restart
 ```
 
 ## Usage Examples
