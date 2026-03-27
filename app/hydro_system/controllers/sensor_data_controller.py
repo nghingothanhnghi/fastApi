@@ -9,6 +9,7 @@ from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.schemas.sensor_data import SensorDataCreateSchema
 from app.hydro_system.config import DEFAULT_THRESHOLDS, WATER_LEVEL_CONFIG
 from app.hydro_system.rules_engine import get_water_level_status, check_rules
+from app.hydro_system.controllers.actuator_controller import handle_automation
 from app.hydro_system.services.device_service import hydro_device_service
 
 from app.core.logging_config import get_logger
@@ -55,6 +56,17 @@ def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
     db.add(new_data)
     db.commit()
     db.refresh(new_data)
+    
+    # ✅ Reactive Automation: Run rules immediately on new data
+    sensor_data_dict = {
+        "temperature": new_data.temperature,
+        "humidity": new_data.humidity,
+        "light": new_data.light,
+        "moisture": new_data.moisture,
+        "water_level": new_data.water_level,
+        "device_id": device.id
+    }
+    handle_automation(db, sensor_data_dict, device_id=device.id)
 
     logger.info(
         f"✅ New sensor data created: ID={new_data.id}, device_id={device.id}, "
