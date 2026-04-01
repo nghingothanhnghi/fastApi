@@ -7,39 +7,54 @@ from app.hydro_system.models.schedule import HydroSchedule
 
 class RecipeEngineController:
 
-    def apply_recipe_to_schedule(self, db, batch, recipe):
+
+    def apply_stage_recipe(self, db, batch, recipe):
 
         if not recipe.start_time or not recipe.end_time:
-            return  # guard clause
+            return
 
-        actuators = hydro_actuator_service.get_active_actuators_by_type(
-            db=db,
-            actuator_type=recipe.actuator_type,
-            device_id=batch.zone_id
-        )
-
-        schedules_to_create = []
-
-        for actuator in actuators:
-
-            if hydro_schedule_service.exists_schedule(
+        try:
+            # 🔴 STEP 1: DELETE old auto schedules
+            hydro_schedule_service.delete_by_device_and_source(
                 db=db,
-                actuator_id=actuator.id,
-                start_time=recipe.start_time,
-                end_time=recipe.end_time,
-                repeat_days="mon,tue,wed,thu,fri,sat,sun"
-            ):
-                continue
+                device_id=batch.zone_id,
+                source="plant_auto"
+            )
 
-            schedules_to_create.append(
+            # 🟢 STEP 2: GET actuators
+            actuators = hydro_actuator_service.get_active_actuators_by_type(
+                db=db,
+                actuator_type=recipe.actuator_type,
+                device_id=batch.zone_id
+            )
+
+            # 🔵 STEP 3: BUILD schedules
+            schedules_to_create = [
                 HydroSchedule(
-                    actuator_id=actuator.id,
+                    actuator_id=a.id,
                     start_time=recipe.start_time,
                     end_time=recipe.end_time,
                     repeat_days="mon,tue,wed,thu,fri,sat,sun",
-                    is_active=True
+                    is_active=True,
+                    source="plant_auto"
                 )
-            )
+                for a in actuators
+            ]
 
-        if schedules_to_create:
-            hydro_schedule_service.bulk_create(db, schedules_to_create)
+            # 🟣 STEP 4: INSERT (no commit yet)
+            if schedules_to_create:
+                hydro_schedule_service.bulk_create(
+                    db,
+                    schedules_to_create,
+                    commit=False
+                )
+
+            # ✅ SINGLE COMMIT (atomic)
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+
+recipe_engine_controller = RecipeEngineController()

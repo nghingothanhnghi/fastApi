@@ -2,6 +2,7 @@
 
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.models.schedule import HydroSchedule
 from app.hydro_system.schemas.schedule import HydroScheduleCreate, HydroScheduleUpdate
 
@@ -41,7 +42,7 @@ class HydroScheduleService:
         db.commit()
         return True
     
-        # ✅ ADD THIS
+    # ✅ ADD THIS
     def exists_schedule(
         self,
         db: Session,
@@ -58,8 +59,15 @@ class HydroScheduleService:
         ).first() is not None
 
     # ✅ ADD THIS (for controller bulk insert)
-    def bulk_create(self, db: Session, schedules: list[HydroSchedule]):
+    def bulk_create(self, db: Session, schedules: list[HydroSchedule], commit: bool = True):
         db.add_all(schedules)
-        db.commit()
+        if commit:
+            db.commit()
+
+    def delete_by_device_and_source(self, db: Session, device_id: int, source: str):
+        db.query(HydroSchedule).join(HydroActuator).filter(
+            HydroActuator.device_id == device_id,
+            HydroSchedule.source == source
+        ).delete(synchronize_session=False)        
 
 hydro_schedule_service = HydroScheduleService()

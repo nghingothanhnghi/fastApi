@@ -19,6 +19,9 @@ class HydroSchedule(Base):
     
     is_active = Column(Boolean, default=True)
 
+    source = Column(String, default="manual")  
+    # values: manual | plant_auto
+
     # Relationships
     actuator = relationship("HydroActuator", back_populates="schedules")
 
