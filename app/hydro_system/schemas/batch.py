@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 class BatchCreate(BaseModel):
     plant_id: int
+    current_stage_id: int | None = None
     zone_id: int | None = None
     start_date: date
 
@@ -11,6 +12,7 @@ class BatchCreate(BaseModel):
 class BatchOut(BaseModel):
     id: int
     plant_id: int
+    current_stage_id: int | None
     zone_id: int | None
     start_date: date
     status: str

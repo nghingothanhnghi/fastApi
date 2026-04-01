@@ -8,7 +8,8 @@ class PlantBatch(Base):
 
     id = Column(Integer, primary_key=True)
     plant_id = Column(Integer, ForeignKey("plants.id"))
-    zone_id = Column(Integer, nullable=True)  # link later
+    current_stage_id = Column(Integer, ForeignKey("growth_stages.id"), nullable=True)
+    zone_id = Column(Integer, nullable=True)  # link to HydroDevice.id
 
     start_date = Column(Date, nullable=False)
     status = Column(String(20), default="growing")

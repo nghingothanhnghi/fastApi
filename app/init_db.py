@@ -4,6 +4,12 @@ from .android_system.models.device import Device
 from .hydro_system.models.device import HydroDevice
 from .hydro_system.models.actuator import HydroActuator
 from .hydro_system.models.sensor_data import SensorData
+from .hydro_system.models.plant import Plant
+from .hydro_system.models.plant_batch import PlantBatch
+from .hydro_system.models.growth_stage import GrowthStage
+from .hydro_system.models.growth_recipe import GrowthRecipe
+from .hydro_system.models.schedule import HydroSchedule
+
 from .user.models.user import User
 from .user.models.password_reset import PasswordResetCode
 from .user.models.role import Role
