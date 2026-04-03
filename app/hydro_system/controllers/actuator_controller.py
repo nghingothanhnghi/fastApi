@@ -2,12 +2,15 @@
 # Description: Hardware + actuator-based control logic for hydroponic system devices
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.state_manager import set_state, get_state
 from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES, SUPPORTED_ACTUATOR_TYPES
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
+from app.hydro_system.models.plant_batch import PlantBatch
+from app.hydro_system.models.growth_stage import GrowthStage
+from app.hydro_system.models.growth_recipe import GrowthRecipe
 
 from app.core.logging_config import get_logger
 
@@ -28,31 +31,34 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
     """Control all actuators of a given type on the device"""
     actuators = hydro_actuator_service.get_all_actuators_by_type(db, device_type, device_id=device_id)
 
+    state_str = "ON" if on else "OFF"
+
     if not actuators:
         fallback_id = DEFAULT_ACTUATORS.get(device_type, f"default_{device_type}_id")
         key = f"{device_type}_{fallback_id}"
         set_state(key, on)
         log_device_action("Default", device_type, on, fallback_id)
-        log_actuator_action(db, None, on)
+        log_actuator_action(db, actuator_id=None, action=state_str.lower(), state=state_str)
         return
 
     for actuator in actuators:
         key = f"{actuator.type}_{actuator.device_id}_{actuator.port}"
         set_state(key, on)
         log_device_action(actuator.name or actuator.type, actuator.type, on, actuator.device_id, actuator.id)
-        log_actuator_action(db, actuator.id, on)
+        log_actuator_action(db, actuator.id, action=state_str.lower(), state=state_str)
 
 
-def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
+def control_actuator_by_id(db: Session, actuator_id: int, on: bool, source: str = "user"):
     """Control a specific actuator directly by its ID"""
     actuator = hydro_actuator_service.get_actuator(db, actuator_id)
     if not actuator:
         raise HTTPException(status_code=404, detail="Actuator not found")
 
+    state_str = "ON" if on else "OFF"
     key = f"{actuator.type}_{actuator.device_id}_{actuator.port}"
     set_state(key, on)
     log_device_action(actuator.name or actuator.type, actuator.type, on, actuator.device_id, actuator.id)
-    log_actuator_action(db, actuator.id, on)
+    log_actuator_action(db, actuator.id, action=state_str.lower(), state=state_str, source=source)
 
     return {
         "message": f"{actuator.name or actuator.type} turned {'on' if on else 'off'}",
@@ -63,13 +69,26 @@ def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
 
 # --- Automation handler for multiple actuators ---
 
-def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
+def handle_automation(db: Session, sensor_data: dict, device_id: int = None):
     """
-    Automate actuator control based on sensor readings.
+    Automate actuator control based on sensor readings and growth recipes.
     Each actuator on the device is evaluated with possible threshold overrides.
     """
     alerts = []
     actions_taken = {}
+
+    # 🌿 GET current GrowthRecipes for this device/zone
+    recipes = []
+    batch = db.query(PlantBatch).options(
+        joinedload(PlantBatch.current_stage).joinedload(GrowthStage.recipes)
+    ).filter(
+        PlantBatch.zone_id == device_id,
+        PlantBatch.status == "growing"
+    ).first()
+
+    if batch and batch.current_stage:
+        recipes = batch.current_stage.recipes
+        logger.debug(f"[Automation] Found {len(recipes)} recipes for Batch {batch.id}")
 
     for device_type in SUPPORTED_ACTUATOR_TYPES:
         actuators = hydro_actuator_service.get_all_actuators_by_type(db, device_type, device_id=device_id)
@@ -82,7 +101,13 @@ def handle_automation(db: Session, sensor_data: dict, device_id: str = None):
             # Per-actuator or per-device thresholds
             thresholds_override = actuator.device.thresholds or {}
 
-            rules_result = check_rules(sensor_data, overrides=thresholds_override, actuators=[actuator])
+            # Pass recipes to check_rules
+            rules_result = check_rules(
+                sensor_data, 
+                overrides=thresholds_override, 
+                actuators=[actuator],
+                recipes=recipes
+            )
             
             # Find the action for this specific actuator
             action = next((a for a in rules_result.get("actions", []) if a["actuator_id"] == actuator.id), None)

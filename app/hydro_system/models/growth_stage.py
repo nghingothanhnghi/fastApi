@@ -12,5 +12,6 @@ class GrowthStage(Base):
     name = Column(String(50), nullable=False)
     day_start = Column(Integer, nullable=False)
     day_end = Column(Integer, nullable=False)
+    recipes = relationship("GrowthRecipe", back_populates="stage", cascade="all, delete")
 
     created_at = Column(DateTime, default=datetime.utcnow)

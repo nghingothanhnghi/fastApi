@@ -59,13 +59,19 @@ class HydroActuatorService:
             raise e
 
     def get_all_actuators_by_type(self, db: Session, actuator_type: str, device_id: Optional[int] = None) -> List[HydroActuator]:
-        query = db.query(HydroActuator).options(joinedload(HydroActuator.schedules)).filter(HydroActuator.type == actuator_type)
+        query = db.query(HydroActuator).options(
+            joinedload(HydroActuator.schedules),
+            joinedload(HydroActuator.logs)
+        ).filter(HydroActuator.type == actuator_type)
         if device_id is not None:
             query = query.filter(HydroActuator.device_id == device_id)
         return query.all()
 
     def get_active_actuators_by_type(self, db: Session, actuator_type: str, device_id: Optional[int] = None) -> List[HydroActuator]:
-        query = db.query(HydroActuator).options(joinedload(HydroActuator.schedules)).filter(
+        query = db.query(HydroActuator).options(
+            joinedload(HydroActuator.schedules),
+            joinedload(HydroActuator.logs)
+        ).filter(
             HydroActuator.type == actuator_type,
             HydroActuator.is_active == True
         )

@@ -8,6 +8,7 @@ class GrowthRecipe(Base):
 
     id = Column(Integer, primary_key=True)
     stage_id = Column(Integer, ForeignKey("growth_stages.id", ondelete="CASCADE"))
+    stage = relationship("GrowthStage", back_populates="recipes")
 
     actuator_type = Column(String, nullable=False)  # light, pump
     action = Column(String, nullable=False)         # on, interval

@@ -138,11 +138,44 @@ def is_in_schedule(actuator) -> bool:
 
     return False
 
+def is_in_interval(actuator, recipe) -> bool:
+    """Check if actuator should be ON based on interval logic (for pumps)"""
+    if not recipe or recipe.action != "interval":
+        return False
+    
+    if not recipe.interval_on_min or not recipe.interval_off_min:
+        return False
+
+    # Get last state change from logs
+    last_log = None
+    if hasattr(actuator, "logs") and actuator.logs:
+        # Sort logs by timestamp descending
+        sorted_logs = sorted(actuator.logs, key=lambda x: x.timestamp, reverse=True)
+        if sorted_logs:
+            last_log = sorted_logs[0]
+
+    if not last_log:
+        # Default to ON to start the first cycle
+        return True
+
+    now = datetime.utcnow()
+    diff_min = (now - last_log.timestamp).total_seconds() / 60
+
+    last_state = last_log.state.upper() if last_log.state else "OFF"
+
+    if last_state == "ON":
+        # If was ON, check if it's time to turn OFF
+        return diff_min < recipe.interval_on_min
+    else:
+        # If was OFF, check if it's time to turn ON
+        return diff_min >= recipe.interval_off_min
+
 def check_rules(
     sensor_data: dict,
     thresholds: dict = DEFAULT_THRESHOLDS,
     actuators: list = [],
     overrides: dict = None,
+    recipes: list = []  # ✅ ADD THIS
 ) -> dict:
     """
     Evaluate sensor data and decide actions for each actuator, using individual thresholds if available.
@@ -167,6 +200,10 @@ def check_rules(
         # Check schedule first
         scheduled_on = is_in_schedule(actuator)
 
+        # ✅ Check interval-based recipe
+        recipe = next((r for r in recipes if r.actuator_type == actuator_type), None)
+        interval_on = is_in_interval(actuator, recipe)
+
         should_activate = False
 
         if actuator_type == "pump":
@@ -182,15 +219,16 @@ def check_rules(
         elif actuator_type == "nutrient_pump":
             should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
 
-        # Actuator is ON if either scheduled OR rule-based
-        final_on = scheduled_on or should_activate
+        # Actuator is ON if either scheduled OR interval OR rule-based
+        final_on = scheduled_on or interval_on or should_activate
 
         actions.append({
             "actuator_id": actuator_id,
             "on": final_on,
             "type": actuator_type,
             "thresholds_used": actuator_thresholds,
-            "scheduled": scheduled_on
+            "scheduled": scheduled_on,
+            "interval_mode": interval_on  # ✅ Track if it was triggered by interval
         })
 
     # Global/system alerts

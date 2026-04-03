@@ -41,22 +41,6 @@ class HydroScheduleService:
         db.delete(schedule)
         db.commit()
         return True
-    
-    # ✅ ADD THIS
-    def exists_schedule(
-        self,
-        db: Session,
-        actuator_id: int,
-        start_time,
-        end_time,
-        repeat_days: str
-    ) -> bool:
-        return db.query(HydroSchedule).filter(
-            HydroSchedule.actuator_id == actuator_id,
-            HydroSchedule.start_time == start_time,
-            HydroSchedule.end_time == end_time,
-            HydroSchedule.repeat_days == repeat_days
-        ).first() is not None
 
     # ✅ ADD THIS (for controller bulk insert)
     def bulk_create(self, db: Session, schedules: list[HydroSchedule], commit: bool = True):
