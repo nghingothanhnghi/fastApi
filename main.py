@@ -10,7 +10,7 @@ from app.user.routes import (user_router, roles_router, auth_router, password_re
 from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router, ws_router)
 # from app.camera_object_detection.websocket import router as hardware_ws_router
 
-from app.hydro_system.routes import ( system_router, sensor_router, actuator_router, schedule_router)
+from app.hydro_system.routes import ( system_router, sensor_router, actuator_router, schedule_router, batch_router)
 
 from app.payments.routes import payment_router
 
@@ -76,6 +76,7 @@ app.include_router(system_router.router)  # Handles /hydro/ endpoints
 app.include_router(sensor_router.router)   # Handles /sensor/ endpoints
 app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
 app.include_router(schedule_router.router)   # Handles /schedules/ endpoints
+app.include_router(batch_router.router)
 
 
 app.include_router(payment_router.router)  # Handles /payments/ endpoints

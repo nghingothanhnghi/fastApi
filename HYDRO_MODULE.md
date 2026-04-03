@@ -13,30 +13,36 @@ app/hydro_system/
 │   ├── actuator.py      # HydroActuator (pump, light, fan, valve, water_pump)
 │   ├── schedule.py      # HydroSchedule (time-based rules)
 │   ├── actuator_log.py  # HydroActuatorLog (historical actions)
-│   └── sensor_data.py   # SensorData (temperature, humidity, moisture, water level)
+│   ├── sensor_data.py   # SensorData (temperature, humidity, moisture, water level)
+│   ├── plant.py         # Plant metadata
+│   ├── plant_batch.py   # PlantBatch (growing session)
+│   ├── growth_stage.py  # GrowthStage (seedling, veg, bloom)
+│   └── growth_recipe.py # GrowthRecipe (specific actuator settings for a stage)
 ├── schemas/             # Pydantic validation schemas
-│   ├── device.py        # HydroDeviceCreate, HydroDeviceUpdate, HydroDeviceOut
-│   ├── actuator.py      # HydroActuatorCreate, HydroActuatorUpdate, HydroActuatorOut
-│   ├── schedule.py      # HydroScheduleCreate, HydroScheduleUpdate, HydroScheduleOut
-│   ├── actuator_log.py  # HydroActuatorLogOut
-│   └── sensor_data.py   # SensorDataOut
+│   ├── device.py        # HydroDevice schemas
+│   ├── actuator.py      # HydroActuator schemas
+│   ├── schedule.py      # HydroSchedule schemas
+│   ├── batch.py         # PlantBatch schemas
+│   ├── growth_stage.py  # GrowthStage schemas
+│   ├── growth_recipe.py # GrowthRecipe schemas
+│   └── sensor_data.py   # SensorData schemas
 ├── controllers/         # Business logic
 │   ├── device_controller.py        # Device CRUD + control logic
-│   ├── actuator_controller.py      # Actuator state management
-│   └── system_controller.py        # System status + automation
+│   ├── actuator_controller.py      # Actuator + automation handling
+│   ├── system_controller.py        # System status + emergency
+│   └── recipe_engine_controller.py # Recipe application logic
 ├── services/            # Data access layer
-│   ├── device_service.py           # Database queries for devices
-│   ├── actuator_service.py         # Database queries for actuators
-│   ├── actuator_log_service.py     # Database queries for logs
-│   ├── schedule_service.py         # Database queries for schedules
-│   └── sensor_data_service.py      # Database queries for sensor readings
+│   ├── device_service.py           # Device DB queries
+│   ├── actuator_service.py         # Actuator DB queries
+│   ├── plant_batch_service.py      # Batch DB queries
+│   ├── growth_stage_service.py     # Stage DB queries
+│   ├── growth_recipe_service.py    # Recipe DB queries
+│   └── schedule_service.py         # Schedule DB queries
 ├── routes/              # API endpoints
-│   ├── device_router.py            # Device CRUD + location control
-│   ├── actuator_router.py          # Actuator control endpoints
-│   ├── actuator_logs_router.py     # Actuator logs endpoints
-│   ├── schedule_router.py          # Schedule management endpoints
-│   ├── sensor_router.py            # Sensor data endpoints
-│   └── system_router.py            # System status + control endpoints
+│   ├── device_router.py            # Device endpoints
+│   ├── actuator_router.py          # Actuator endpoints
+│   ├── batch_router.py             # PlantBatch + Stage endpoints
+│   └── system_router.py            # System endpoints
 ├── config.py            # Configuration (device IDs, thresholds, actuator types)
 ├── rules_engine.py      # Automation rules for actuator control
 ├── scheduler.py         # Background sensor collection job
@@ -180,6 +186,64 @@ Audit trail of all actuator state changes.
 | `source` | String | Who triggered ("user", "scheduler", "rule_engine") |
 | `note` | String | Optional reason or context |
 | `timestamp` | DateTime | When action occurred |
+
+### Plant (Metadata)
+
+**Table:** `plants`
+
+Defines different species of plants (e.g., Lettuce, Tomato).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `name` | String | Species name |
+| `description` | Text | Planting details |
+
+### PlantBatch (Growing Session)
+
+**Table:** `plant_batches`
+
+A specific growing session linked to a plant and a device (zone).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `plant_id` | Integer (FK) | Linked plant species |
+| `current_stage_id` | Integer (FK) | Currently active growth stage |
+| `zone_id` | Integer (FK) | Device (HydroDevice) where this batch grows |
+| `start_date` | Date | When the session started |
+| `status` | String | "growing", "harvested", "failed" |
+
+### GrowthStage (Stage Definition)
+
+**Table:** `growth_stages`
+
+Specific phases of growth for a plant (e.g., "Seedling", "Vegetative").
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `plant_id` | Integer (FK) | Parent plant |
+| `name` | String | Stage name |
+| `day_start` | Integer | Day index when stage begins |
+| `day_end` | Integer | Day index when stage ends |
+
+### GrowthRecipe (Automation Settings)
+
+**Table:** `growth_recipes`
+
+Configuration for actuators during a specific growth stage.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key |
+| `stage_id` | Integer (FK) | Linked growth stage |
+| `actuator_type` | String | "light", "pump", etc. |
+| `action` | String | "on" (time-based) or "interval" (pump logic) |
+| `start_time` | Time | ON time (for "on" action) |
+| `end_time` | Time | OFF time (for "on" action) |
+| `interval_on_min` | Integer | Duration to stay ON (for "interval" action) |
+| `interval_off_min` | Integer | Duration to stay OFF (for "interval" action) |
 
 ## API Endpoints
 
@@ -572,6 +636,29 @@ GET /hydro/actuator-logs?actuator_id=1&device_id=esp32-001&start_time=ISO_TIMEST
 ```
 Retrieves historical actions taken on actuators.
 
+### Plant Batch Management
+
+#### Create Batch
+```http
+POST /batches
+```
+
+#### List Batches
+```http
+GET /batches
+```
+
+#### Set Batch Stage
+```http
+POST /batches/{batch_id}/set-stage/{stage_id}
+```
+**Behavior:**
+1. Updates `current_stage_id` for the batch.
+2. Identifies all `GrowthRecipe` records for the new stage.
+3. Deletes existing `plant_auto` schedules for the batch's device.
+4. Creates new `HydroSchedule` records for time-based recipes.
+5. Updates internal rules engine to handle interval-based recipes.
+
 ## Configuration
 
 ### File: `app/hydro_system/config.py`
@@ -820,6 +907,22 @@ actuator_controller.control_actuator_by_id()  (if rule triggered)
 state_manager.set_state()
   ↓
 log_actuator_action()
+```
+
+### Plant Batch & Stage Flow
+
+```
+POST /batches/{batch_id}/set-stage/{stage_id}
+  ↓
+batch_router.set_batch_stage()
+  ↓
+recipe_engine_controller.apply_stage_recipe()
+  ↓
+schedule_service.delete_by_device_and_source(source="plant_auto")
+  ↓ (if time-based recipe)
+schedule_service.bulk_create(source="plant_auto")
+  ↓ (if interval-based recipe)
+rules_engine.is_in_interval()  (Checked during next automation cycle)
 ```
 
 ## Background Jobs
