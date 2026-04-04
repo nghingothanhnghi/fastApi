@@ -563,7 +563,25 @@ GET /hydro/status?device_id=1
 **Query Parameters:**
 - `device_id` (int, optional): Filter by device. If not provided, returns all devices for user's client.
 
-**Response:** `List[dict]` containing sensor data, actuator states, and automation status per device.
+**Response:** `List[dict]` containing sensor data, actuator states, growing batch overview, and automation status per device.
+
+**Example Item:**
+```json
+{
+  "device_id": 1,
+  "device_name": "Greenhouse A Controller",
+  "sensors": { "temperature": 24.5, ... },
+  "growing_batch": {
+    "id": 5,
+    "plant_name": "Lettuce",
+    "days_growing": 12,
+    "current_stage": "Vegetative",
+    "status": "growing"
+  },
+  "actuators": [...],
+  "automation": { ... }
+}
+```
 
 #### Individual Actuator Control
 

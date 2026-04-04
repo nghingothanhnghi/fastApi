@@ -10,6 +10,9 @@ from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
+from app.hydro_system.models.plant_batch import PlantBatch
+from sqlalchemy.orm import joinedload
+from datetime import date
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -67,6 +70,27 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
             })      
 
+        # 5️⃣ Get currently growing batch for this device
+        batch_info = None
+        batch = db.query(PlantBatch).options(
+            joinedload(PlantBatch.plant),
+            joinedload(PlantBatch.current_stage)
+        ).filter(
+            PlantBatch.zone_id == device.id,
+            PlantBatch.status == "growing"
+        ).first()
+
+        if batch:
+            days_growing = (date.today() - batch.start_date).days
+            batch_info = {
+                "id": batch.id,
+                "plant_name": batch.plant.name if batch.plant else "Unknown",
+                "start_date": batch.start_date,
+                "days_growing": days_growing,
+                "current_stage": batch.current_stage.name if batch.current_stage else "None",
+                "status": batch.status
+            }
+
         # --- Compile full device status ---
         results.append({
             "device_id": device.id,
@@ -74,6 +98,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             "location": device.location,
             "sensors": sensor_data,
             "actuators": actuators_state,
+            "growing_batch": batch_info,
             "system": {
                 "scheduler_state": state_manager.get_state(f"scheduler_{device.id}")
             },

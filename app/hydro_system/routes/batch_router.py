@@ -5,15 +5,27 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.hydro_system.schemas.batch import BatchCreate, BatchOut
+from app.hydro_system.schemas.plant import PlantCreate, PlantOut
 from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageOut
 from app.hydro_system.schemas.growth_recipe import GrowthRecipeCreate, GrowthRecipeOut
 from app.hydro_system.services.plant_batch_service import plant_batch_service
+from app.hydro_system.services.plant_service import plant_service
 from app.hydro_system.services.growth_stage_service import growth_stage_service
 from app.hydro_system.services.growth_recipe_service import growth_recipe_service
 from app.hydro_system.controllers.recipe_engine_controller import recipe_engine_controller
 
 router = APIRouter(prefix="/batches", tags=["Plant Batches"])
 
+# Plant Metadata Routes
+@router.post("/plants", response_model=PlantOut, tags=["Plants"])
+def create_plant(plant_in: PlantCreate, db: Session = Depends(get_db)):
+    return plant_service.create_plant(db, plant_in)
+
+@router.get("/plants", response_model=List[PlantOut], tags=["Plants"])
+def get_plants(db: Session = Depends(get_db)):
+    return plant_service.get_all_plants(db)
+
+# Batch Routes
 @router.post("", response_model=BatchOut, status_code=status.HTTP_201_CREATED)
 def create_batch(batch_in: BatchCreate, db: Session = Depends(get_db)):
     return plant_batch_service.create_batch(db, batch_in)
@@ -43,8 +55,7 @@ def set_batch_stage(batch_id: int, stage_id: int, db: Session = Depends(get_db))
     plant_batch_service.update_batch(db, batch_id, {"current_stage_id": stage_id})
     
     # Apply all recipes for this stage
-    for recipe in stage.recipes:
-        recipe_engine_controller.apply_stage_recipe(db, batch, recipe)
+    recipe_engine_controller.apply_stage_recipes(db, batch, stage.recipes)
         
     return {"message": f"Stage {stage.name} applied to batch {batch_id}"}
 

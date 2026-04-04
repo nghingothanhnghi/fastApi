@@ -114,7 +114,7 @@ def is_in_schedule(actuator) -> bool:
     if not hasattr(actuator, "schedules") or not actuator.schedules:
         return False
 
-    now = datetime.now()
+    now = datetime.utcnow()
     current_time = now.time()
     current_day = now.strftime("%a").lower()  # mon, tue, etc.
 
