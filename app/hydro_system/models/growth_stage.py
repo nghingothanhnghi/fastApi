@@ -1,3 +1,5 @@
+# app/hydro_system/models/growth_stage.py
+# GrowthStage model representing a stage in the plant growth cycle
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean, JSON
 from datetime import datetime
 from sqlalchemy.orm import relationship

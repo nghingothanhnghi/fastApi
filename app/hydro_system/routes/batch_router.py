@@ -1,3 +1,5 @@
+# app/hydro_system/routes/batch_router.py
+# Routes for managing plant batches, growth stages, and growth recipes in the hydroponic system
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List

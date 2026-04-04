@@ -1,4 +1,5 @@
-
+# app/hydro_system/models/plant.py
+# Plant model for the hydroponic system application
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean, JSON, Text
 from datetime import datetime
 from sqlalchemy.orm import relationship

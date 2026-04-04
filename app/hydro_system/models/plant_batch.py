@@ -1,3 +1,5 @@
+# app/hydro_system/models/plant_batch.py
+# PlantBatch model representing a batch of plants in the hydroponic system
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Boolean, JSON, Date
 from datetime import datetime
 from sqlalchemy.orm import relationship
