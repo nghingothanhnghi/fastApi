@@ -917,8 +917,8 @@ Sensor Collection Job (60s interval)
 sensors.read_sensor_data()
   ↓
 device_controller.handle_automation()
-  ↓
-rules_engine.check_rules(sensor_data, thresholds)
+  ↓ (fetch recipes for current batch)
+rules_engine.check_rules(sensor_data, thresholds, recipes)
   ↓
 actuator_controller.control_actuator_by_id()  (if rule triggered)
   ↓
@@ -934,13 +934,14 @@ POST /batches/{batch_id}/set-stage/{stage_id}
   ↓
 batch_router.set_batch_stage()
   ↓
-recipe_engine_controller.apply_stage_recipe()
+recipe_engine_controller.apply_stage_recipes()
   ↓
 schedule_service.delete_by_device_and_source(source="plant_auto")
-  ↓ (if time-based recipe)
+  ↓ (for each GrowthRecipe in stage)
+  ↓ (if time-based recipe: start_time & end_time set)
 schedule_service.bulk_create(source="plant_auto")
-  ↓ (if interval-based recipe)
-rules_engine.is_in_interval()  (Checked during next automation cycle)
+  ↓ (if interval-based recipe: action="interval")
+rules_engine.is_in_interval()  (Evaluated during handle_automation cycle)
 ```
 
 ## Background Jobs

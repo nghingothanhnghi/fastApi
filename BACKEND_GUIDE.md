@@ -93,9 +93,11 @@ Related files:
 
 ### 7.2 Hydroponic System (`app/hydro_system`)
 - **Sensors & Control**: `sensors.py` reads values, `controllers/actuator_controller.py` applies rules.
+- **Automation Engine**: `rules_engine.py` handles threshold-based, schedule-based, and interval-based logic.
+- **Plant Management**: `PlantBatch`, `GrowthStage`, and `GrowthRecipe` models allow for stage-specific automation (e.g., auto-generating schedules when a plant enters a new growth stage).
 - **Scheduler**: `scheduler.py` registers `sensor_collect_job` (every 60s), persists `SensorData`, and triggers automation.
 - **State**: `state_manager.py` stores flags like scheduler state.
-- **Routes**: `/hydro/*`, `/sensor/*`, `/actuator/*` for status, control, and data endpoints.
+- **Routes**: `/hydro/*`, `/sensor/*`, `/actuator/*`, and `/batches` for status, control, and batch/stage management.
 
 ### 7.3 Android System (`app/android_system`)
 - **Device control** via ADB: `device_manager.py`, `interaction_controller.py`.
