@@ -48,10 +48,25 @@ class HydroScheduleService:
         if commit:
             db.commit()
 
+    # 🔥 FIXED VERSION (NO JOIN DELETE)
     def delete_by_device_and_source(self, db: Session, device_id: int, source: str):
-        db.query(HydroSchedule).join(HydroActuator).filter(
-            HydroActuator.device_id == device_id,
+        # 1️⃣ Get actuator IDs for this device
+        actuator_ids = db.query(HydroActuator.id).filter(
+            HydroActuator.device_id == device_id
+        ).all()
+
+        actuator_ids = [a[0] for a in actuator_ids]
+
+        if not actuator_ids:
+            return
+
+        # 2️⃣ Delete schedules using IN
+        db.query(HydroSchedule).filter(
+            HydroSchedule.actuator_id.in_(actuator_ids),
             HydroSchedule.source == source
-        ).delete(synchronize_session=False)        
+        ).delete(synchronize_session=False)
+
+        # 3️⃣ Commit here OR let caller handle
+        db.commit()      
 
 hydro_schedule_service = HydroScheduleService()

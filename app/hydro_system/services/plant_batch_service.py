@@ -1,7 +1,9 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from datetime import date
 from typing import List, Optional
 from app.hydro_system.models.plant_batch import PlantBatch
-from app.hydro_system.schemas.batch import BatchCreate
+from app.hydro_system.schemas import batch
+from app.hydro_system.schemas.batch import BatchCreate, BatchDetail
 
 class PlantBatchService:
     def create_batch(self, db: Session, batch_in: BatchCreate) -> PlantBatch:
@@ -34,5 +36,47 @@ class PlantBatchService:
         db.delete(batch)
         db.commit()
         return True
+    
+    def _map_to_detail(self, batch: PlantBatch) -> BatchDetail:
+        return BatchDetail(
+            id=batch.id,
+            plant_id=batch.plant_id,
+            current_stage_id=batch.current_stage_id,
+            zone_id=batch.zone_id,
+            start_date=batch.start_date,
+            status=batch.status,
+
+            # 👇 computed
+            plant_name=batch.plant.name if batch.plant else None,
+            current_stage_name=batch.current_stage.name if batch.current_stage else None,
+            days_growing=(date.today() - batch.start_date).days if batch.start_date else None,
+
+            device_name=batch.device.device_id if batch.device else None,
+            device_location=batch.device.location if batch.device else None,
+    )
+
+    def get_all_batches_detail(self, db: Session) -> List[BatchDetail]:
+        batches = db.query(PlantBatch)\
+            .options(
+                joinedload(PlantBatch.plant),
+                joinedload(PlantBatch.current_stage),
+                joinedload(PlantBatch.device)
+            )\
+            .all()
+        return [self._map_to_detail(b) for b in batches]
+    
+    def get_batch_detail(self, db: Session, batch_id: int) -> Optional[BatchDetail]:
+        batch = db.query(PlantBatch)\
+            .options(
+                joinedload(PlantBatch.plant),
+                joinedload(PlantBatch.current_stage)
+            )\
+            .filter(PlantBatch.id == batch_id)\
+            .first()
+
+        if not batch:
+            return None
+
+        return self._map_to_detail(batch)
 
 plant_batch_service = PlantBatchService()

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.hydro_system.schemas.batch import BatchCreate, BatchOut
+from app.hydro_system.schemas.batch import BatchCreate, BatchOut, BatchDetail
 from app.hydro_system.schemas.plant import PlantCreate, PlantOut
 from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageOut
 from app.hydro_system.schemas.growth_recipe import GrowthRecipeCreate, GrowthRecipeOut
@@ -26,17 +26,18 @@ def get_plants(db: Session = Depends(get_db)):
     return plant_service.get_all_plants(db)
 
 # Batch Routes
-@router.post("", response_model=BatchOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=BatchDetail)
 def create_batch(batch_in: BatchCreate, db: Session = Depends(get_db)):
-    return plant_batch_service.create_batch(db, batch_in)
+    batch = plant_batch_service.create_batch(db, batch_in)
+    return plant_batch_service.get_batch_detail(db, batch.id)
 
-@router.get("", response_model=List[BatchOut])
+@router.get("", response_model=List[BatchDetail])
 def get_batches(db: Session = Depends(get_db)):
-    return plant_batch_service.get_all_batches(db)
+    return plant_batch_service.get_all_batches_detail(db)
 
-@router.get("/{batch_id}", response_model=BatchOut)
+@router.get("/{batch_id}", response_model=BatchDetail)
 def get_batch(batch_id: int, db: Session = Depends(get_db)):
-    batch = plant_batch_service.get_batch(db, batch_id)
+    batch = plant_batch_service.get_batch_detail(db, batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch

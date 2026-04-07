@@ -948,10 +948,8 @@ rules_engine.is_in_interval()  (Evaluated during handle_automation cycle)
 
 ### Sensor Collection Job
 
-**File:** `app/hydro_system/scheduler.py`
-
+- **File:** `app/hydro_system/scheduler.py`
 - **Frequency:** Every 60 seconds
-- **Trigger:** Reads all sensors on active devices
 - **Actions:**
   1. Collects sensor data (temperature, humidity, moisture, water level, ec, ppm)
   2. Persists readings to `SensorData` table
@@ -959,12 +957,15 @@ rules_engine.is_in_interval()  (Evaluated during handle_automation cycle)
   4. Controls actuators if conditions are met
   5. Generates alerts if critical levels reached
 
-**Registration:**
-```python
-# main.py
-from app.hydro_system.scheduler import start_sensor_job
-start_sensor_job()
-```
+### Batch Stage Update Job
+
+- **File:** `app/hydro_system/scheduler.py`
+- **Frequency:** Every 12 hours
+- **Actions:**
+  1. Calculates `days_growing` for each active batch (`today - start_date`).
+  2. Finds the matching `GrowthStage` based on `day_start <= days_growing <= day_end`.
+  3. Automatically updates the batch to the new stage if a transition is needed.
+  4. Triggers `recipe_engine_controller.apply_stage_recipes()` to update hardware schedules and automation rules.
 
 ## State Management
 
