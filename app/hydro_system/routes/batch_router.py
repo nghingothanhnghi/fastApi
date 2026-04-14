@@ -6,8 +6,8 @@ from typing import List
 from app.database import get_db
 from app.hydro_system.schemas.batch import BatchCreate, BatchOut, BatchDetail
 from app.hydro_system.schemas.plant import PlantCreate, PlantOut
-from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageOut
-from app.hydro_system.schemas.growth_recipe import GrowthRecipeCreate, GrowthRecipeOut
+from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageOut, GrowthStageWithRecipesUpdate, GrowthStageUpdate
+from app.hydro_system.schemas.growth_recipe import GrowthRecipeCreate, GrowthRecipeOut, GrowthRecipeUpdate
 from app.hydro_system.services.plant_batch_service import plant_batch_service
 from app.hydro_system.services.plant_service import plant_service
 from app.hydro_system.services.growth_stage_service import growth_stage_service
@@ -42,6 +42,28 @@ def get_batch(batch_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
 
+@router.put("/{batch_id}", response_model=BatchDetail)
+def update_batch(batch_id: int, batch_in: BatchCreate, db: Session = Depends(get_db)):
+    batch = plant_batch_service.update_batch(
+        db,
+        batch_id,
+        batch_in.dict(exclude_unset=True)
+    )
+
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    return plant_batch_service.get_batch_detail(db, batch.id)
+
+@router.delete("/{batch_id}", status_code=204)
+def delete_batch(batch_id: int, db: Session = Depends(get_db)):
+    success = plant_batch_service.delete_batch(db, batch_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    return None
+
 @router.post("/{batch_id}/set-stage/{stage_id}")
 def set_batch_stage(batch_id: int, stage_id: int, db: Session = Depends(get_db)):
     batch = plant_batch_service.get_batch(db, batch_id)
@@ -69,7 +91,55 @@ def create_stage(stage_in: GrowthStageCreate, db: Session = Depends(get_db)):
 def get_stages(plant_id: int, db: Session = Depends(get_db)):
     return growth_stage_service.get_stages_by_plant(db, plant_id)
 
+@router.put("/stages/{stage_id}", response_model=GrowthStageOut, tags=["Growth Stages"])
+def update_stage(stage_id: int, updates: GrowthStageUpdate, db: Session = Depends(get_db)):
+    stage = growth_stage_service.update_stage(db, stage_id, updates.dict(exclude_unset=True))
+    if not stage:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    return stage
+
+@router.put("/stages/{stage_id}/with-recipes", response_model=GrowthStageOut, tags=["Growth Stages"])
+def update_stage_with_recipes(
+    stage_id: int,
+    payload: GrowthStageWithRecipesUpdate,
+    db: Session = Depends(get_db)
+):
+    stage = growth_stage_service.update_stage_with_recipes(
+        db, stage_id, payload
+    )
+
+    if not stage:
+        raise HTTPException(status_code=404, detail="Stage not found")
+
+    return stage
+
+@router.delete("/stages/{stage_id}", tags=["Growth Stages"])
+def delete_stage(stage_id: int, db: Session = Depends(get_db)):
+    success = growth_stage_service.delete_stage(db, stage_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Stage not found")
+    return {"message": "Stage deleted"}
+
 # Growth Recipe Routes
 @router.post("/recipes", response_model=GrowthRecipeOut, tags=["Growth Recipes"])
 def create_recipe(recipe_in: GrowthRecipeCreate, db: Session = Depends(get_db)):
     return growth_recipe_service.create_recipe(db, recipe_in)
+
+@router.put("/recipes/{recipe_id}", response_model=GrowthRecipeOut, tags=["Growth Recipes"])
+def update_recipe(recipe_id: int, updates: GrowthRecipeUpdate, db: Session = Depends(get_db)):
+    recipe = growth_recipe_service.update_recipe(
+        db,
+        recipe_id,
+        updates.dict(exclude_unset=True)
+    )
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
+
+
+@router.delete("/recipes/{recipe_id}", tags=["Growth Recipes"])
+def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    success = growth_recipe_service.delete_recipe(db, recipe_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return {"message": "Recipe deleted"}

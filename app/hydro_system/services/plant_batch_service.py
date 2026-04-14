@@ -1,3 +1,5 @@
+# app/hydro_system/services/plant_batch_service.py
+# Service layer for managing plant batches in the hydroponic system
 from sqlalchemy.orm import Session, joinedload
 from datetime import date
 from typing import List, Optional

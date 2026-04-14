@@ -1,4 +1,5 @@
 # app/hydro_system/schemas/batch.py
+# Pydantic schemas for growth batches in the hydroponic system
 from datetime import date
 from pydantic import BaseModel
 from typing import Optional
