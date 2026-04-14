@@ -1,49 +1,72 @@
-+-------------------+        +------------------------+
-|  Sensors (ESP32)  |        |   Actuators (Relays)   |
-| - Temperature     |        | - Pump, Fan, Light     |
-| - Humidity        |        | - Water Pump           |
-| - Light           |        +------------------------+
-| - Moisture        |                 ^
-| - Water Level     |                 |
-| - PPM             |                 |
-| - EC              |                 |
-+--------+----------+                 |
-         | Sends sensor data          | GPIO HIGH/LOW
-         v                            |
-+-------------------+        +------------------------+
-|       ESP32       |        |  relay.py update_relays |
-| - Reads sensors   |        |  Maps ACTUATOR_STATES   |
-| - Calls backend   | ------> updates physical relays
-|   /sensor/data    |        +------------------------+
-| - Calls backend   |
-|   /hydro/status   |
-+--------+----------+
-         ^
-         | Receives actuator states
-         | (current_state) from backend
-         |
-+-------------------+
-|     Backend       |
-| (FastAPI Server)  |
-|                   |
-| - Scheduler job   |
-|   runs every X s  |
-| - Reads last      |
-|   sensor data     |
-| - Runs automation |
-|   rules (check_rules)|
-| - Sets actuator   |
-|   states in state_manager |
-| - Updates current_state |
-+-------------------+
-         ^
-         |
-+-------------------+
-|   Frontend / API  |
-| - Manual override |
-|   POST /actuator/{id}/on  |
-|   POST /actuator/{id}/off |
-| - Updates backend |
-|   actuator states in state_manager |
-+-------------------+
+# Hydroponic System Architecture (ESP32 & FastAPI)
+
+```mermaid
+flowchart TD
+    subgraph "Hardware Layer (ESP32)"
+        Sensors["Sensors: Temp, Hum, Light, Moisture, WL, EC, PPM"]
+        ESP32["ESP32 Controller"]
+        Relays["Physical Relays (Pump, Fan, Light, etc.)"]
+        
+        Sensors --> ESP32
+        ESP32 -- "POST /sensor/data" --> Backend
+        ESP32 -- "GET /hydro/status" --> Backend
+        Backend -- "current_state" --> ESP32
+        ESP32 --> Relays
+    end
+
+    subgraph "Management Layer (Frontend/API)"
+        Admin["Admin / User Dashboard"]
+        Plants["Plant Metadata"]
+        Batches["Plant Batches (Zones)"]
+        Stages["Growth Stages"]
+        Recipes["Growth Recipes (Schedules & Thresholds)"]
+        
+        Admin --> Plants
+        Admin --> Batches
+        Admin --> Stages
+        Admin --> Recipes
+        Admin -- "Manual Override" --> Backend
+    end
+
+    subgraph "Logic Layer (FastAPI Backend)"
+        Backend["FastAPI Server"]
+        RecipeEngine["Recipe Engine"]
+        Schedules["Hydro Schedules (plant_auto)"]
+        RuleEngine["Rule Engine (check_rules)"]
+        StateManager["State Manager (Actuator States)"]
+        BackgroundJob["Background Job (Scheduler)"]
+        
+        Recipes --> RecipeEngine
+        Batches --> RecipeEngine
+        RecipeEngine --> Schedules
+        
+        BackgroundJob --> RuleEngine
+        Schedules --> RuleEngine
+        Sensors -.-> RuleEngine
+        
+        RuleEngine --> StateManager
+        Admin -- "Manual Toggle" --> StateManager
+        
+        StateManager -- "Poll Status" --> Backend
+    end
+
+    subgraph "Data Layer (SQLite)"
+        DB[("database.db")]
+        Backend <--> DB
+    end
+```
+
+## Data Flow Description
+
+1.  **Configuration**: Users define **Plants**, **Growth Stages**, and **Growth Recipes**.
+2.  **Activation**: When a **Batch** is assigned a **Growth Stage**, the **Recipe Engine** generates **Hydro Schedules** (source: `plant_auto`).
+3.  **Sensor Input**: **ESP32** reads sensors and sends data to `/sensor/data` every cycle.
+4.  **Automation**: The **Background Job** runs `check_rules()` periodically:
+    *   Checks if current time matches any **Schedules**.
+    *   Checks if actuator is in an **Interval** cycle (for pumps).
+    *   Checks if **Sensor Data** crosses defined **Thresholds**.
+5.  **State Management**: `check_rules()` updates the **StateManager** with the desired actuator states (ON/OFF).
+6.  **Control**: **ESP32** polls `/hydro/status` and applies the `current_state` to physical **Relays**.
+7.  **Manual Override**: Users can manually toggle actuators via the API, which overrides automated logic in the **StateManager**.
+
 
