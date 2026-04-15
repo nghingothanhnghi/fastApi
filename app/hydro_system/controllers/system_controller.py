@@ -11,6 +11,7 @@ from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.models.plant_batch import PlantBatch
+from app.hydro_system.models.growth_stage import GrowthStage
 from sqlalchemy.orm import joinedload
 from datetime import date
 from app.core.logging_config import get_logger
@@ -82,12 +83,55 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
 
         if batch:
             days_growing = (date.today() - batch.start_date).days
+            # batch_info = {
+            #     "id": batch.id,
+            #     "plant_name": batch.plant.name if batch.plant else "Unknown",
+            #     "start_date": batch.start_date,
+            #     "days_growing": days_growing,
+            #     "current_stage": batch.current_stage.name if batch.current_stage else "None",
+            #     "status": batch.status
+            # }
+
+              # ✅ NEW: load stages with recipes
+            stages = db.query(GrowthStage).options(
+                joinedload(GrowthStage.recipes)
+            ).filter(
+                GrowthStage.plant_id == batch.plant_id
+            ).order_by(GrowthStage.day_start).all()
+
+            # ✅ serialize stages
+            stages_data = [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "day_start": s.day_start,
+                    "day_end": s.day_end,
+                    "recipes": [
+                        {
+                            "id": r.id,
+                            "actuator_type": getattr(r, "actuator_type", None),
+                            "value": getattr(r, "value", None),
+                            "schedule": getattr(r, "schedule", None),
+                        }
+                        for r in s.recipes
+                    ]
+                }
+                for s in stages
+            ]
+
             batch_info = {
                 "id": batch.id,
                 "plant_name": batch.plant.name if batch.plant else "Unknown",
                 "start_date": batch.start_date,
                 "days_growing": days_growing,
+
+                # ✅ stage info
                 "current_stage": batch.current_stage.name if batch.current_stage else "None",
+                "current_stage_id": batch.current_stage.id if batch.current_stage else None,
+
+                # ✅ timeline
+                "stages": stages_data,
+
                 "status": batch.status
             }
 
