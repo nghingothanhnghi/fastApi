@@ -9,6 +9,11 @@ from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
+# =========================
+# SENSOR RULES
+# =========================
+
 def should_turn_on_pump(sensor_data: dict, thresholds: dict) -> bool:
     """Check if irrigation pump should be turned on based on soil moisture"""
     moisture = sensor_data.get("moisture", 0)
@@ -110,42 +115,10 @@ def should_dose_nutrients(sensor_data: dict, thresholds: dict) -> bool:
     
     return False
 
-def is_in_schedule(actuator) -> bool:
-    """
-    Check if current time is within any active schedule for the actuator.
-    ONLY returns True for 'fixed on' schedules (no interval logic).
-    """
-    if not hasattr(actuator, "schedules") or not actuator.schedules:
-        return False
 
-    now = datetime.utcnow()
-    current_time = now.time()
-    current_day = now.strftime("%a").lower()
-
-    for schedule in actuator.schedules:
-        if not schedule.is_active:
-            continue
-        
-        # 💡 EXCLUDE interval schedules from this check
-        # (they are handled separately by is_in_interval)
-        if getattr(schedule, "interval_on_min", None) or getattr(schedule, "interval_off_min", None):
-            continue
-
-        # Check day
-        days = [d.strip().lower() for d in schedule.repeat_days.split(",")]
-        if current_day not in days:
-            continue
-
-        # Check time range
-        if schedule.start_time <= schedule.end_time:
-            if schedule.start_time <= current_time <= schedule.end_time:
-                return True
-        else:
-            # Over-night schedule
-            if current_time >= schedule.start_time or current_time <= schedule.end_time:
-                return True
-
-    return False
+# =========================
+# SCHEDULE / INTERVAL
+# =========================
 
 def is_within_schedule_time(schedule, current_time, current_day) -> bool:
     """Helper to check if a specific schedule is active right now"""
@@ -156,42 +129,65 @@ def is_within_schedule_time(schedule, current_time, current_day) -> bool:
     if schedule.start_time <= schedule.end_time:
         return schedule.start_time <= current_time <= schedule.end_time
     else:
-        return current_time >= schedule.start_time or current_time <= schedule.end_time
+        return current_time >= schedule.start_time or current_time <= schedule.end_time    
+    
+def is_in_schedule(actuator) -> tuple[bool, bool]:
+    """
+    Returns:
+    - (is_on_now, has_schedule)
+    """
+    if not hasattr(actuator, "schedules") or not actuator.schedules:
+        return False, False
+
+    now = datetime.utcnow()
+    current_time = now.time()
+    current_day = now.strftime("%a").lower()
+
+    has_schedule = False
+
+    for schedule in actuator.schedules:
+        if not schedule.is_active:
+            continue
+
+        # skip interval schedules
+        if schedule.interval_on_min or schedule.interval_off_min:
+            continue
+
+        has_schedule = True
+
+        if is_within_schedule_time(schedule, current_time, current_day):
+            return True, True
+
+    return False, has_schedule    
 
 def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
-    """
-    Check if actuator should be ON based on interval logic.
-    Returns: (should_be_on, status)
-    status can be: "active_on", "active_off", "inactive"
-    """
     now = datetime.utcnow()
     current_time = now.time()
     current_day = now.strftime("%a").lower()
 
     active_interval = None
 
-    # 1. Check schedules on the actuator first (highest precision)
-    if hasattr(actuator, "schedules") and actuator.schedules:
+    # 1. actuator schedule first
+    if hasattr(actuator, "schedules"):
         for schedule in actuator.schedules:
             if not schedule.is_active:
                 continue
-            
-            if getattr(schedule, "interval_on_min", None) and getattr(schedule, "interval_off_min", None):
+
+            if schedule.interval_on_min and schedule.interval_off_min:
                 if is_within_schedule_time(schedule, current_time, current_day):
                     active_interval = schedule
                     break
 
-    # 2. Fallback to global recipe if no specific schedule matches
+    # 2. fallback recipe
     if not active_interval and recipe and recipe.action == "interval":
-        # Check if current time is within recipe window
         start = recipe.start_time or time(0, 0)
         end = recipe.end_time or time(23, 59)
-        
-        in_window = False
-        if start <= end:
-            in_window = start <= current_time <= end
-        else:
-            in_window = current_time >= start or current_time <= end
+
+        in_window = (
+            start <= current_time <= end
+            if start <= end
+            else current_time >= start or current_time <= end
+        )
 
         if in_window:
             active_interval = recipe
@@ -202,29 +198,42 @@ def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
     on_min = active_interval.interval_on_min
     off_min = active_interval.interval_off_min
 
-    # Get last state change from logs
+    # last log
     last_log = None
     if hasattr(actuator, "logs") and actuator.logs:
-        sorted_logs = sorted(actuator.logs, key=lambda x: x.timestamp, reverse=True)
-        if sorted_logs:
-            last_log = sorted_logs[0]
+        last_log = sorted(actuator.logs, key=lambda x: x.timestamp, reverse=True)[0]
 
     if not last_log:
         return True, "active_on"
 
     diff_min = (now - last_log.timestamp).total_seconds() / 60
-    last_state = last_log.state.upper() if last_log.state else "OFF"
+    last_state = (last_log.state or "OFF").upper()
 
     if last_state == "ON":
-        if diff_min < on_min:
-            return True, "active_on"
-        else:
-            return False, "active_off"
+        return (diff_min < on_min), "active_on" if diff_min < on_min else "active_off"
     else:
-        if diff_min >= off_min:
-            return True, "active_on"
-        else:
-            return False, "active_off"
+        return (diff_min >= off_min), "active_on" if diff_min >= off_min else "active_off"
+    
+def is_in_oneshot(actuator) -> tuple[bool, str]:
+    """
+    Check if actuator is running a one-shot action (run for X seconds)
+    """
+    if not hasattr(actuator, "oneshot") or not actuator.oneshot:
+        return False, "inactive"
+
+    start = actuator.oneshot.get("start_time")
+    duration = actuator.oneshot.get("duration_sec")
+
+    if not start or not duration:
+        return False, "inactive"
+
+    now = datetime.utcnow()
+    diff = (now - start).total_seconds()
+
+    if diff < duration:
+        return True, "running"
+
+    return False, "done"    
 
 def check_rules(
     sensor_data: dict,
@@ -253,13 +262,27 @@ def check_rules(
         # Use thresholds from device, fallback to global
         actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
 
-        # Check schedule first
-        scheduled_on = is_in_schedule(actuator)
 
-        # ✅ Check interval-based recipe
-        recipe = next((r for r in recipes if r.actuator_type == actuator_type), None)
+        # ✅ MANUAL override
+        manual = None
+        if overrides and "actuators" in overrides:
+            manual = overrides["actuators"].get(str(actuator_id))        
+
+        # Check schedule first
+        scheduled_on, has_schedule = is_in_schedule(actuator)
+
+        # recipe
+        recipe = next(
+            (r for r in recipes if r.actuator_type == actuator_type),
+            None
+        )
+
+        # ✅ INTERVAL
         interval_on, interval_status = is_in_interval(actuator, recipe)
 
+        oneshot_on, oneshot_status = is_in_oneshot(actuator)
+
+        # ✅ SENSOR RULE
         should_activate = False
 
         if actuator_type == "pump":
@@ -279,50 +302,62 @@ def check_rules(
         final_on = False
         reason = "off"
 
-        # 🥇 PRIORITY 1: SAFETY (ALWAYS override)
-        # -------------------------------------
-        is_safety_triggered = False
-        
-        # Fan safety: high temp
-        if actuator_type == "fan" and sensor_data.get("temperature", 0) > 35:
+        # 🥇 SAFETY
+        if actuator_type == "fan" and sensor_data.get("temperature", 0) > actuator_thresholds.get("temperature_critical", 35):
             final_on = True
             reason = "safety_high_temp"
-            is_safety_triggered = True
-        
-        # Pump safety: low water (protects all pumps from dry running)
-        elif actuator_type in ["pump", "water_pump", "nutrient_pump"] and sensor_data.get("water_level", 0) < thresholds.get("water_level_critical", 10):
+
+        elif actuator_type in ["pump", "water_pump", "nutrient_pump"] and sensor_data.get("water_level", 0) < actuator_thresholds.get("water_level_critical", 10):
             final_on = False
             reason = "safety_low_water"
-            is_safety_triggered = True
 
-        # -------------------------------------------------------------
-        # IF SAFETY NOT TRIGGERED, PROCEED WITH NORMAL PRIORITIES
-        # -------------------------------------------------------------
-        if not is_safety_triggered:
-            # 🥈 PRIORITY 2: RECIPE (SCHEDULE) - Main Control
-            if scheduled_on:
-                final_on = True
-                reason = "schedule"
-            
-            # 🥉 PRIORITY 3: INTERVAL - Pumps etc.
-            elif interval_status != "inactive":
-                final_on = interval_on
-                reason = "interval"
+        # 🥈 MANUAL (hard override)
+        elif manual is not None:
+            final_on = manual
+            reason = "manual"
 
-            # 🪶 PRIORITY 4: SENSOR - Fallback only
-            else:
-                final_on = should_activate
-                reason = "sensor" if should_activate else "off"
+        # 🥉 ONE-SHOT (🔥 NEW)
+        elif oneshot_status == "running":
+            final_on = True
+            reason = "oneshot"
+
+        # 🟡 SCHEDULE (LOCK MODE)
+        elif has_schedule:
+            final_on = scheduled_on
+            reason = "schedule"
+
+        # 🔁 INTERVAL
+        elif interval_status != "inactive":
+            final_on = interval_on
+            reason = "interval"
+
+        # 🌱 SENSOR
+        else:
+            final_on = should_activate
+            reason = "sensor" if should_activate else "off"
 
         actions.append({
             "actuator_id": actuator_id,
             "on": final_on,
             "type": actuator_type,
+            # 🔍 DEBUG / VISIBILITY
             "thresholds_used": actuator_thresholds,
             "reason": reason,
+
             "scheduled": scheduled_on,
-            "interval_mode": interval_status != "inactive",
-            "sensor_triggered": should_activate
+            "has_schedule": has_schedule,
+
+            # 🔁 INTERVAL INFO
+            "interval_mode": interval_status,
+            "interval_active": interval_status != "inactive",
+
+            # oneshot
+            "oneshot": oneshot_status,
+
+            # 🌡 SENSOR INFO
+            "sensor_triggered": should_activate,
+            # 🧑 MANUAL
+            "manual": manual
         })
 
     # Global/system alerts

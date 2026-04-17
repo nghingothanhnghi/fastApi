@@ -43,11 +43,16 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         # 2️⃣ Determine thresholds for automation
         thresholds = device.thresholds if hasattr(device, "thresholds") and device.thresholds else DEFAULT_THRESHOLDS
 
-        # 3️⃣ Evaluate automation rules based on sensor values and thresholds
-        rules_result = check_rules(sensor_data, thresholds)
-
         # 4️⃣ Get all actuators assigned to this device
         actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
+
+        # 3️⃣ Evaluate automation rules based on sensor values and thresholds
+        rules_result = check_rules(
+            sensor_data,
+            thresholds,
+            actuators=actuators,
+            recipes=[]
+        )
 
         actuators_state = []
 
