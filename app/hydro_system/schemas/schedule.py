@@ -8,6 +8,8 @@ class HydroScheduleBase(BaseModel):
     end_time: time = Field(..., json_schema_extra={"example": "20:00:00"})
     repeat_days: str = Field("mon,tue,wed,thu,fri,sat,sun", json_schema_extra={"example": "mon,tue,wed,thu,fri,sat,sun"})
     is_active: bool = True
+    interval_on_min: Optional[int] = None
+    interval_off_min: Optional[int] = None
 
 class HydroScheduleCreate(HydroScheduleBase):
     pass

@@ -22,6 +22,10 @@ class HydroSchedule(Base):
     source = Column(String, default="manual")  
     # values: manual | plant_auto
 
+    # 🔁 Interval control (for pumps)
+    interval_on_min = Column(Integer, nullable=True)
+    interval_off_min = Column(Integer, nullable=True)
+
     # Relationships
     actuator = relationship("HydroActuator", back_populates="schedules")
 

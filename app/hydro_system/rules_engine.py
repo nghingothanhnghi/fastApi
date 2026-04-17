@@ -1,8 +1,9 @@
 # File: app/hydro_system/rules_engine.py
 # Description: Rules engine to determine actions based on sensor data
 
-from datetime import datetime
+from datetime import datetime, time
 from app.hydro_system.config import DEFAULT_THRESHOLDS
+from app.hydro_system.models import sensor_data
 from app.hydro_system.models.actuator import HydroActuator
 from app.core.logging_config import get_logger
 
@@ -110,16 +111,24 @@ def should_dose_nutrients(sensor_data: dict, thresholds: dict) -> bool:
     return False
 
 def is_in_schedule(actuator) -> bool:
-    """Check if current time is within any active schedule for the actuator"""
+    """
+    Check if current time is within any active schedule for the actuator.
+    ONLY returns True for 'fixed on' schedules (no interval logic).
+    """
     if not hasattr(actuator, "schedules") or not actuator.schedules:
         return False
 
     now = datetime.utcnow()
     current_time = now.time()
-    current_day = now.strftime("%a").lower()  # mon, tue, etc.
+    current_day = now.strftime("%a").lower()
 
     for schedule in actuator.schedules:
         if not schedule.is_active:
+            continue
+        
+        # 💡 EXCLUDE interval schedules from this check
+        # (they are handled separately by is_in_interval)
+        if getattr(schedule, "interval_on_min", None) or getattr(schedule, "interval_off_min", None):
             continue
 
         # Check day
@@ -132,43 +141,90 @@ def is_in_schedule(actuator) -> bool:
             if schedule.start_time <= current_time <= schedule.end_time:
                 return True
         else:
-            # Over-night schedule (e.g., 22:00 to 06:00)
+            # Over-night schedule
             if current_time >= schedule.start_time or current_time <= schedule.end_time:
                 return True
 
     return False
 
-def is_in_interval(actuator, recipe) -> bool:
-    """Check if actuator should be ON based on interval logic (for pumps)"""
-    if not recipe or recipe.action != "interval":
+def is_within_schedule_time(schedule, current_time, current_day) -> bool:
+    """Helper to check if a specific schedule is active right now"""
+    days = [d.strip().lower() for d in schedule.repeat_days.split(",")]
+    if current_day not in days:
         return False
-    
-    if not recipe.interval_on_min or not recipe.interval_off_min:
-        return False
+
+    if schedule.start_time <= schedule.end_time:
+        return schedule.start_time <= current_time <= schedule.end_time
+    else:
+        return current_time >= schedule.start_time or current_time <= schedule.end_time
+
+def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
+    """
+    Check if actuator should be ON based on interval logic.
+    Returns: (should_be_on, status)
+    status can be: "active_on", "active_off", "inactive"
+    """
+    now = datetime.utcnow()
+    current_time = now.time()
+    current_day = now.strftime("%a").lower()
+
+    active_interval = None
+
+    # 1. Check schedules on the actuator first (highest precision)
+    if hasattr(actuator, "schedules") and actuator.schedules:
+        for schedule in actuator.schedules:
+            if not schedule.is_active:
+                continue
+            
+            if getattr(schedule, "interval_on_min", None) and getattr(schedule, "interval_off_min", None):
+                if is_within_schedule_time(schedule, current_time, current_day):
+                    active_interval = schedule
+                    break
+
+    # 2. Fallback to global recipe if no specific schedule matches
+    if not active_interval and recipe and recipe.action == "interval":
+        # Check if current time is within recipe window
+        start = recipe.start_time or time(0, 0)
+        end = recipe.end_time or time(23, 59)
+        
+        in_window = False
+        if start <= end:
+            in_window = start <= current_time <= end
+        else:
+            in_window = current_time >= start or current_time <= end
+
+        if in_window:
+            active_interval = recipe
+
+    if not active_interval:
+        return False, "inactive"
+
+    on_min = active_interval.interval_on_min
+    off_min = active_interval.interval_off_min
 
     # Get last state change from logs
     last_log = None
     if hasattr(actuator, "logs") and actuator.logs:
-        # Sort logs by timestamp descending
         sorted_logs = sorted(actuator.logs, key=lambda x: x.timestamp, reverse=True)
         if sorted_logs:
             last_log = sorted_logs[0]
 
     if not last_log:
-        # Default to ON to start the first cycle
-        return True
+        return True, "active_on"
 
-    now = datetime.utcnow()
     diff_min = (now - last_log.timestamp).total_seconds() / 60
-
     last_state = last_log.state.upper() if last_log.state else "OFF"
 
     if last_state == "ON":
-        # If was ON, check if it's time to turn OFF
-        return diff_min < recipe.interval_on_min
+        if diff_min < on_min:
+            return True, "active_on"
+        else:
+            return False, "active_off"
     else:
-        # If was OFF, check if it's time to turn ON
-        return diff_min >= recipe.interval_off_min
+        if diff_min >= off_min:
+            return True, "active_on"
+        else:
+            return False, "active_off"
 
 def check_rules(
     sensor_data: dict,
@@ -202,7 +258,7 @@ def check_rules(
 
         # ✅ Check interval-based recipe
         recipe = next((r for r in recipes if r.actuator_type == actuator_type), None)
-        interval_on = is_in_interval(actuator, recipe)
+        interval_on, interval_status = is_in_interval(actuator, recipe)
 
         should_activate = False
 
@@ -219,16 +275,54 @@ def check_rules(
         elif actuator_type == "nutrient_pump":
             should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
 
-        # Actuator is ON if either scheduled OR interval OR rule-based
-        final_on = scheduled_on or interval_on or should_activate
+        # ✅ 2. EVALUATE PRIORITIES
+        final_on = False
+        reason = "off"
+
+        # 🥇 PRIORITY 1: SAFETY (ALWAYS override)
+        # -------------------------------------
+        is_safety_triggered = False
+        
+        # Fan safety: high temp
+        if actuator_type == "fan" and sensor_data.get("temperature", 0) > 35:
+            final_on = True
+            reason = "safety_high_temp"
+            is_safety_triggered = True
+        
+        # Pump safety: low water (protects all pumps from dry running)
+        elif actuator_type in ["pump", "water_pump", "nutrient_pump"] and sensor_data.get("water_level", 0) < thresholds.get("water_level_critical", 10):
+            final_on = False
+            reason = "safety_low_water"
+            is_safety_triggered = True
+
+        # -------------------------------------------------------------
+        # IF SAFETY NOT TRIGGERED, PROCEED WITH NORMAL PRIORITIES
+        # -------------------------------------------------------------
+        if not is_safety_triggered:
+            # 🥈 PRIORITY 2: RECIPE (SCHEDULE) - Main Control
+            if scheduled_on:
+                final_on = True
+                reason = "schedule"
+            
+            # 🥉 PRIORITY 3: INTERVAL - Pumps etc.
+            elif interval_status != "inactive":
+                final_on = interval_on
+                reason = "interval"
+
+            # 🪶 PRIORITY 4: SENSOR - Fallback only
+            else:
+                final_on = should_activate
+                reason = "sensor" if should_activate else "off"
 
         actions.append({
             "actuator_id": actuator_id,
             "on": final_on,
             "type": actuator_type,
             "thresholds_used": actuator_thresholds,
+            "reason": reason,
             "scheduled": scheduled_on,
-            "interval_mode": interval_on  # ✅ Track if it was triggered by interval
+            "interval_mode": interval_status != "inactive",
+            "sensor_triggered": should_activate
         })
 
     # Global/system alerts

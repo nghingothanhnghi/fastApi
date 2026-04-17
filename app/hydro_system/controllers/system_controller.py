@@ -83,14 +83,6 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
 
         if batch:
             days_growing = (date.today() - batch.start_date).days
-            # batch_info = {
-            #     "id": batch.id,
-            #     "plant_name": batch.plant.name if batch.plant else "Unknown",
-            #     "start_date": batch.start_date,
-            #     "days_growing": days_growing,
-            #     "current_stage": batch.current_stage.name if batch.current_stage else "None",
-            #     "status": batch.status
-            # }
 
               # ✅ NEW: load stages with recipes
             stages = db.query(GrowthStage).options(
@@ -109,9 +101,12 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                     "recipes": [
                         {
                             "id": r.id,
-                            "actuator_type": getattr(r, "actuator_type", None),
-                            "value": getattr(r, "value", None),
-                            "schedule": getattr(r, "schedule", None),
+                            "actuator_type": r.actuator_type,
+                            "action": r.action,
+                            "start_time": r.start_time,
+                            "end_time": r.end_time,
+                            "interval_on_min": r.interval_on_min,
+                            "interval_off_min": r.interval_off_min,
                         }
                         for r in s.recipes
                     ]
