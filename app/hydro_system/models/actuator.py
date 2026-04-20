@@ -13,8 +13,8 @@ class HydroActuator(Base):
     name = Column(String, nullable=True)   # Optional name like "Grow Light 1"
 
     # Hardware mapping
-    pin = Column(String, nullable=True)    # Optional: GPIO pin identifier on ESP32
-    port = Column(Integer, nullable=False) # GPIO pin number
+    pin = Column(String, nullable=True)    # "26", "27" pin GPIO.
+    port = Column(Integer, nullable=False) # logical port (optional)
 
     # Control
     is_active = Column(Boolean, default=True)  # For logical control
