@@ -1,5 +1,7 @@
 # app/hydro_system/controllers/hydro_system_controller.py
 # Defines endpoints for controlling individual devices (pump, light, fan, water pump)
+import json
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -155,6 +157,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
     # return results if len(results) > 1 else results[0]
 
     return results
+
 
 
 def control_actuator(db: Session, actuator_type: str, on: bool, user_id: int, device_id: Optional[int] = None):
