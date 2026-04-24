@@ -69,4 +69,59 @@ flowchart TD
 6.  **Control**: **ESP32** polls `/hydro/status` and applies the `current_state` to physical **Relays**.
 7.  **Manual Override**: Users can manually toggle actuators via the API, which overrides automated logic in the **StateManager**.
 
+---
+
+## 🛰️ Integration Detail: Hardware & Backend
+
+The system follows a **Polling & Submission** model where the ESP32 acts as the initiator for all network requests.
+
+### 1. Sensors (Hardware → Backend)
+The ESP32 samples physical sensors and submits them to the backend for storage and analysis.
+
+- **Endpoint**: `POST /sensor/data`
+- **Router**: [./app/hydro_system/routes/sensor_router.py](./app/hydro_system/routes/sensor_router.py)
+- **Logic**: Data is saved to the `sensor_data` table and immediately becomes available for the **Rule Engine**.
+
+### 2. Commands (Backend → Hardware)
+The ESP32 polls the backend for its "Desired State" rather than the backend pushing commands.
+
+- **Endpoint**: `GET /hydro/status?device_id=X`
+- **Router**: [./app/hydro_system/routes/system_router.py](./app/hydro_system/routes/system_router.py)
+- **Logic**: The backend returns a JSON object containing the `current_state` (ON/OFF) for every actuator registered to that device from the [./app/hydro_system/state_manager.py](./app/hydro_system/state_manager.py).
+- **Hardware Action**: The ESP32 parses the JSON and sets its GPIO pins high/low to match.
+
+### 3. Automation vs Manual Control
+The `state_manager` determines the final state based on:
+- **Manual Overrides**: API calls to `/hydro/pump/on` or `/hydro/light/off`.
+- **Automated Rules**: The background scheduler evaluating `check_rules()` against latest sensor data and recipes.
+
+---
+
+## 🔄 Communication Sequence
+
+```mermaid
+sequenceDiagram
+    participant ESP as ESP32 Hardware
+    participant API as FastAPI Backend
+    participant DB as SQLite Database
+
+    Note over ESP, DB: Sensor Reporting Cycle
+    ESP->>API: POST /sensor/data {temp: 25, hum: 60...}
+    API->>DB: Save sensor_data
+    API-->>ESP: 200 OK
+
+    Note over ESP, DB: Automation Cycle (Background)
+    loop Every 30s
+        API->>DB: Get latest sensor_data & thresholds
+        API->>API: check_rules()
+        API->>API: Update state_manager (e.g., pump=ON)
+    end
+
+    Note over ESP, DB: Command Polling Cycle
+    ESP->>API: GET /hydro/status
+    API->>API: Read state_manager (pump is ON)
+    API-->>ESP: {actuators: [{type: 'pump', current_state: true}]}
+    ESP->>ESP: Switch Relay Pin HIGH (Pump turns ON)
+```
+
 

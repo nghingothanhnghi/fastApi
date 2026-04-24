@@ -1,6 +1,7 @@
 # File: backend/app/hydro_system/controllers/actuator_controller.py
 # Description: Hardware + actuator-based control logic for hydroponic system devices
 
+from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 from app.hydro_system.rules_engine import check_rules
@@ -49,7 +50,18 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
 
 
 def control_actuator_by_id(db: Session, actuator_id: int, on: bool, source: str = "user"):
-    """Control a specific actuator directly by its ID"""
+    """
+    Control ONE actuator immediately (direct action).
+
+    This function:
+    - Executes hardware action NOW
+    - Updates runtime state (state_manager)
+    - Logs action
+
+    ❗ IMPORTANT:
+    - Does NOT define long-term behavior (manual/auto)
+    - Used by: user actions, automation, scheduler
+    """
     actuator = hydro_actuator_service.get_actuator(db, actuator_id)
     if not actuator:
         raise HTTPException(status_code=404, detail="Actuator not found")
@@ -67,12 +79,66 @@ def control_actuator_by_id(db: Session, actuator_id: int, on: bool, source: str 
         "state_key": key
     }
 
+def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
+    """
+    Set manual control mode for an actuator.
+    Controller layer:
+    - Calls service to update DB
+    - Applies hardware state if needed
+    
+    state:
+        True  -> force ON (manual_on)
+        False -> force OFF (manual_off)
+        None  -> AUTO (allow automation)
+
+    Responsibilities:
+    - Persist control mode in DB (manual_state)
+    - Optionally apply state immediately
+    - Define behavior for future automation cycles
+
+    ❗ This is NOT just an action → it defines CONTROL AUTHORITY
+    """
+    actuator = hydro_actuator_service.set_manual_state(db, actuator_id, state)
+
+    if not actuator:
+        raise HTTPException(status_code=404, detail="Actuator not found")
+
+    # 🔥 apply immediately
+    if state is not None:
+        control_actuator_by_id(db, actuator_id, state, source="manual")
+
+    logger.info(
+        f"[MANUAL MODE] Actuator {actuator_id} -> "
+        f"{'ON' if state is True else 'OFF' if state is False else 'AUTO'}"
+    )
+
+    return {
+        "actuator_id": actuator_id,
+        "manual_state": state,
+        "mode": (
+            "manual_on" if state is True else
+            "manual_off" if state is False else
+            "auto"
+        )
+    }
+
 # --- Automation handler for multiple actuators ---
 
 def handle_automation(db: Session, sensor_data: dict, device_id: int = None):
     """
-    Automate actuator control based on sensor readings and growth recipes.
-    Each actuator on the device is evaluated with possible threshold overrides.
+    Main automation engine.
+
+    This runs periodically (scheduler) and decides actuator states.
+
+    Priority logic:
+    1️⃣ manual_state (highest priority)
+    2️⃣ recipes (growth stage)
+    3️⃣ thresholds (sensor rules)
+
+    Responsibilities:
+    - Evaluate rules
+    - Apply actuator changes ONLY when needed
+    - Avoid unnecessary toggling
     """
     alerts = []
     actions_taken = {}
@@ -98,6 +164,23 @@ def handle_automation(db: Session, sensor_data: dict, device_id: int = None):
             continue
 
         for actuator in actuators:
+            actuator_key = f"{device_type}_{actuator.device_id}_{actuator.port}"
+
+            # 🛑 STEP 1: MANUAL OVERRIDE (HIGHEST PRIORITY)
+            if actuator.manual_state is not None:
+                desired_state = actuator.manual_state
+                prev_state = get_state(actuator_key)
+
+                if desired_state != prev_state:
+                    control_actuator_by_id(db, actuator.id, desired_state, source="manual")
+                    set_state(actuator_key, desired_state)
+
+                    logger.info(f"[MANUAL OVERRIDE] {actuator_key} -> {desired_state}")
+
+                # ❌ SKIP automation completely
+                continue
+
+            # 🛑 STEP 2: AUTOMATION (rules_engine)
             # Per-actuator or per-device thresholds
             thresholds_override = actuator.device.thresholds or {}
 

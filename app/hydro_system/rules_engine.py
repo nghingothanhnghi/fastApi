@@ -77,12 +77,24 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
     }
 
 def should_turn_on_water_pump(sensor_data: dict, thresholds: dict) -> bool:
+    # """
+    # Determine if the water pump should be turned on.
+    # Example logic: used to refill internal reservoirs when main tank is sufficient
+    # """
+    # water_level = sensor_data.get("water_level", 0)
+    # return water_level < thresholds.get("water_level_min", 20)  # Example: pump if water is available
     """
-    Determine if the water pump should be turned on.
-    Example logic: used to refill internal reservoirs when main tank is sufficient
+    🚫 IMPORTANT:
+    DO NOT control water pump by sensor directly in hydroponics.
+
+    Water pump should be controlled by:
+    - interval
+    - schedule
+    - manual
+
+    This prevents ALWAYS-ON bug.
     """
-    water_level = sensor_data.get("water_level", 0)
-    return water_level > thresholds.get("water_level_min", 20)  # Example: pump if water is available
+    return False    
 
 def should_open_valve(sensor_data: dict, thresholds: dict) -> bool:
     """
@@ -264,10 +276,16 @@ def check_rules(
 
 
         # ✅ MANUAL override
-        manual = None
-        if overrides and "actuators" in overrides:
-            manual = overrides["actuators"].get(str(actuator_id))        
+        # manual = None
+        # if overrides and "actuators" in overrides:
+        #     manual = overrides["actuators"].get(str(actuator_id))
+        manual = getattr(actuator, "manual_state", None)
+        logger.info(f"[RULE] actuator={actuator_id} manual={manual}")   
 
+
+        # =========================
+        # SCHEDULE / INTERVAL / ONESHOT
+        # =========================
         # Check schedule first
         scheduled_on, has_schedule = is_in_schedule(actuator)
 
@@ -298,7 +316,9 @@ def check_rules(
         elif actuator_type == "nutrient_pump":
             should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
 
-        # ✅ 2. EVALUATE PRIORITIES
+        # =========================
+        # PRIORITY SYSTEM
+        # =========================
         final_on = False
         reason = "off"
 
@@ -311,10 +331,14 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
-        # 🥈 MANUAL (hard override)
-        elif manual is not None:
-            final_on = manual
-            reason = "manual"
+        # 🥈 MANUAL (STRONG OVERRIDE)
+        elif manual is True:
+            final_on = True
+            reason = "manual_on"
+
+        elif manual is False:
+            final_on = False
+            reason = "manual_off"
 
         # 🥉 ONE-SHOT (🔥 NEW)
         elif oneshot_status == "running":
@@ -326,7 +350,7 @@ def check_rules(
             final_on = scheduled_on
             reason = "schedule"
 
-        # 🔁 INTERVAL
+        # 🔁 INTERVAL (🔥 MAIN CONTROL FOR WATER SYSTEM)
         elif interval_status != "inactive":
             final_on = interval_on
             reason = "interval"
@@ -335,14 +359,15 @@ def check_rules(
         else:
             final_on = should_activate
             reason = "sensor" if should_activate else "off"
+        
 
         actions.append({
             "actuator_id": actuator_id,
             "on": final_on,
             "type": actuator_type,
             # 🔍 DEBUG / VISIBILITY
-            "thresholds_used": actuator_thresholds,
             "reason": reason,
+            "manual": manual,
 
             "scheduled": scheduled_on,
             "has_schedule": has_schedule,
@@ -356,8 +381,9 @@ def check_rules(
 
             # 🌡 SENSOR INFO
             "sensor_triggered": should_activate,
-            # 🧑 MANUAL
-            "manual": manual
+
+            "thresholds_used": actuator_thresholds
+
         })
 
     # Global/system alerts

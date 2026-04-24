@@ -40,6 +40,7 @@ class HydroActuator(Base):
     schedules = relationship("HydroSchedule", back_populates="actuator", cascade="all, delete")
 
     sensor_key = Column(String, nullable=True)
+    manual_state = Column(Boolean, nullable=True, default=None)  # True (Force ON), False (Force OFF), None (Auto)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

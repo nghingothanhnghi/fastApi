@@ -1,7 +1,5 @@
 # app/hydro_system/controllers/hydro_system_controller.py
-# Defines endpoints for controlling individual devices (pump, light, fan, water pump)
-import json
-
+# Defines endpoints for controlling individual devices (pump, light, fan, water pump) and overall system status.
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -48,21 +46,38 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         # 4️⃣ Get all actuators assigned to this device
         actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
 
+        auto_actuators = [a for a in actuators if a.manual_state is None]
+        
         # 3️⃣ Evaluate automation rules based on sensor values and thresholds
         rules_result = check_rules(
             sensor_data,
             thresholds,
-            actuators=actuators,
+            actuators=auto_actuators,
             recipes=[]
-        )
+        ) if auto_actuators else {"actions": []}
+
+        # 🔥 map rules → actuator
+        rules_map = {a["actuator_id"]: a for a in rules_result["actions"]}
 
         actuators_state = []
 
         # --- Map each actuator's info and current state ---
         for actuator in actuators:
-            sensor_value = None
-            if actuator.sensor_key and actuator.sensor_key in sensor_data:
-                sensor_value = sensor_data[actuator.sensor_key]
+            # sensor_value = None
+            # if actuator.sensor_key and actuator.sensor_key in sensor_data:
+            #     sensor_value = sensor_data[actuator.sensor_key]
+            sensor_value = sensor_data.get(actuator.sensor_key) if actuator.sensor_key else None
+            
+            # ✅ MANUAL MODE HANDLING
+            if actuator.manual_state is not None:
+                rule_info = {
+                    "reason": "manual_override",
+                    "interval_mode": None,
+                    "oneshot": None,
+                    "sensor_triggered": None,
+                }
+            else:
+                rule_info = rules_map.get(actuator.id, {})
 
             actuators_state.append({
                 "id": actuator.id,
@@ -75,7 +90,27 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "sensor_key": actuator.sensor_key,
                 "linked_sensor_value": sensor_value,
                 # Get last known state from state_manager (True=ON, False=OFF)
-                "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
+                # "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
+
+                # 🔥 REAL STATE
+                "current_state": state_manager.get_state(
+                    f"{actuator.type}_{actuator.device_id}_{actuator.port}"
+                ),
+
+                # 🔥 MANUAL CONTROL
+                "manual_state": actuator.manual_state,
+                "mode": (
+                    "manual_on" if actuator.manual_state is True else
+                    "manual_off" if actuator.manual_state is False else
+                    "auto"
+                ),
+
+                # 🔍 DEBUG INFO
+                "automation_reason": rule_info.get("reason"),
+                "interval_mode": rule_info.get("interval_mode"),
+                "oneshot": rule_info.get("oneshot"),
+                "sensor_triggered": rule_info.get("sensor_triggered"),
+
             })      
 
         # 5️⃣ Get currently growing batch for this device
@@ -166,6 +201,16 @@ def control_actuator(db: Session, actuator_type: str, on: bool, user_id: int, de
 
 def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
     return actuator_controller.control_actuator_by_id(db, actuator_id, on)
+
+def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
+    """
+    state:
+      True  -> manual ON
+      False -> manual OFF
+      None  -> AUTO
+    """
+    return actuator_controller.set_manual_mode(db, actuator_id, state)
+
 def control_pump(db: Session, on: bool, user_id: int, device_id: Optional[int] = None):
     control_actuator(db, "pump", on, user_id, device_id)
 

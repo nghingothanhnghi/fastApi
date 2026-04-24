@@ -15,6 +15,7 @@ class HydroActuatorBase(BaseModel):
         json_schema_extra={"example": "temperature"},
         description="The sensor key this actuator is linked to (e.g., temperature, humidity)"
     )    
+    manual_state: Optional[bool] = Field(None, description="Force state: True(ON), False(OFF), None(AUTO)")
 
 class HydroActuatorCreate(HydroActuatorBase):
     device_id: int = Field(..., json_schema_extra={"example": 1})
@@ -31,6 +32,7 @@ class HydroActuatorUpdate(BaseModel):
         json_schema_extra={"example": "humidity"},
         description="Update the linked sensor key"
     )    
+    manual_state: Optional[bool] = Field(None, description="Update force state")
 class HydroActuatorOut(HydroActuatorBase):
     id: int
     device_id: int

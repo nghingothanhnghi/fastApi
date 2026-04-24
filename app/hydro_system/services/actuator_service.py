@@ -94,6 +94,24 @@ class HydroActuatorService:
         db.commit()
         return actuators    
 
+def set_manual_state(self, db: Session, actuator_id: int, state: Optional[bool]) -> Optional[HydroActuator]:
+    """
+    Set manual mode for actuator.
+
+    state:
+        True  -> manual ON
+        False -> manual OFF
+        None  -> AUTO (disable manual override)
+    """
+    actuator = self.get_actuator(db, actuator_id)
+    if not actuator:
+        return None
+
+    actuator.manual_state = state
+    db.commit()
+    db.refresh(actuator)
+
+    return actuator
 
 # Export a single instance (singleton-style)
 hydro_actuator_service = HydroActuatorService()

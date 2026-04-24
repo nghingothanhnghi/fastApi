@@ -13,6 +13,7 @@ from app.hydro_system.controllers import (
 from typing import Optional, List
 from app.hydro_system.routes.actuator_logs_router import actuator_log_router
 from app.hydro_system.routes.device_router import device_router
+from app.hydro_system.helpers.actuator_helper import validate_actuator_access
 
 router = APIRouter(prefix="/hydro", tags=["Hydro System"])
 router.include_router(actuator_log_router, prefix="/actuator-logs")
@@ -131,7 +132,11 @@ def turn_actuator_on(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return system_controller.control_actuator_by_id(db, actuator_id=actuator_id, on=True)
+    validate_actuator_access(db, actuator_id, current_user.id)
+
+    return system_controller.control_actuator_by_id(
+        db, actuator_id=actuator_id, on=True
+    )
 
 @router.post("/actuator/{actuator_id}/off", summary="Turn actuator OFF by ID")
 def turn_actuator_off(
@@ -139,8 +144,34 @@ def turn_actuator_off(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return system_controller.control_actuator_by_id(db, actuator_id=actuator_id, on=False)
+    validate_actuator_access(db, actuator_id, current_user.id)
 
+    return system_controller.control_actuator_by_id(
+        db, actuator_id=actuator_id, on=False
+    )
+
+@router.post("/actuator/{actuator_id}/manual", summary="Set actuator manual mode")
+def set_manual_mode(
+    actuator_id: int,
+    state: Optional[bool] = Body(None, embed=True),  # true / false / null
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    state:
+      true  -> force ON
+      false -> force OFF
+      null  -> AUTO mode (back to automation)
+    """
+    validate_actuator_access(db, actuator_id, current_user.id)
+
+    result = system_controller.set_manual_mode(db, actuator_id, state)
+
+    return {
+            "success": True,
+            "data": result,
+            "message": "Manual mode updated successfully"
+    }
 
 # --- Scheduler Control ---
 @router.post("/scheduler/start")
