@@ -91,9 +91,18 @@ The ESP32 polls the backend for its "Desired State" rather than the backend push
 - **Hardware Action**: The ESP32 parses the JSON and sets its GPIO pins high/low to match.
 
 ### 3. Automation vs Manual Control
-The `state_manager` determines the final state based on:
-- **Manual Overrides**: API calls to `/hydro/pump/on` or `/hydro/light/off`.
-- **Automated Rules**: The background scheduler evaluating `check_rules()` against latest sensor data and recipes.
+The `state_manager` determines the final state based on a priority system:
+1.  **Safety Rules**: Critical temperature or water level checks (cannot be overridden).
+2.  **Manual Override**: Persistent state stored in DB (`manual_state`). If set to ON or OFF, automation is bypassed.
+3.  **One-Shot Actions**: Temporary timed runs.
+4.  **Schedules**: Fixed time-based windows.
+5.  **Intervals**: Cycling behavior (e.g., 5m ON / 15m OFF).
+6.  **Sensor Thresholds**: Dynamic response to environment.
+
+**Manual Control Flow**:
+- User toggle → API → Controller → `actuator.manual_state` updated in DB.
+- Next automation cycle → `rules_engine` reads `manual_state` → state is preserved.
+- User sets to "AUTO" → `manual_state` set to `null` → automation resumes.
 
 ---
 

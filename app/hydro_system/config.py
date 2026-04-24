@@ -27,35 +27,35 @@ DEFAULT_ACTUATORS = [
     {
         "type": "pump",
         "name": "Pump A",
-        "pin": "D1",
+        "pin": "25",
         "port": 1,
         "default_state": False
     },
     {
         "type": "light",
-        "name": "Grow Light A",
-        "pin": "D2",
+        "name": "Đèn",
+        "pin": "23",
         "port": 2,
         "default_state": False
     },
     {
         "type": "fan",
-        "name": "Exhaust Fan A",
-        "pin": "D3",
+        "name": "Quạt",
+        "pin": "27",
         "port": 3,
         "default_state": False
     },
     {
         "type": "water_pump",
-        "name": "Refill Pump",
-        "pin": "D4",
+        "name": "Bơm nước",
+        "pin": "26",
         "port": 4,
         "default_state": False
     },
     {
         "type": "valve",
-        "name": "Water Valve",
-        "pin": "D5",
+        "name": "Van nước",
+        "pin": "22",
         "port": 5,
         "default_state": False
     }
