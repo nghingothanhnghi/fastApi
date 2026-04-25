@@ -31,91 +31,91 @@ def get_status(
     )
 
 # --- Irrigation Pump Control ---
-@router.post("/pump/on")
-def pump_on(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_pump(db, True, user_id=current_user.id, device_id=device_id)
-    return {"status": "Irrigation pump turned on", "device": "pump"}
+# @router.post("/pump/on")
+# def pump_on(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_pump(db, True, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Irrigation pump turned on", "device": "pump"}
 
-@router.post("/pump/off")
-def pump_off(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_pump(db, False, user_id=current_user.id, device_id=device_id)
-    return {"status": "Irrigation pump turned off", "device": "pump"}
+# @router.post("/pump/off")
+# def pump_off(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_pump(db, False, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Irrigation pump turned off", "device": "pump"}
 
-# --- Grow Light Control ---
-@router.post("/light/on")
-def light_on(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_light(db, True, user_id=current_user.id, device_id=device_id)
-    return {"status": "Grow lights turned on", "device": "light"}
+# # --- Grow Light Control ---
+# @router.post("/light/on")
+# def light_on(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_light(db, True, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Grow lights turned on", "device": "light"}
 
-@router.post("/light/off")
-def light_off(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_light(db, False, user_id=current_user.id, device_id=device_id)
-    return {"status": "Grow lights turned off", "device": "light"}
+# @router.post("/light/off")
+# def light_off(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_light(db, False, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Grow lights turned off", "device": "light"}
 
 # --- Ventilation Fan Control ---
-@router.post("/fan/on")
-def fan_on(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_fan(db, True, user_id=current_user.id, device_id=device_id)
-    return {"status": "Ventilation fan turned on", "device": "fan"}
+# @router.post("/fan/on")
+# def fan_on(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_fan(db, True, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Ventilation fan turned on", "device": "fan"}
 
-@router.post("/fan/off")
-def fan_off(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_fan(db, False, user_id=current_user.id, device_id=device_id)
-    return {"status": "Ventilation fan turned off", "device": "fan"}
+# @router.post("/fan/off")
+# def fan_off(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_fan(db, False, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Ventilation fan turned off", "device": "fan"}
 
-# --- Water Tank Management ---
-@router.post("/water-pump/on")
-def water_pump_on(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_water_pump(db, True, user_id=current_user.id, device_id=device_id)
-    return {"status": "Water refill pump turned on", "device": "water_pump"}
+# # --- Water Tank Management ---
+# @router.post("/water-pump/on")
+# def water_pump_on(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_water_pump(db, True, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Water refill pump turned on", "device": "water_pump"}
 
-@router.post("/water-pump/off")
-def water_pump_off(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None)
-):
-    system_controller.control_water_pump(db, False, user_id=current_user.id, device_id=device_id)
-    return {"status": "Water refill pump turned off", "device": "water_pump"}
+# @router.post("/water-pump/off")
+# def water_pump_off(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None)
+# ):
+#     system_controller.control_water_pump(db, False, user_id=current_user.id, device_id=device_id)
+#     return {"status": "Water refill pump turned off", "device": "water_pump"}
 
-@router.post("/water-tank/refill")
-def refill_water_tank(
-    duration: int = Query(300, description="Refill duration in seconds", ge=30, le=1800),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    device_id: Optional[int] = Query(None),
-):
-    return system_controller.refill_water_tank(
-        db=db, duration_seconds=duration, user_id=current_user.id, device_id=device_id
-    )
+# @router.post("/water-tank/refill")
+# def refill_water_tank(
+#     duration: int = Query(300, description="Refill duration in seconds", ge=30, le=1800),
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     device_id: Optional[int] = Query(None),
+# ):
+#     return system_controller.refill_water_tank(
+#         db=db, duration_seconds=duration, user_id=current_user.id, device_id=device_id
+#     )
 
 # --- Emergency Controls ---
 @router.post("/emergency-stop")
