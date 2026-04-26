@@ -245,6 +245,46 @@ Configuration for actuators during a specific growth stage.
 | `interval_on_min` | Integer | Duration to stay ON (for "interval" action) |
 | `interval_off_min` | Integer | Duration to stay OFF (for "interval" action) |
 
+## Control Logic & Priority
+
+The system uses a centralized rules engine (`rules_engine.py`) to determine the state of each actuator. Decisions are made based on a strict priority hierarchy to ensure safety and allow for manual intervention.
+
+### Priority Hierarchy
+
+When multiple rules conflict, the system follows this order of precedence (from highest to lowest):
+
+1.  **Safety Rules (Critical)**:
+    *   **High Temperature**: If temperature exceeds `temperature_critical` (default 35°C), fans are forced **ON**.
+    *   **Low Water Level**: If water level falls below `water_level_critical` (default 10%), all pumps (`pump`, `water_pump`, `nutrient_pump`) are forced **OFF** to prevent dry running.
+    *   *Note: Safety rules cannot be overridden by manual mode or automation.*
+
+2.  **Manual Override**:
+    *   Controlled via the `manual_state` attribute on the actuator.
+    *   `True`: Forces the actuator **ON**.
+    *   `False`: Forces the actuator **OFF**.
+    *   `None` (Default): Resumes **AUTO** mode (passes control to lower priorities).
+
+3.  **One-Shot Actions**:
+    *   Temporary, timed runs (e.g., "Run pump for 60 seconds").
+    *   Triggered via specialized API endpoints or internal logic.
+
+4.  **Schedules**:
+    *   Fixed time-based windows defined in `hydro_schedules`.
+    *   Example: "Turn lights ON from 06:00 to 18:00 every day."
+
+5.  **Intervals**:
+    *   Cycling behavior defined in `growth_recipes` or `hydro_schedules`.
+    *   Format: `X` minutes ON followed by `Y` minutes OFF.
+    *   Used primarily for irrigation pumps.
+
+6.  **Sensor Thresholds**:
+    *   Dynamic response to environment data.
+    *   Example: "Turn fan ON if temperature > 28°C" or "Turn pump ON if moisture < 30%".
+
+### Rules Engine Implementation
+
+The `check_rules()` function evaluates all active rules for an actuator and returns a single `final_on` state along with the `reason` for that decision (e.g., `"safety_high_temp"`, `"manual_on"`, `"schedule"`, `"sensor"`).
+
 ## API Endpoints
 
 ### Device Management
