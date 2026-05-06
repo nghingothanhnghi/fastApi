@@ -5,8 +5,8 @@ from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.sensors import read_sensors
-from app.hydro_system.controllers.actuator_controller import handle_automation
-from app.hydro_system.controllers.recipe_engine_controller import recipe_engine_controller
+from app.hydro_system.services.automation_service import automation_service
+from app.hydro_system.models.actuator import HydroActuator
 from app.database import SessionLocal
 from app.hydro_system import state_manager
 from app.utils.scheduler import add_job, remove_job
@@ -49,7 +49,19 @@ def collect_and_process():
                     logger.error(f"⚠️ Failed reading sensors for device {device_id}: {sensor_error}")
                     # Still proceed to handle_automation for schedules
 
-                handle_automation(session, sensor_data, device_id=device_id)
+                # ⚡ Run control loop
+                actuators = session.query(HydroActuator).filter(HydroActuator.device_id == device_id).all()
+                batch = session.query(PlantBatch).filter(
+                    PlantBatch.zone_id == device_id,
+                    PlantBatch.status == "growing"
+                ).first()
+
+                automation_service.run_control_loop(
+                    db=session,
+                    sensor_data=sensor_data,
+                    actuators=actuators,
+                    batch=batch
+                )
 
             except Exception as e:
                 logger.error(f"❌ Failed processing device {device_id}: {e}")
@@ -66,44 +78,8 @@ def update_batch_stages():
     """
     session = SessionLocal()
     try:
-        # 1️⃣ Fetch all growing batches
-        batches = session.query(PlantBatch).options(
-            joinedload(PlantBatch.current_stage)
-        ).filter(PlantBatch.status == "growing").all()
-
-        today = date.today()
-
-        for batch in batches:
-            # 2️⃣ Calculate days_growing
-            days_growing = (today - batch.start_date).days
-            logger.debug(f"Checking Batch {batch.id} (Plant: {batch.plant_id}) - Days growing: {days_growing}")
-
-            # 3️⃣ Find the appropriate stage for this plant and day
-            new_stage = session.query(GrowthStage).filter(
-                GrowthStage.plant_id == batch.plant_id,
-                GrowthStage.day_start <= days_growing,
-                GrowthStage.day_end >= days_growing
-            ).first()
-
-            if new_stage and (not batch.current_stage or batch.current_stage_id != new_stage.id):
-                logger.info(f"🚀 Batch {batch.id} stage transition: {batch.current_stage.name if batch.current_stage else 'None'} -> {new_stage.name}")
-                
-                # 4️⃣ Update batch current stage
-                batch.current_stage_id = new_stage.id
-                session.add(batch)
-                
-                # 5️⃣ Apply recipes for the new stage
-                # We need to reload the stage with recipes
-                full_stage = session.query(GrowthStage).options(
-                    joinedload(GrowthStage.recipes)
-                ).filter(GrowthStage.id == new_stage.id).first()
-                
-                if full_stage:
-                    recipe_engine_controller.apply_stage_recipes(session, batch, full_stage.recipes)
-                
-                session.commit()
-                logger.info(f"✅ Batch {batch.id} updated to stage {new_stage.name}")
-
+        automation_service.run_growth_cycle(session)
+        logger.info("✅ Batch stages updated via AutomationService")
     except Exception as e:
         logger.error(f"Failed to update batch stages: {e}")
         session.rollback()
