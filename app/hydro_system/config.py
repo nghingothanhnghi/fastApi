@@ -83,3 +83,9 @@ WATER_LEVEL_CONFIG = {
     "calibration_offset": 2       # Sensor calibration offset in cm
 }
 
+ACTIVE_BATCH_STATUSES = [
+    "seeded",
+    "growing",
+    "flowering",
+    "harvesting"
+]

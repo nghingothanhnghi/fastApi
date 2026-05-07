@@ -7,7 +7,7 @@ from app.hydro_system import sensors, state_manager
 from app.hydro_system.controllers import actuator_controller
 from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restart_sensor_job
 from app.hydro_system.rules_engine import check_rules
-from app.hydro_system.config import DEFAULT_THRESHOLDS
+from app.hydro_system.config import DEFAULT_THRESHOLDS, ACTIVE_BATCH_STATUSES
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.models.plant_batch import PlantBatch
@@ -120,7 +120,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             joinedload(PlantBatch.current_stage)
         ).filter(
             PlantBatch.zone_id == device.id,
-            PlantBatch.status == "growing"
+            PlantBatch.status.in_(ACTIVE_BATCH_STATUSES)
         ).first()
 
         if batch:

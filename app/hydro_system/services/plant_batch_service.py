@@ -119,7 +119,12 @@ class PlantBatchService:
 
         return self._map_to_detail(batch)
     
-    def update_growth_progress(self, db: Session, batch: PlantBatch, stages: list[GrowthStage]):
+    def update_growth_progress(
+        self,
+        db: Session,
+        batch: PlantBatch,
+        stages: list[GrowthStage]
+    ):
 
         if not batch.start_date or not stages:
             return batch
@@ -128,41 +133,95 @@ class PlantBatchService:
 
         current_stage = None
 
+    # =========================
+    # FIND CURRENT STAGE
+    # =========================
         for i, stage in enumerate(stages):
-            next_stage = stages[i + 1] if i + 1 < len(stages) else None
 
-            if stage.day_start <= days and (not next_stage or days < next_stage.day_start):
+            next_stage = (
+                stages[i + 1]
+                if i + 1 < len(stages)
+                else None
+            )
+
+            if (
+                stage.day_start <= days and
+                (
+                    not next_stage or
+                    days < next_stage.day_start
+                )
+            ):
                 current_stage = stage
                 break
 
-        
         old_stage_id = batch.current_stage_id
-        old_status = batch.status    
+        old_status = batch.status
 
         new_stage_id = None
-        new_status = batch.status
+        new_status = old_status
 
-        if current_stage:
+    # =========================
+    # SEEDED
+    # =========================
+        if days < stages[0].day_start:
+            new_stage_id = None
+            new_status = "seeded"
+
+    # =========================
+    # ACTIVE STAGE
+    # =========================
+        elif current_stage:
+
             new_stage_id = current_stage.id
-            new_status = "harvesting" if current_stage == stages[-1] else "growing"
-        else:
-            if days > stages[-1].day_end:
-                new_stage_id = stages[-1].id
-                new_status = "completed"
-            elif days < stages[0].day_start:
-                new_stage_id = None
-                new_status = "seeded"
 
+            stage_name = (
+                current_stage.name or ""
+            ).lower()
+
+            # 🌸 FLOWERING
+            if "flower" in stage_name:
+                new_status = "flowering"
+
+            # 🌱 DEFAULT ACTIVE GROWTH
+            else:
+                new_status = "growing"
+
+    # =========================
+    # HARVESTING
+    # =========================
+        elif days > stages[-1].day_end:
+
+            new_stage_id = stages[-1].id
+
+            # configurable harvest buffer
+            harvest_days = 3
+
+            if days <= stages[-1].day_end + harvest_days:
+                new_status = "harvesting"
+            else:
+                new_status = "completed"
+
+    # =========================
+    # UPDATE BATCH
+    # =========================
         stage_changed = old_stage_id != new_stage_id
 
-        # ✅ update batch state
-        if stage_changed or old_status != new_status:
+        if (
+            stage_changed or
+            old_status != new_status
+        ):
             batch.current_stage_id = new_stage_id
-            batch.status = new_status        
+            batch.status = new_status
 
-        # 🔥🔥🔥 TRIGGER RECIPE ENGINE HERE
+    # =========================
+    # APPLY RECIPES
+    # =========================
         if stage_changed and new_stage_id:
-            recipes = growth_recipe_service.get_recipes_by_stage(db, new_stage_id)
+
+            recipes = growth_recipe_service.get_recipes_by_stage(
+                db,
+                new_stage_id
+            )
 
             if recipes:
                 recipe_engine_controller.apply_stage_recipes(
