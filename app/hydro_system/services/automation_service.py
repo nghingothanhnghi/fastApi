@@ -20,31 +20,71 @@ class AutomationService:
     # 🌱 STAGE + RECIPE ENGINE
     # =========================
     def run_growth_cycle(self, db: Session):
-        """
-        Run periodically (cronjob).
-        Handles:
-        - stage transitions
-        - recipe engine trigger
-        """
 
-        batches = db.query(PlantBatch).all()
+        try:
 
-        # preload stages
-        stages_by_plant = {}
-        all_stages = db.query(GrowthStage)\
-            .order_by(GrowthStage.day_start.asc())\
-            .all()
+            batches = db.query(PlantBatch).all()
 
-        for s in all_stages:
-            stages_by_plant.setdefault(s.plant_id, []).append(s)
+            all_stages = (
+                db.query(GrowthStage)
+                .options(joinedload(GrowthStage.recipes))
+                .order_by(GrowthStage.day_start.asc())
+                .all()
+            )
 
-        for batch in batches:
-            stages = stages_by_plant.get(batch.plant_id, [])
+            stages_by_plant = {}
 
-            # This service handles both stage update AND RecipeEngine trigger
-            plant_batch_service.update_growth_progress(db, batch, stages)
+            for stage in all_stages:
+                stages_by_plant.setdefault(
+                    stage.plant_id,
+                    []
+                ).append(stage)
 
-        db.commit()
+            for batch in batches:
+
+                stages = stages_by_plant.get(
+                    batch.plant_id,
+                    []
+                )
+
+                old_stage_id = batch.current_stage_id
+
+                plant_batch_service.update_growth_progress(
+                    db,
+                    batch,
+                    stages
+                )
+
+                # stage changed
+                if old_stage_id != batch.current_stage_id:
+
+                    current_stage = next(
+                        (
+                            s for s in stages
+                            if s.id == batch.current_stage_id
+                        ),
+                        None
+                    )
+
+                    if current_stage and current_stage.recipes:
+
+                        recipe_engine_controller.apply_stage_recipes(
+                            db=db,
+                            batch=batch,
+                            recipes=current_stage.recipes
+                        )
+
+                        print(
+                            f"[Automation] "
+                            f"batch={batch.id} "
+                            f"stage={current_stage.name}"
+                        )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
 
     # =========================
     # ⚡ REAL-TIME CONTROL

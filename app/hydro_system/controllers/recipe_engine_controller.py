@@ -25,21 +25,25 @@ class RecipeEngineController:
 
             # 🟢 STEP 2: APPLY each recipe
             for recipe in recipes:
-                self.apply_stage_recipe(db, batch, recipe, delete_existing=False, commit=False)
+                self.apply_stage_recipe(
+                    db=db,
+                    batch=batch,
+                    recipe=recipe
+            )
 
             # ✅ SINGLE COMMIT
-            db.commit()
+            # db.commit()
         except Exception:
             db.rollback()
             raise
 
-    def apply_stage_recipe(self, db, batch, recipe, delete_existing=True, commit=True):
+    def apply_stage_recipe(self, db, batch, recipe):
         """
         Apply a single recipe to a batch's zone (device).
         Handles OLD schedules deletion and NEW schedules creation for time-based recipes.
         """
         try:
-            schedules_to_create = []
+            
 
             actuators = hydro_actuator_service.get_active_actuators_by_type(
                 db=db,
@@ -50,6 +54,8 @@ class RecipeEngineController:
             if not actuators:
                 print(f"[RecipeEngine] No actuators found for {recipe.actuator_type}")
                 return
+            
+            schedules_to_create = []
 
             # 🟢 ON
             if recipe.action == "on" and recipe.start_time and recipe.end_time:
@@ -67,6 +73,7 @@ class RecipeEngineController:
 
             # 🟡 INTERVAL
             elif recipe.action == "interval" and recipe.interval_on_min and recipe.interval_off_min:
+
                 start_time = recipe.start_time or time(0, 0)
                 end_time = recipe.end_time or time(23, 59)
 
@@ -89,15 +96,16 @@ class RecipeEngineController:
                 return
 
             if schedules_to_create:
-                hydro_schedule_service.bulk_create(db, schedules_to_create, commit=False)
+                hydro_schedule_service.bulk_create(
+                    db,
+                    schedules_to_create,
+                    commit=False
+                )
 
-            if commit:
-                # ✅ COMMIT
-                db.commit()
 
         except Exception:
-            if commit:
-                db.rollback()
+            # if commit:
+            #     db.rollback()
             raise
 
 
