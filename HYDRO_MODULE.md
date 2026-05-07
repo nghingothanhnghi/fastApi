@@ -37,7 +37,8 @@ app/hydro_system/
 │   ├── plant_batch_service.py      # Batch DB queries
 │   ├── growth_stage_service.py     # Stage DB queries
 │   ├── growth_recipe_service.py    # Recipe DB queries
-│   └── schedule_service.py         # Schedule DB queries
+│   ├── schedule_service.py         # Schedule DB queries
+│   └── automation_service.py       # Orchestration service for growth cycles and control loops
 ├── routes/              # API endpoints
 │   ├── device_router.py            # Device endpoints
 │   ├── actuator_router.py          # Actuator endpoints
@@ -284,6 +285,15 @@ When multiple rules conflict, the system follows this order of precedence (from 
 ### Rules Engine Implementation
 
 The `check_rules()` function evaluates all active rules for an actuator and returns a single `final_on` state along with the `reason` for that decision (e.g., `"safety_high_temp"`, `"manual_on"`, `"schedule"`, `"sensor"`).
+
+### Automation Pipeline Integration
+
+The system operates as a continuous pipeline where multiple components coordinate during every 60-second cycle:
+
+1.  **The Pulse (Scheduler)**: The background job wakes up every 60 seconds to initiate a system check.
+2.  **The Context (Automation Service)**: Identifies the active `PlantBatch` for the device and retrieves the `GrowthRecipe` for the current `GrowthStage`.
+3.  **The Decision (Rule Engine)**: Receives live sensor readings, active recipes, and time-based schedules. It evaluates them using the priority hierarchy (Safety > Manual > Schedule > Recipe > Sensor).
+4.  **The Action (Actuator Controller)**: Executes the final decision by sending signals to the hardware and logging the state change.
 
 ## API Endpoints
 
@@ -956,7 +966,7 @@ Sensor Collection Job (60s interval)
   ↓
 sensors.read_sensor_data()
   ↓
-device_controller.handle_automation()
+automation_service.run_control_loop()
   ↓ (fetch recipes for current batch)
 rules_engine.check_rules(sensor_data, thresholds, recipes)
   ↓
@@ -993,19 +1003,21 @@ rules_engine.is_in_interval()  (Evaluated during handle_automation cycle)
 - **Actions:**
   1. Collects sensor data (temperature, humidity, moisture, water level, ec, ppm)
   2. Persists readings to `SensorData` table
-  3. Evaluates automation rules based on thresholds
-  4. Controls actuators if conditions are met
-  5. Generates alerts if critical levels reached
+  3. Executes `automation_service.run_control_loop()`
+  4. Evaluates automation rules via `rules_engine.check_rules()`
+  5. Controls actuators if conditions are met
+  6. Generates alerts if critical levels reached
 
 ### Batch Stage Update Job
 
 - **File:** `app/hydro_system/scheduler.py`
 - **Frequency:** Every 12 hours
 - **Actions:**
-  1. Calculates `days_growing` for each active batch (`today - start_date`).
-  2. Finds the matching `GrowthStage` based on `day_start <= days_growing <= day_end`.
-  3. Automatically updates the batch to the new stage if a transition is needed.
-  4. Triggers `recipe_engine_controller.apply_stage_recipes()` to update hardware schedules and automation rules.
+  1. Executes `automation_service.run_growth_cycle()`
+  2. Calculates `days_growing` for each active batch (`today - start_date`).
+  3. Finds the matching `GrowthStage` based on `day_start <= days_growing <= day_end`.
+  4. Automatically updates the batch to the new stage if a transition is needed.
+  5. Triggers `recipe_engine_controller.apply_stage_recipes()` to update hardware schedules and automation rules.
 
 ## State Management
 
@@ -1063,7 +1075,6 @@ Example: `pump_1_1` = pump on device 1, port 1
 
 - [ ] WebSocket real-time actuator state updates
 - [ ] Device grouping/zones (multiple devices per location)
-- [ ] Advanced scheduling (time-based rules)
 - [ ] Historical analytics dashboard
 - [ ] Hardware firmware update management
 - [ ] MQTT integration for remote devices
