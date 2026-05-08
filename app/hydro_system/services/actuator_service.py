@@ -5,11 +5,20 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.actuator import HydroActuatorCreate, HydroActuatorUpdate
+from app.hydro_system.helpers.actuator_helper import validate_actuator_access, validate_gpio_pin_available
 
 class HydroActuatorService:
 
     def create_actuator(self, db: Session, actuator_in: HydroActuatorCreate) -> HydroActuator:
         try:
+
+            # ✅ Validate GPIO uniqueness
+            validate_gpio_pin_available(
+                db=db,
+                device_id=actuator_in.device_id,
+                pin=actuator_in.pin
+            )
+
             actuator = HydroActuator(**actuator_in.dict())
             db.add(actuator)
             db.commit()
@@ -37,8 +46,23 @@ class HydroActuatorService:
         if not actuator:
             return None
         try:
-            for field, value in updates.dict(exclude_unset=True).items():
+
+            update_data = updates.dict(exclude_unset=True)
+
+            # ✅ Validate GPIO uniqueness only if pin changed
+            if "pin" in update_data and update_data["pin"]:
+
+                validate_gpio_pin_available(
+                    db=db,
+                    device_id=actuator.device_id,
+                    pin=update_data["pin"],
+                    exclude_actuator_id=actuator.id,  # ignore current actuator
+                )
+
+             # ✅ Apply updates
+            for field, value in update_data.items():
                 setattr(actuator, field, value)
+
             db.commit()
             db.refresh(actuator)
             return actuator
