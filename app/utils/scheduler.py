@@ -54,19 +54,23 @@ def start_scheduler():
             scheduler.start()
             print("[Scheduler] Started.")
 
-def add_job(func, seconds: int, job_id: str, job_name: str = None):
+def add_job(func, job_id: str, job_name: str = None, **kwargs):
+    """
+    Register a job with an interval trigger. 
+    Accepts interval parameters like seconds=60, minutes=5, hours=12.
+    """
     with scheduler_lock:
         existing = scheduler.get_job(job_id)
         if existing:
             logger.info(f"[Scheduler] Job '{job_id}' already exists.")
             return
 
-        scheduler.add_job(func, IntervalTrigger(seconds=seconds), id=job_id, replace_existing=True)
+        scheduler.add_job(func, IntervalTrigger(**kwargs), id=job_id, replace_existing=True)
         JOB_REGISTRY[job_id] = {
             "id": job_id,
             "name": job_name or job_id
         }
-        logger.info(f"[Scheduler] Job '{job_id}' added (every {seconds}s)")
+        logger.info(f"[Scheduler] Job '{job_id}' added with interval {kwargs}")
 
 
 def remove_job(job_id: str):

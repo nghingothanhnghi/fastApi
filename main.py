@@ -126,7 +126,7 @@ try:
     start_scheduler()  # Start global scheduler
     start_sensor_job() # Register hydro system sensor job
     start_batch_stage_job() # Register batch stage update job
-    add_job(transform_unprocessed_data, seconds=10, job_id="transform_job") # Register data transformation job
+    add_job(transform_unprocessed_data, job_id="transform_job", seconds=10) # Register data transformation job
     # Tue/Thu/Sat at 18:00 local time
     add_cron_job(draw_job, job_id="jackpot_draw_job", day_of_week="tue,thu,sat", hour=18, minute=0, job_name="Jackpot Draw Job")
     # Start hardware detection WebSocket background tasks

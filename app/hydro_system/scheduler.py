@@ -89,14 +89,14 @@ def update_batch_stages():
 
 def start_sensor_job():
     # ✅ Use global scheduler to add job
-    add_job(collect_and_process, seconds=60, job_id=SENSOR_JOB_ID, job_name="Sensor Collect Job")
+    add_job(collect_and_process, job_id=SENSOR_JOB_ID, job_name="Sensor Collect Job", seconds=60)
     state_manager.set_state("scheduler", True)
     logger.info("Sensor job scheduled.")
 
 def start_batch_stage_job():
     """Start the background job for updating batch stages (runs once a day)"""
     # Run once every 6 hours or once a day. Let's start with every 12 hours.
-    add_job(update_batch_stages, hours=12, job_id=BATCH_STAGE_JOB_ID, job_name="Batch Stage Update Job")
+    add_job(update_batch_stages, job_id=BATCH_STAGE_JOB_ID, job_name="Batch Stage Update Job", hours=12)
     logger.info("Batch stage update job scheduled.")
 
 def stop_sensor_job():
