@@ -181,7 +181,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             "actuators": actuators_state,
             "growing_batch": batch_info,
             "system": {
-                "scheduler_state": state_manager.get_state(f"scheduler_{device.id}")
+                "scheduler_state": state_manager.get_state("scheduler")
             },
             "automation": {
                 "rules_result": rules_result,
@@ -229,24 +229,10 @@ def emergency_stop(db: Session, user_id: int):
 def scheduler_control(action: str, user_id: Optional[int] = None, device_id: Optional[int] = None):
     if action == "start":
         start_sensor_job()
-        if device_id:
-            state_manager.set_state(f"scheduler_{device_id}", True)
-        else:
-            state_manager.set_state("scheduler", True)
-
     elif action == "stop":
         stop_sensor_job()
-        if device_id:
-            state_manager.set_state(f"scheduler_{device_id}", False)
-        else:
-            state_manager.set_state("scheduler", False)
-
     elif action == "restart":
         restart_sensor_job()
-        if device_id:
-            state_manager.set_state(f"scheduler_{device_id}", True)
-        else:
-            state_manager.set_state("scheduler", True)
 
     logger.info(f"Scheduler {action} command executed")
 

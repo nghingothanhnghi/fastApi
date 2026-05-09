@@ -11,11 +11,6 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone=get_localzone())
 scheduler_lock = threading.Lock()
 
-KNOWN_JOBS = [
-    {"id": "transform_job", "name": "Transform Job"},
-    {"id": "sensor_collect_job", "name": "Sensor Collect Job"},
-]
-
 JOB_REGISTRY = {}
 
 def get_scheduler_health():
