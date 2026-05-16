@@ -119,6 +119,17 @@ class AutomationService:
 
         # 🔥 Execute actions
         actions_taken = {}
+        
+        # Check scheduler state before acting
+        from app.hydro_system.state_manager import get_state as get_global_state
+        if not get_global_state("scheduler"):
+            return {
+                "actions_taken": {},
+                "alerts": result.get("alerts", []),
+                "result": result,
+                "note": "Automation paused (Scheduler OFF)"
+            }
+
         for action in result.get("actions", []):
             actuator_id = action["actuator_id"]
             should_on = action["on"]

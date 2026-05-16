@@ -90,8 +90,10 @@ def update_batch_stages():
 def start_sensor_job():
     # ✅ Use global scheduler to add job
     add_job(collect_and_process, job_id=SENSOR_JOB_ID, job_name="Sensor Collect Job", seconds=60)
+    # Also ensure batch stage job is running
+    start_batch_stage_job()
     state_manager.set_state("scheduler", True)
-    logger.info("Sensor job scheduled.")
+    logger.info("Sensor and Batch jobs scheduled.")
 
 def start_batch_stage_job():
     """Start the background job for updating batch stages (runs once a day)"""
@@ -101,14 +103,15 @@ def start_batch_stage_job():
 
 def stop_sensor_job():
     remove_job(SENSOR_JOB_ID)  # Use the remove_job function from utils.scheduler 
+    stop_batch_stage_job()
     state_manager.set_state("scheduler", False)
-    logger.warning("Stop job manually in global scheduler (not yet implemented)")
+    logger.warning("Hydro system jobs stopped (Sensor + Batch)")
 
 def stop_batch_stage_job():
     remove_job(BATCH_STAGE_JOB_ID)
     logger.info("Batch stage update job stopped.")
 
 def restart_sensor_job():
-    stop_sensor_job()  # Stop the existing job
-    start_sensor_job()  # Start a new job
-    logger.info("Scheduler restarted.") 
+    stop_sensor_job()  # Stop both jobs
+    start_sensor_job()  # Start both jobs
+    logger.info("Hydro scheduler restarted.") 

@@ -127,19 +127,10 @@ def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
 def handle_automation(db: Session, sensor_data: dict, device_id: int = None):
     """
     Main automation engine.
-
-    This runs periodically (scheduler) and decides actuator states.
-
-    Priority logic:
-    1️⃣ manual_state (highest priority)
-    2️⃣ recipes (growth stage)
-    3️⃣ thresholds (sensor rules)
-
-    Responsibilities:
-    - Evaluate rules
-    - Apply actuator changes ONLY when needed
-    - Avoid unnecessary toggling
     """
+    from app.hydro_system import state_manager
+    scheduler_active = state_manager.get_state("scheduler")
+
     alerts = []
     actions_taken = {}
 
@@ -181,6 +172,10 @@ def handle_automation(db: Session, sensor_data: dict, device_id: int = None):
                 continue
 
             # 🛑 STEP 2: AUTOMATION (rules_engine)
+            if not scheduler_active:
+                logger.debug(f"[Automation] Skipped for {actuator_key} (Scheduler OFF)")
+                continue
+
             # Per-actuator or per-device thresholds
             thresholds_override = actuator.device.thresholds or {}
 

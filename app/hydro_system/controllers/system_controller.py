@@ -231,8 +231,18 @@ def scheduler_control(action: str, user_id: Optional[int] = None, device_id: Opt
         start_sensor_job()
     elif action == "stop":
         stop_sensor_job()
+        # Optional: Force turn off all actuators when stopping the brain
+        if user_id:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            try:
+                emergency_stop(db, user_id)
+                logger.info(f"System stopped and emergency shutdown triggered for user {user_id}")
+            finally:
+                db.close()
     elif action == "restart":
         restart_sensor_job()
 
     logger.info(f"Scheduler {action} command executed")
+    return {"status": f"Scheduler {action} executed successfully"}
 
