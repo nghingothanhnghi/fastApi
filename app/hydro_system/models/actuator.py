@@ -9,6 +9,10 @@ class HydroActuator(Base):
     __tablename__ = "hydro_actuators"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    # ─────────────────────────────────────────────
+    # Identity
+    # ─────────────────────────────────────────────
     type = Column(String, nullable=False)  # "pump", "light", "fan", etc.
     name = Column(String, nullable=True)   # Optional name like "Grow Light 1"
 
@@ -16,10 +20,41 @@ class HydroActuator(Base):
     pin = Column(String, nullable=True)    # "26", "27" pin GPIO.
     port = Column(Integer, nullable=False) # logical port (optional)
 
-    # Control
+    device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=False)
+
+    # ─────────────────────────────────────────────
+    # Runtime state
+    # ─────────────────────────────────────────────
     is_active = Column(Boolean, default=True)  # For logical control
+
+    # Default boot state
     default_state = Column(Boolean, default=False)  # Initial state (optional)
 
+    # 🔥 REAL CURRENT STATE (replace state_manager)
+    current_state = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    # Last time actuator state changed
+    last_state_changed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # ─────────────────────────────────────────────
+    # Manual override
+    # ─────────────────────────────────────────────
+
+    # True  -> force ON
+    # False -> force OFF
+    # None  -> AUTO
+    manual_state = Column(Boolean, nullable=True, default=None)  # True (Force ON), False (Force OFF), None (Auto)
+
+    # ─────────────────────────────────────────────
+    # Control modes
+    # ─────────────────────────────────────────────
     control_mode = Column(
         String,
         default="binary"   # binary | pulse | pwm
@@ -33,14 +68,22 @@ class HydroActuator(Base):
         # pwm:   { "duty": 70, "freq": 1000 }
     )    
 
-    device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=False)
-    device = relationship("HydroDevice", back_populates="actuators")
+    
 
+    # ─────────────────────────────────────────────
+    # Relationships
+    # ─────────────────────────────────────────────
+    device = relationship("HydroDevice", back_populates="actuators")
     logs = relationship("HydroActuatorLog", back_populates="actuator", cascade="all, delete")
     schedules = relationship("HydroSchedule", back_populates="actuator", cascade="all, delete")
 
+    # ─────────────────────────────────────────────
+    # Sensor linkage
+    # ─────────────────────────────────────────────
     sensor_key = Column(String, nullable=True)
-    manual_state = Column(Boolean, nullable=True, default=None)  # True (Force ON), False (Force OFF), None (Auto)
 
+    # ─────────────────────────────────────────────
+    # Timestamps
+    # ─────────────────────────────────────────────
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
