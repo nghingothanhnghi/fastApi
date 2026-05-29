@@ -1,12 +1,10 @@
 # File: backend/app/hydro_system/controllers/actuator_controller.py
 # Description: Hardware + actuator-based control logic for hydroponic system devices
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import HTTPException
-from sqlalchemy.orm import Session, joinedload
-from app.hydro_system.rules_engine import check_rules
-from app.hydro_system.state_manager import set_state, get_state
+from sqlalchemy.orm import Session
 from app.hydro_system.config import DEFAULT_ACTUATORS, ACTUATOR_TYPES, SUPPORTED_ACTUATOR_TYPES
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
@@ -36,12 +34,6 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
     state_str = "ON" if on else "OFF"
 
     if not actuators:
-        # fallback_id = DEFAULT_ACTUATORS.get(device_type, f"default_{device_type}_id")
-        # key = f"{device_type}_{fallback_id}"
-        # set_state(key, on)
-
-        # log_device_action("Default", device_type, on, fallback_id)
-        # log_actuator_action(db, actuator_id=None, action=state_str.lower(), state=state_str)
         
         fallback_id = DEFAULT_ACTUATORS.get(
             device_type,
@@ -73,11 +65,9 @@ def control_actuator(db: Session, device_type: str, on: bool, device_id: str = N
     
 
     for actuator in actuators:
-        # key = f"{actuator.type}_{actuator.device_id}_{actuator.port}"
-        # set_state(key, on)
 
         actuator.current_state = on
-        actuator.last_state_changed_at = datetime.utcnow()
+        actuator.last_state_changed_at = datetime.now(timezone.utc)
 
         log_device_action(
             actuator.name or actuator.type,
@@ -134,7 +124,7 @@ def control_actuator_by_id(
     # ─────────────────────────────────────────────
 
     actuator.current_state = on
-    actuator.last_state_changed_at = datetime.utcnow()
+    actuator.last_state_changed_at = datetime.now(timezone.utc)
 
     # ✅ persist changes
     db.commit()
@@ -172,39 +162,6 @@ def control_actuator_by_id(
         "current_state": actuator.current_state,
         "last_state_changed_at": actuator.last_state_changed_at,
     }
-# def control_actuator_by_id(db: Session, actuator_id: int, on: bool, source: str = "user"):
-#     """
-#     Control ONE actuator immediately (direct action).
-
-#     This function:
-#     - Executes hardware action NOW
-#     - Updates runtime state (state_manager)
-#     - Logs action
-
-#     ❗ IMPORTANT:
-#     - Does NOT define long-term behavior (manual/auto)
-#     - Used by: user actions, automation, scheduler
-#     """
-#     actuator = hydro_actuator_service.get_actuator(db, actuator_id)
-#     if not actuator:
-#         raise HTTPException(status_code=404, detail="Actuator not found")
-
-#     state_str = "ON" if on else "OFF"
-#     # key = f"{actuator.type}_{actuator.device_id}_{actuator.port}"
-#     # set_state(key, on)
-
-#     actuator.current_state = on
-#     actuator.last_state_changed_at = datetime.utcnow()
-
-#     log_device_action(actuator.name or actuator.type, actuator.type, on, actuator.device_id, actuator.id)
-#     log_actuator_action(db, actuator.id, action=state_str.lower(), state=state_str, source=source)
-
-#     return {
-#         "message": f"{actuator.name or actuator.type} turned {'on' if on else 'off'}",
-#         "actuator_id": actuator_id,
-#         "new_state": on,
-#         "state_key": key
-#     }
 
 def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
     """

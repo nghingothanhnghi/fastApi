@@ -9,7 +9,6 @@ from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.actuator import HydroActuator
 
 from app.hydro_system.services.plant_batch_service import plant_batch_service
-from app.hydro_system.services.growth_recipe_service import growth_recipe_service
 from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
@@ -108,209 +107,226 @@ class AutomationService:
         alerts = []
         actions_taken = {}
 
-        scheduler_active = get_state("scheduler")
+        try:
 
-        # ──────────────────────────────────────────────────────────────
-        # Load active batch + recipes
-        # ──────────────────────────────────────────────────────────────
+            scheduler_active = get_state("scheduler")
 
-        recipes = []
+            # ──────────────────────────────────────────────────────────────
+            # Load active batch + recipes
+            # ──────────────────────────────────────────────────────────────
 
-        batch = (
-            db.query(PlantBatch)
-            .options(
-                joinedload(PlantBatch.current_stage)
-                .joinedload(GrowthStage.recipes)
-            )
-            .filter(
-                PlantBatch.zone_id == device_id,
-                PlantBatch.status == "growing",
-            )
-            .first()
-        )
+            recipes = []
 
-        if batch and batch.current_stage:
-            recipes = batch.current_stage.recipes
-
-            logger.debug(
-                f"[Automation] Found {len(recipes)} recipes "
-                f"for Batch {batch.id}"
-            )
-
-        # ──────────────────────────────────────────────────────────────
-        # Load actuators
-        # ──────────────────────────────────────────────────────────────
-
-        actuators: list[HydroActuator] = []
-
-        for device_type in SUPPORTED_ACTUATOR_TYPES:
-
-            type_actuators = (
-                hydro_actuator_service.get_all_actuators_by_type(
-                    db,
-                    device_type,
-                    device_id=device_id,
+            batch = (
+                db.query(PlantBatch)
+                .options(
+                    joinedload(PlantBatch.current_stage)
+                    .joinedload(GrowthStage.recipes)
                 )
+                .filter(
+                    PlantBatch.zone_id == device_id,
+                    PlantBatch.status == "growing",
+                )
+                .first()
             )
 
-            actuators.extend(type_actuators)
+            if batch and batch.current_stage:
+                recipes = batch.current_stage.recipes
 
-        if not actuators:
-            logger.warning(
-                f"[Automation] No actuators found "
-                f"for device '{device_id}'"
-            )
+                logger.debug(
+                    f"[Automation] Found {len(recipes)} recipes "
+                    f"for Batch {batch.id}"
+                )
 
-            return {
-                "actions_taken": {},
-                "alerts": [],
-                "sensor_data": sensor_data,
+            # ──────────────────────────────────────────────────────────────
+            # Load actuators
+            # ──────────────────────────────────────────────────────────────
+
+            actuators: list[HydroActuator] = []
+
+            for device_type in SUPPORTED_ACTUATOR_TYPES:
+
+                type_actuators = (
+                    hydro_actuator_service.get_all_actuators_by_type(
+                        db,
+                        device_type,
+                        device_id=device_id,
+                    )
+                )
+
+                actuators.extend(type_actuators)
+
+            if not actuators:
+                logger.warning(
+                    f"[Automation] No actuators found "
+                    f"for device '{device_id}'"
+                )
+
+                return {
+                    "actions_taken": {},
+                    "alerts": [],
+                    "sensor_data": sensor_data,
+                }
+        
+            # Faster lookup
+            actuator_map = {
+                actuator.id: actuator
+                for actuator in actuators
             }
 
-        # ──────────────────────────────────────────────────────────────
-        # STEP 1 — MANUAL OVERRIDE
-        # ──────────────────────────────────────────────────────────────
+            # ──────────────────────────────────────────────────────────────
+            # STEP 1 — MANUAL OVERRIDE
+            # ──────────────────────────────────────────────────────────────
 
-        auto_actuators = []
+            auto_actuators = []
 
-        for actuator in actuators:
+            for actuator in actuators:
 
-            actuator_key = (
-                f"{actuator.type}_"
-                f"{actuator.device_id}_"
-                f"{actuator.port}"
+                actuator_key = (
+                    f"{actuator.type}_"
+                    f"{actuator.device_id}_"
+                    f"{actuator.port}"
+                )
+
+                # Manual override has highest priority
+                if actuator.manual_state is not None:
+
+                    desired_state = actuator.manual_state
+                    prev_state = actuator.current_state
+
+                    if desired_state != prev_state:
+
+                        self._apply_actuator_action(
+                            db=db,
+                            actuator=actuator,
+                            on=desired_state,
+                            source="manual",
+                        )
+
+                        logger.info(
+                            f"[MANUAL OVERRIDE] "
+                            f"{actuator_key} -> {desired_state}"
+                        )
+
+                        actions_taken[actuator_key] = {
+                            "activated": desired_state,
+                            "mode": "manual",
+                        }
+
+                    continue
+
+                auto_actuators.append(actuator)
+
+            # ──────────────────────────────────────────────────────────────
+            # STEP 2 — AUTOMATION DISABLED
+            # ──────────────────────────────────────────────────────────────
+
+            if not scheduler_active:
+
+                logger.debug(
+                    "[Automation] Scheduler OFF "
+                    "- skipping automatic control"
+                )
+
+                db.commit()
+
+                return {
+                    "actions_taken": actions_taken,
+                    "alerts": alerts,
+                    "sensor_data": sensor_data,
+                    "note": "Scheduler OFF",
+                }
+
+            # ──────────────────────────────────────────────────────────────
+            # STEP 3 — RULE EVALUATION
+            # ──────────────────────────────────────────────────────────────
+
+            result = check_rules(
+                sensor_data=sensor_data,
+                actuators=auto_actuators,
+                recipes=recipes,
             )
 
-            # Manual override has highest priority
-            if actuator.manual_state is not None:
+            # Collect alerts
+            for alert in result.get("alerts", []):
 
-                desired_state = actuator.manual_state
-                # prev_state = get_state(actuator_key)
+                level = alert.get("type", "info")
+                message = alert.get("message", "")
+
+                getattr(logger, level, logger.info)(
+                    f"{level.upper()} ALERT: {message}"
+                )
+
+                alerts.append(alert)
+
+            # ──────────────────────────────────────────────────────────────
+            # STEP 4 — APPLY ACTIONS
+            # ──────────────────────────────────────────────────────────────
+
+            for action in result.get("actions", []):
+
+                actuator_id = action["actuator_id"]
+                should_on = action["on"]
+
+                actuator = actuator_map.get(actuator_id)
+
+                if not actuator:
+                    continue
+
+                actuator_key = (
+                    f"{actuator.type}_"
+                    f"{actuator.device_id}_"
+                    f"{actuator.port}"
+                )
+
                 prev_state = actuator.current_state
 
-                if desired_state != prev_state:
+                # Only apply changes
+                if should_on != prev_state:
 
                     self._apply_actuator_action(
                         db=db,
                         actuator=actuator,
-                        on=desired_state,
+                        on=should_on,
                         # actuator_key=actuator_key,
-                        source="manual",
+                        source="automation",
                     )
 
                     logger.info(
-                        f"[MANUAL OVERRIDE] "
-                        f"{actuator_key} -> {desired_state}"
+                        f"[Automation] "
+                        f"{actuator_key} -> {should_on}"
                     )
 
                     actions_taken[actuator_key] = {
-                        "activated": desired_state,
-                        "mode": "manual",
+                        "activated": should_on,
+                        "mode": "automation",
                     }
 
-                continue
+                else:
 
-            auto_actuators.append(actuator)
+                    logger.debug(
+                        f"[Automation] No change for "
+                        f"{actuator_key}, remains {prev_state}"
+                    )
 
-        # ──────────────────────────────────────────────────────────────
-        # STEP 2 — AUTOMATION DISABLED
-        # ──────────────────────────────────────────────────────────────
-
-        if not scheduler_active:
-
-            logger.debug(
-                "[Automation] Scheduler OFF "
-                "- skipping automatic control"
-            )
+            # ✅ SINGLE COMMIT
+            db.commit()        
 
             return {
                 "actions_taken": actions_taken,
                 "alerts": alerts,
                 "sensor_data": sensor_data,
-                "note": "Scheduler OFF",
             }
+        
+        except Exception:
 
-        # ──────────────────────────────────────────────────────────────
-        # STEP 3 — RULE EVALUATION
-        # ──────────────────────────────────────────────────────────────
+            db.rollback()
 
-        result = check_rules(
-            sensor_data=sensor_data,
-            actuators=auto_actuators,
-            recipes=recipes,
-        )
-
-        # Collect alerts
-        for alert in result.get("alerts", []):
-
-            level = alert.get("type", "info")
-            message = alert.get("message", "")
-
-            getattr(logger, level, logger.info)(
-                f"{level.upper()} ALERT: {message}"
+            logger.exception(
+                "[Automation] Control loop failed"
             )
 
-            alerts.append(alert)
-
-        # ──────────────────────────────────────────────────────────────
-        # STEP 4 — APPLY ACTIONS
-        # ──────────────────────────────────────────────────────────────
-
-        for action in result.get("actions", []):
-
-            actuator_id = action["actuator_id"]
-            should_on = action["on"]
-
-            actuator = next(
-                (a for a in auto_actuators if a.id == actuator_id),
-                None,
-            )
-
-            if not actuator:
-                continue
-
-            actuator_key = (
-                f"{actuator.type}_"
-                f"{actuator.device_id}_"
-                f"{actuator.port}"
-            )
-
-            # prev_state = get_state(actuator_key)
-            prev_state = actuator.current_state
-
-            # Only apply changes
-            if should_on != prev_state:
-
-                self._apply_actuator_action(
-                    db=db,
-                    actuator=actuator,
-                    on=should_on,
-                    # actuator_key=actuator_key,
-                    source="automation",
-                )
-
-                logger.info(
-                    f"[Automation] "
-                    f"{actuator_key} -> {should_on}"
-                )
-
-                actions_taken[actuator_key] = {
-                    "activated": should_on,
-                    "mode": "automation",
-                }
-
-            else:
-
-                logger.debug(
-                    f"[Automation] No change for "
-                    f"{actuator_key}, remains {prev_state}"
-                )
-
-        return {
-            "actions_taken": actions_taken,
-            "alerts": alerts,
-            "sensor_data": sensor_data,
-        }
+            raise
 
     # ──────────────────────────────────────────────────────────────────────
     # INTERNAL HELPERS
@@ -321,25 +337,16 @@ class AutomationService:
         db: Session,
         actuator: HydroActuator,
         on: bool,
-        # actuator_key: str,
         source: str = "automation",
     ) -> None:
 
         state_str = "ON" if on else "OFF"
 
-        # Runtime state cache
-        # set_state(actuator_key, on)
-
+        # TODO:
+        # hardware_driver.execute(actuator, on)
         # ✅ Persist REAL runtime state
         actuator.current_state = on
         actuator.last_state_changed_at = datetime.now(timezone.utc)
-
-        
-        db.commit()
-        db.refresh(actuator)
-
-        # TODO:
-        # hardware_driver.execute(actuator, on)
 
         # Persist action log
         log_actuator_action(
@@ -353,7 +360,7 @@ class AutomationService:
         logger.info(
             f"[Actuator] "
             f"{actuator.type} actuator {actuator.id} "
-            # f"({actuator_key}) -> {state_str}"
+            f"({actuator.name}) -> {state_str}"
         )
 
 
