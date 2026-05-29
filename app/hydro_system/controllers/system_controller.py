@@ -93,9 +93,13 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 # "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
 
                 # 🔥 REAL STATE
-                "current_state": state_manager.get_state(
-                    f"{actuator.type}_{actuator.device_id}_{actuator.port}"
-                ),
+                # "current_state": state_manager.get_state(
+                #     f"{actuator.type}_{actuator.device_id}_{actuator.port}"
+                # ),
+
+                # Using DB state instead of state_manager for real-time accuracy
+                "current_state": actuator.current_state,
+                "last_state_changed_at": actuator.last_state_changed_at,
 
                 # 🔥 MANUAL CONTROL
                 "manual_state": actuator.manual_state,

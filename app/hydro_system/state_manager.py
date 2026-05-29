@@ -5,14 +5,17 @@ from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# _state = {
+#     "pump": False,
+#     "light": False,
+#     "scheduler": False,
+#     "fan": False,               # ✅ add this
+#     "water_pump": False,        # ✅ add this
+#     "water_refill": False,
+#     "valve": False,
+# }
 _state = {
-    "pump": False,
-    "light": False,
     "scheduler": False,
-    "fan": False,               # ✅ add this
-    "water_pump": False,        # ✅ add this
-    "water_refill": False,
-    "valve": False,
 }
 
 def get_state(device):

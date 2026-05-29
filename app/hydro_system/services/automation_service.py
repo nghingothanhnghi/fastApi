@@ -1,5 +1,7 @@
 # app/hydro_system/services/automation_service.py
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session, joinedload
 
 from app.hydro_system.models.plant_batch import PlantBatch
@@ -183,7 +185,8 @@ class AutomationService:
             if actuator.manual_state is not None:
 
                 desired_state = actuator.manual_state
-                prev_state = get_state(actuator_key)
+                # prev_state = get_state(actuator_key)
+                prev_state = actuator.current_state
 
                 if desired_state != prev_state:
 
@@ -191,7 +194,7 @@ class AutomationService:
                         db=db,
                         actuator=actuator,
                         on=desired_state,
-                        actuator_key=actuator_key,
+                        # actuator_key=actuator_key,
                         source="manual",
                     )
 
@@ -272,7 +275,8 @@ class AutomationService:
                 f"{actuator.port}"
             )
 
-            prev_state = get_state(actuator_key)
+            # prev_state = get_state(actuator_key)
+            prev_state = actuator.current_state
 
             # Only apply changes
             if should_on != prev_state:
@@ -281,7 +285,7 @@ class AutomationService:
                     db=db,
                     actuator=actuator,
                     on=should_on,
-                    actuator_key=actuator_key,
+                    # actuator_key=actuator_key,
                     source="automation",
                 )
 
@@ -317,14 +321,22 @@ class AutomationService:
         db: Session,
         actuator: HydroActuator,
         on: bool,
-        actuator_key: str,
+        # actuator_key: str,
         source: str = "automation",
     ) -> None:
 
         state_str = "ON" if on else "OFF"
 
         # Runtime state cache
-        set_state(actuator_key, on)
+        # set_state(actuator_key, on)
+
+        # ✅ Persist REAL runtime state
+        actuator.current_state = on
+        actuator.last_state_changed_at = datetime.now(timezone.utc)
+
+        
+        db.commit()
+        db.refresh(actuator)
 
         # TODO:
         # hardware_driver.execute(actuator, on)
@@ -341,7 +353,7 @@ class AutomationService:
         logger.info(
             f"[Actuator] "
             f"{actuator.type} actuator {actuator.id} "
-            f"({actuator_key}) -> {state_str}"
+            # f"({actuator_key}) -> {state_str}"
         )
 
 
