@@ -26,7 +26,7 @@ DEFAULT_THRESHOLDS = {
 DEFAULT_ACTUATORS = [
     {
         "type": "pump",
-        "name": "Pump A",
+        "name": "Bơm dung dịch",
         "pin": "25",
         "port": 1,
         "default_state": False
@@ -34,28 +34,28 @@ DEFAULT_ACTUATORS = [
     {
         "type": "light",
         "name": "Đèn",
-        "pin": "23",
+        "pin": "27",
         "port": 2,
         "default_state": False
     },
     {
         "type": "fan",
         "name": "Quạt",
-        "pin": "27",
+        "pin": "23",
         "port": 3,
         "default_state": False
     },
     {
         "type": "water_pump",
         "name": "Bơm nước",
-        "pin": "26",
+        "pin": "16",
         "port": 4,
         "default_state": False
     },
     {
         "type": "valve",
         "name": "Van nước",
-        "pin": "22",
+        "pin": "18",
         "port": 5,
         "default_state": False
     }

@@ -27,18 +27,6 @@ class HydroDeviceService:
             db.add(device)
             db.flush()  # Get device.id before commit
             logger.info(f"Created base device entry with ID: {device.id}")
-            # Create default actuators for this device
-            # for act in DEFAULT_ACTUATORS:
-            #     actuator = HydroActuator(
-            #         type=act["type"],
-            #         name=act.get("name"),
-            #         pin=act.get("pin"),
-            #         port=act.get("port"),
-            #         default_state=act.get("default_state", False),
-            #         device_id=device.id,
-            #     )
-            #     db.add(actuator)
-            #     logger.debug(f"Added actuator for device {device.device_id}: {actuator.type}")
 
              # --- MOCK MODE ---
             if USE_MOCK_HYDROSYSTEMMAINBOARD:
