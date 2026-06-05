@@ -90,7 +90,6 @@ def start_sensor_job():
     add_job(collect_and_process, job_id=SENSOR_JOB_ID, job_name="Sensor Collect Job", seconds=60)
     # Also ensure batch stage job is running
     start_batch_stage_job()
-    state_manager.set_state("scheduler", True)
     logger.info("Sensor and Batch jobs scheduled.")
 
 def start_batch_stage_job():
@@ -102,7 +101,6 @@ def start_batch_stage_job():
 def stop_sensor_job():
     remove_job(SENSOR_JOB_ID)  # Use the remove_job function from utils.scheduler 
     stop_batch_stage_job()
-    state_manager.set_state("scheduler", False)
     logger.warning("Hydro system jobs stopped (Sensor + Batch)")
 
 def stop_batch_stage_job():

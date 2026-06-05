@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.hydro_system import sensors, state_manager
+from app.hydro_system.services.system_state_service import system_state_service
 from app.hydro_system.controllers import actuator_controller
 from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restart_sensor_job
 from app.hydro_system.rules_engine import check_rules
@@ -90,13 +91,6 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "sensor_key": actuator.sensor_key,
                 "linked_sensor_value": sensor_value,
                 # Get last known state from state_manager (True=ON, False=OFF)
-                # "current_state": state_manager.get_state(f"{actuator.type}_{actuator.device_id}_{actuator.port}")
-
-                # 🔥 REAL STATE
-                # "current_state": state_manager.get_state(
-                #     f"{actuator.type}_{actuator.device_id}_{actuator.port}"
-                # ),
-
                 # Using DB state instead of state_manager for real-time accuracy
                 "current_state": actuator.current_state,
                 "last_state_changed_at": actuator.last_state_changed_at,
@@ -185,7 +179,8 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             "actuators": actuators_state,
             "growing_batch": batch_info,
             "system": {
-                "scheduler_state": state_manager.get_state("scheduler")
+                "scheduler_state": 
+                    system_state_service.get_scheduler_status()
             },
             "automation": {
                 "rules_result": rules_result,

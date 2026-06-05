@@ -14,7 +14,6 @@ from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 
 from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES
-from app.hydro_system.state_manager import get_state, set_state
 from app.hydro_system.rules_engine import check_rules
 
 from app.core.logging_config import get_logger
@@ -108,8 +107,6 @@ class AutomationService:
         actions_taken = {}
 
         try:
-
-            scheduler_active = get_state("scheduler")
 
             # ──────────────────────────────────────────────────────────────
             # Load active batch + recipes
@@ -217,28 +214,9 @@ class AutomationService:
 
                 auto_actuators.append(actuator)
 
-            # ──────────────────────────────────────────────────────────────
-            # STEP 2 — AUTOMATION DISABLED
-            # ──────────────────────────────────────────────────────────────
-
-            if not scheduler_active:
-
-                logger.debug(
-                    "[Automation] Scheduler OFF "
-                    "- skipping automatic control"
-                )
-
-                db.commit()
-
-                return {
-                    "actions_taken": actions_taken,
-                    "alerts": alerts,
-                    "sensor_data": sensor_data,
-                    "note": "Scheduler OFF",
-                }
 
             # ──────────────────────────────────────────────────────────────
-            # STEP 3 — RULE EVALUATION
+            # STEP 2 — RULE EVALUATION
             # ──────────────────────────────────────────────────────────────
 
             result = check_rules(
@@ -260,7 +238,7 @@ class AutomationService:
                 alerts.append(alert)
 
             # ──────────────────────────────────────────────────────────────
-            # STEP 4 — APPLY ACTIONS
+            # STEP 3 — APPLY ACTIONS
             # ──────────────────────────────────────────────────────────────
 
             for action in result.get("actions", []):
