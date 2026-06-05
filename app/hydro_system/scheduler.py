@@ -11,8 +11,6 @@ from app.database import SessionLocal
 from app.hydro_system import state_manager
 from app.utils.scheduler import add_job, remove_job
 from app.core.logging_config import get_logger
-from sqlalchemy.orm import joinedload
-from datetime import date
 
 logger = get_logger(__name__)
 
