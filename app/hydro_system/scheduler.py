@@ -2,13 +2,9 @@
 # Description: This module handles scheduling tasks for collecting and processing sensor data.
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.models.sensor_data import SensorData
-from app.hydro_system.models.plant_batch import PlantBatch
-from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.sensors import read_sensors
 from app.hydro_system.services.automation_service import automation_service
-from app.hydro_system.models.actuator import HydroActuator
 from app.database import SessionLocal
-from app.hydro_system import state_manager
 from app.utils.scheduler import add_job, remove_job
 from app.core.logging_config import get_logger
 
@@ -48,17 +44,10 @@ def collect_and_process():
                     # Still proceed to handle_automation for schedules
 
                 # ⚡ Run control loop
-                actuators = session.query(HydroActuator).filter(HydroActuator.device_id == device_id).all()
-                batch = session.query(PlantBatch).filter(
-                    PlantBatch.zone_id == device_id,
-                    PlantBatch.status == "growing"
-                ).first()
-
                 automation_service.run_control_loop(
                     db=session,
                     sensor_data=sensor_data,
-                    actuators=actuators,
-                    batch=batch
+                    device_id=device_id
                 )
 
             except Exception as e:
