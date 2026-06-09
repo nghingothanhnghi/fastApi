@@ -1,10 +1,9 @@
 # File: app/hydro_system/rules_engine.py
 # Description: Rules engine to determine actions based on sensor data
-
+import app.hydro_system.rules
+from app.hydro_system.rules.registry import get_rule
 from datetime import datetime, time
 from app.hydro_system.config import DEFAULT_THRESHOLDS
-from app.hydro_system.models import sensor_data
-from app.hydro_system.models.actuator import HydroActuator
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -13,28 +12,6 @@ logger = get_logger(__name__)
 # =========================
 # SENSOR RULES
 # =========================
-
-def should_turn_on_pump(sensor_data: dict, thresholds: dict) -> bool:
-    """Check if irrigation pump should be turned on based on soil moisture"""
-    moisture = sensor_data.get("moisture", 0)
-    water_level = sensor_data.get("water_level", 0)
-    
-    # Don't turn on pump if water level is too low
-    if water_level < thresholds.get("water_level_min", 20):
-        logger.warning(f"Cannot turn on pump: Water level too low ({water_level}%)")
-        return False
-    
-    return moisture < thresholds.get("moisture_min", 30)
-
-def should_turn_on_light(sensor_data: dict, thresholds: dict) -> bool:
-    """Check if grow lights should be turned on based on light intensity"""
-    light = sensor_data.get("light", 0)
-    return light < thresholds.get("light_min", 300)
-
-def should_turn_on_fan(sensor_data: dict, thresholds: dict) -> bool:
-    """Check if ventilation fan should be turned on based on temperature"""
-    temperature = sensor_data.get("temperature", 0)
-    return temperature > thresholds.get("temperature_max", 28)
 
 def should_refill_water_tank(sensor_data: dict, thresholds: dict) -> bool:
     """Check if water tank needs refilling"""
@@ -75,57 +52,6 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
         "min_threshold": thresholds.get("water_level_min", 20),
         "critical_threshold": thresholds.get("water_level_critical", 10)
     }
-
-def should_turn_on_water_pump(sensor_data: dict, thresholds: dict) -> bool:
-    # """
-    # Determine if the water pump should be turned on.
-    # Example logic: used to refill internal reservoirs when main tank is sufficient
-    # """
-    # water_level = sensor_data.get("water_level", 0)
-    # return water_level < thresholds.get("water_level_min", 20)  # Example: pump if water is available
-    """
-    🚫 IMPORTANT:
-    DO NOT control water pump by sensor directly in hydroponics.
-
-    Water pump should be controlled by:
-    - interval
-    - schedule
-    - manual
-
-    This prevents ALWAYS-ON bug.
-    """
-    return False    
-
-def should_open_valve(sensor_data: dict, thresholds: dict) -> bool:
-    """
-    Determine if a valve should be opened.
-    Example logic: open valve if soil is dry and water level is sufficient
-    """
-    moisture = sensor_data.get("moisture", 0)
-    water_level = sensor_data.get("water_level", 0)
-
-    if water_level < thresholds.get("water_level_min", 20):
-        logger.warning("Cannot open valve: Water level too low")
-        return False
-
-    return moisture < thresholds.get("moisture_min", 30)
-
-def should_dose_nutrients(sensor_data: dict, thresholds: dict) -> bool:
-    """
-    Determine if the nutrient pump should be turned on.
-    Logic: dose if EC or PPM is below the minimum threshold.
-    """
-    ec = sensor_data.get("ec", 0)
-    ppm = sensor_data.get("ppm", 0)
-    
-    # Priority on EC, fallback to PPM if EC is 0 (missing)
-    if ec > 0:
-        return ec < thresholds.get("ec_min", 1.2)
-    
-    if ppm > 0:
-        return ppm < thresholds.get("ppm_min", 600)
-    
-    return False
 
 
 # =========================
@@ -301,20 +227,29 @@ def check_rules(
         oneshot_on, oneshot_status = is_in_oneshot(actuator)
 
         # ✅ SENSOR RULE
-        should_activate = False
 
-        if actuator_type == "pump":
-            should_activate = should_turn_on_pump(sensor_data, actuator_thresholds)
-        elif actuator_type == "light":
-            should_activate = should_turn_on_light(sensor_data, actuator_thresholds)
-        elif actuator_type == "fan":
-            should_activate = should_turn_on_fan(sensor_data, actuator_thresholds)
-        elif actuator_type == "valve":
-            should_activate = should_open_valve(sensor_data, actuator_thresholds)
-        elif actuator_type == "water_pump":
-            should_activate = should_turn_on_water_pump(sensor_data, actuator_thresholds)
-        elif actuator_type == "nutrient_pump":
-            should_activate = should_dose_nutrients(sensor_data, actuator_thresholds)
+        rule = get_rule(actuator_type)
+
+        logger.info(
+            f"Actuator={actuator_type}, Rule={rule}"
+        )
+
+        if rule:
+            should_activate = rule.should_activate(
+                sensor_data=sensor_data,
+                thresholds=actuator_thresholds,
+                actuator=actuator,
+            )
+
+            logger.info(
+                f"[RULE RESULT] {actuator_type} -> {should_activate}"
+            )
+        else:
+            logger.warning(
+                f"No rule registered for actuator type '{actuator_type}'"
+            )
+            
+            should_activate = False
 
         # =========================
         # PRIORITY SYSTEM
