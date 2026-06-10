@@ -199,15 +199,11 @@ def check_rules(
         actuator_id = actuator.id
 
         # Use thresholds from device, fallback to global
-        # actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
         actuator_thresholds = threshold_service.get_for_device(
             actuator.device
         )
 
         # ✅ MANUAL override
-        # manual = None
-        # if overrides and "actuators" in overrides:
-        #     manual = overrides["actuators"].get(str(actuator_id))
         manual = getattr(actuator, "manual_state", None)
         logger.info(f"[RULE] actuator={actuator_id} manual={manual}")   
 
