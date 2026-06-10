@@ -6,10 +6,11 @@ from datetime import datetime, timedelta
 
 from app.hydro_system.models.sensor_data import SensorData
 from app.hydro_system.models.device import HydroDevice
+from app.hydro_system.schemas import sensor_data
 from app.hydro_system.schemas.sensor_data import SensorDataCreateSchema
 from app.hydro_system.config import DEFAULT_THRESHOLDS, WATER_LEVEL_CONFIG
 from app.hydro_system.rules_engine import get_water_level_status, check_rules
-# from app.hydro_system.controllers.actuator_controller import handle_automation
+from app.hydro_system.services.threshold_service import threshold_service
 from app.hydro_system.services.automation_service import automation_service
 from app.hydro_system.services.device_service import hydro_device_service
 
@@ -21,14 +22,45 @@ def get_latest_sensor_data(db: Session):
     return db.query(SensorData).order_by(SensorData.created_at.desc()).limit(10).all()
 
 
-def get_thresholds():
-    return DEFAULT_THRESHOLDS
+# def get_thresholds():
+#     return DEFAULT_THRESHOLDS
 
 
-def update_thresholds(thresholds: dict):
-    DEFAULT_THRESHOLDS.update(thresholds)
-    logger.info(f"Thresholds updated: {thresholds}")
-    return DEFAULT_THRESHOLDS
+# def update_thresholds(thresholds: dict):
+#     DEFAULT_THRESHOLDS.update(thresholds)
+#     logger.info(f"Thresholds updated: {thresholds}")
+#     return DEFAULT_THRESHOLDS
+
+def get_device_thresholds(
+    db: Session,
+    device_id: int,
+):
+    device = (
+        db.query(HydroDevice)
+        .filter(HydroDevice.id == device_id)
+        .first()
+    )
+
+    if not device:
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found"
+        )
+
+    return threshold_service.get_for_device(
+        device
+    )
+
+def update_device_thresholds(
+    db: Session,
+    device_id: int,
+    thresholds: dict,
+):
+    return threshold_service.update_device_thresholds(
+        db,
+        device_id,
+        thresholds,
+    )
 
 def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
     device = None
@@ -128,8 +160,23 @@ def get_current_water_status(db: Session):
             "moisture": latest_data.moisture,
         }
 
-        water_status = get_water_level_status(sensor_data, DEFAULT_THRESHOLDS)
-        rules_result = check_rules(sensor_data, DEFAULT_THRESHOLDS, device=device)
+        # water_status = get_water_level_status(sensor_data, DEFAULT_THRESHOLDS)
+        # rules_result = check_rules(sensor_data, DEFAULT_THRESHOLDS, device=device)
+
+        thresholds = threshold_service.get_for_device(
+            device
+        )
+
+        water_status = get_water_level_status(
+            sensor_data,
+            thresholds
+        )
+
+        rules_result = check_rules(
+            sensor_data,
+            thresholds,
+            device=device
+        )
 
         actions = []
         raw_actions = rules_result.get("actions", [])

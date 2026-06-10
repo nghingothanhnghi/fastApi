@@ -4,6 +4,7 @@ import app.hydro_system.rules
 from app.hydro_system.rules.registry import get_rule
 from datetime import datetime, time
 from app.hydro_system.config import DEFAULT_THRESHOLDS
+from app.hydro_system.services.threshold_service import threshold_service
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -198,8 +199,10 @@ def check_rules(
         actuator_id = actuator.id
 
         # Use thresholds from device, fallback to global
-        actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
-
+        # actuator_thresholds = getattr(actuator.device, "thresholds", {}) or thresholds
+        actuator_thresholds = threshold_service.get_for_device(
+            actuator.device
+        )
 
         # ✅ MANUAL override
         # manual = None
@@ -248,7 +251,7 @@ def check_rules(
             logger.warning(
                 f"No rule registered for actuator type '{actuator_type}'"
             )
-            
+
             should_activate = False
 
         # =========================

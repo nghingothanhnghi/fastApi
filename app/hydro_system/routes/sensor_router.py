@@ -17,16 +17,44 @@ def get_latest_sensor_data(db: Session = Depends(get_db)):
     """Get the latest sensor data readings"""
     return controller.get_latest_sensor_data(db)
 
-@router.get("/thresholds")
-def get_thresholds():
-    """Get current sensor thresholds for automation rules"""
-    return controller.get_thresholds()
+# @router.get("/thresholds")
+# def get_thresholds():
+#     """Get current sensor thresholds for automation rules"""
+#     return controller.get_thresholds()
 
-@router.post("/thresholds")
-def update_thresholds(thresholds: dict):
-    """Update sensor thresholds for automation rules"""
-    new = controller.update_thresholds(thresholds)
-    return {"message": "Thresholds updated", "new": new}
+@router.get("/thresholds/{device_id}")
+def get_device_thresholds(
+    device_id: int,
+    db: Session = Depends(get_db),
+):
+    return controller.get_device_thresholds(
+        db,
+        device_id,
+    )
+
+# @router.post("/thresholds")
+# def update_thresholds(thresholds: dict):
+#     """Update sensor thresholds for automation rules"""
+#     new = controller.update_thresholds(thresholds)
+#     return {"message": "Thresholds updated", "new": new}
+
+@router.post("/thresholds/{device_id}")
+def update_device_thresholds(
+    device_id: int,
+    thresholds: dict,
+    db: Session = Depends(get_db),
+):
+    device = controller.update_device_thresholds(
+        db,
+        device_id,
+        thresholds,
+    )
+
+    return {
+        "message": "Thresholds updated",
+        "device_id": device.id,
+        "thresholds": device.thresholds,
+    }
 
 @router.post("/data", response_model=SensorDataSchema)
 def create_sensor_data(payload: SensorDataCreateSchema, db: Session = Depends(get_db)):

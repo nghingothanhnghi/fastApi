@@ -9,6 +9,7 @@ from app.hydro_system.controllers import actuator_controller
 from app.hydro_system.scheduler import start_sensor_job, stop_sensor_job, restart_sensor_job
 from app.hydro_system.rules_engine import check_rules
 from app.hydro_system.config import DEFAULT_THRESHOLDS, ACTIVE_BATCH_STATUSES
+from app.hydro_system.services.threshold_service import threshold_service
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.models.plant_batch import PlantBatch
@@ -42,7 +43,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         sensor_data = sensors.read_sensors(device_id=device.id)
 
         # 2️⃣ Determine thresholds for automation
-        thresholds = device.thresholds if hasattr(device, "thresholds") and device.thresholds else DEFAULT_THRESHOLDS
+        thresholds = threshold_service.get_for_device(device)
 
         # 4️⃣ Get all actuators assigned to this device
         actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
