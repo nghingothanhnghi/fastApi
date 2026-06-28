@@ -5,6 +5,10 @@ from app.hydro_system.rules.registry import get_rule
 from datetime import datetime, time
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.threshold_service import threshold_service
+from app.hydro_system.helpers.schedule_helper import (
+    get_schedule_context,
+    get_utc_now,
+)
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -62,13 +66,29 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
 def is_within_schedule_time(schedule, current_time, current_day) -> bool:
     """Helper to check if a specific schedule is active right now"""
     days = [d.strip().lower() for d in schedule.repeat_days.split(",")]
+
+    logger.info(
+        f"[SCHEDULE] now={current_time} "
+        f"day={current_day} "
+        f"start={schedule.start_time} "
+        f"end={schedule.end_time} "
+        f"repeat={days}"
+    )
+
     if current_day not in days:
+        logger.info("[SCHEDULE] Day mismatch")
         return False
 
     if schedule.start_time <= schedule.end_time:
-        return schedule.start_time <= current_time <= schedule.end_time
+        result = schedule.start_time <= current_time <= schedule.end_time
     else:
-        return current_time >= schedule.start_time or current_time <= schedule.end_time    
+        result = (
+            current_time >= schedule.start_time
+            or current_time <= schedule.end_time
+        )
+
+    logger.info(f"[SCHEDULE] Active={result}")
+    return result   
     
 def is_in_schedule(actuator) -> tuple[bool, bool]:
     """
@@ -78,9 +98,10 @@ def is_in_schedule(actuator) -> tuple[bool, bool]:
     if not hasattr(actuator, "schedules") or not actuator.schedules:
         return False, False
 
-    now = datetime.utcnow()
-    current_time = now.time()
-    current_day = now.strftime("%a").lower()
+    # now = datetime.utcnow()
+    # current_time = now.time()
+    # current_day = now.strftime("%a").lower()
+    current_time, current_day = get_schedule_context()
 
     has_schedule = False
 
@@ -100,9 +121,12 @@ def is_in_schedule(actuator) -> tuple[bool, bool]:
     return False, has_schedule    
 
 def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
-    now = datetime.utcnow()
-    current_time = now.time()
-    current_day = now.strftime("%a").lower()
+
+    # now = datetime.utcnow()
+    # current_time = now.time()
+    # current_day = now.strftime("%a").lower()
+    utc_now = get_utc_now()
+    current_time, current_day = get_schedule_context()
 
     active_interval = None
 
@@ -145,7 +169,11 @@ def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
     if not last_log:
         return True, "active_on"
 
-    diff_min = (now - last_log.timestamp).total_seconds() / 60
+    # diff_min = (now - last_log.timestamp).total_seconds() / 60
+    diff_min = (
+        utc_now - last_log.timestamp
+    ).total_seconds() / 60
+
     last_state = (last_log.state or "OFF").upper()
 
     if last_state == "ON":
@@ -166,8 +194,13 @@ def is_in_oneshot(actuator) -> tuple[bool, str]:
     if not start or not duration:
         return False, "inactive"
 
-    now = datetime.utcnow()
-    diff = (now - start).total_seconds()
+    # now = datetime.utcnow()
+    # diff = (now - start).total_seconds()
+    utc_now = get_utc_now()
+
+    diff = (
+        utc_now - start
+    ).total_seconds()
 
     if diff < duration:
         return True, "running"

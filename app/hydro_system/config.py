@@ -89,3 +89,5 @@ ACTIVE_BATCH_STATUSES = [
     "flowering",
     "harvesting"
 ]
+
+TIMEZONE = "Asia/Ho_Chi_Minh"
