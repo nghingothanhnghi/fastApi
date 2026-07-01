@@ -41,3 +41,8 @@ def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Schedule not found")
     return {"detail": "Schedule deleted successfully"}
+
+
+@router.post("/bulk", response_model=List[HydroScheduleOut])
+def create_schedules_bulk(schedules_in: List[HydroScheduleCreate], db: Session = Depends(get_db)):
+    return [hydro_schedule_service.create_schedule(db, s) for s in schedules_in]
