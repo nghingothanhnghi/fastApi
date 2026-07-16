@@ -18,6 +18,9 @@ from app.jackpot.routes import jackpot_router
 
 from app.product.routes import product_router
 
+from app.cms.routes import cms_router
+from app.cms.config import CMS_MEDIA_DIR, CMS_MEDIA_URL
+
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
@@ -85,6 +88,7 @@ app.include_router(jackpot_router.router)  # Handles /jackpot/ endpoints
 
 app.include_router(product_router.router)  # Handles /product/ endpoints
 
+app.include_router(cms_router)      # Handles /cms/* endpoints
 
 app.include_router(ingest_api.router)
 app.include_router(transform_api.router)
@@ -97,6 +101,11 @@ app.include_router(template_api.router)
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 os.makedirs(config.MEDIA_DIR, exist_ok=True)
 os.makedirs(config.QR_CODE_DIR, exist_ok=True)
+# alongside your other os.makedirs() calls
+os.makedirs(CMS_MEDIA_DIR, exist_ok=True)
+
+# alongside your other app.mount() calls
+app.mount(CMS_MEDIA_URL, StaticFiles(directory=CMS_MEDIA_DIR), name="cms_media")
 
 # Serve /uploads/profile_images/* → uploads/profile_images/
 app.mount(
