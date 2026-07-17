@@ -201,23 +201,27 @@ class HydroDeviceService:
                         "name": actuator.name or actuator.type,
                         "type": actuator.type,
                         "state": state_str
-                })
+                    })
                 except Exception as e:
                     logger.error(f"Failed to control actuator {actuator.id}: {e}")
                     # continue other actuators but note failure
                     device_result["actuators_controlled"].append({
-                    "actuator_id": actuator.id,
-                    "error": str(e)
-                })
+                        "actuator_id": actuator.id,
+                        "error": str(e)
+                    })
                     
-        results.append(device_result)
+            # ✅ FIX: append inside the device loop so every device (not just the
+            # last one) is included in the response — and so we never hit an
+            # UnboundLocalError when every device has zero actuators.
+            results.append(device_result)   
+
         logger.info(f"Controlled {len(results)} device(s) at location '{location}' -> {state_str}")
         return {
             "location": location,
             "state": state_str,
             "devices_controlled": len(results),
             "details": results
-    }
+        }
 
     # Placeholder: real hardware sync hook
     def sync_device_actuators_from_hardware(self, db: Session, device_id: int) -> None:
