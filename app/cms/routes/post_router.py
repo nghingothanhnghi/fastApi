@@ -8,7 +8,7 @@ from app.user.utils.token import get_current_user
 from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.cms.models.post import PostStatus, PostType
-from app.cms.schemas.post import PostCreate, PostUpdate, PostOut, PaginatedPosts
+from app.cms.schemas.post import PostCreate, PostUpdate, PostOut, PaginatedPosts, PostScheduleRequest
 from app.cms.controllers.post_controller import post_controller
 
 router = APIRouter(prefix="/cms/posts", tags=["CMS - Posts"])
@@ -107,3 +107,19 @@ def archive_post(
     post = post_controller.get_post(db, post_id)
     _ensure_owner_or_editor(post, current_user)
     return post_controller.archive_post(db, post_id)
+
+@router.post("/{post_id}/schedule", response_model=PostOut)
+def schedule_post(
+    post_id: int,
+    data: PostScheduleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Set a post to auto-publish at a future datetime.
+    Status flips to 'scheduled' now, then a background job (polling every
+    minute) flips it to 'published' once `scheduled_at` passes.
+    """
+    post = post_controller.get_post(db, post_id)
+    _ensure_owner_or_editor(post, current_user)
+    return post_controller.schedule_post(db, post_id, data.scheduled_at)

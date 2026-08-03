@@ -3,11 +3,16 @@ from typing import List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
+from fastapi import HTTPException, status
 
 from app.cms.models.post import CmsPost, PostStatus, PostType
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
 from app.cms.utils.slugify import slugify, make_unique_slug
+
+from app.core.logging_config import get_logger
+ 
+logger = get_logger(__name__)
 
 
 class PostService:
@@ -112,6 +117,7 @@ class PostService:
             update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=post_id)
 
         was_published = post.status == PostStatus.published
+        new_status = update_data.get("status", post.status)
 
         for field, value in update_data.items():
             setattr(post, field, value)
@@ -122,6 +128,11 @@ class PostService:
         # Auto-stamp published_at the first time a post transitions to published
         if post.status == PostStatus.published and not was_published:
             post.published_at = datetime.utcnow()
+
+        # Leaving 'scheduled' (manually or via publish/archive) clears the
+        # scheduled_at marker so the background job stops picking it up.
+        if new_status != PostStatus.scheduled and "scheduled_at" not in update_data:
+            post.scheduled_at = None            
 
         db.commit()
         db.refresh(post)
@@ -147,6 +158,7 @@ class PostService:
             return None
         post.status = PostStatus.published
         post.published_at = datetime.utcnow()
+        post.scheduled_at = None
         db.commit()
         db.refresh(post)
         return self.get_post(db, post.id)
@@ -156,9 +168,66 @@ class PostService:
         if not post:
             return None
         post.status = PostStatus.archived
+        post.scheduled_at = None
         db.commit()
         db.refresh(post)
         return self.get_post(db, post.id)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # ⏰ Scheduled publishing
+    # ──────────────────────────────────────────────────────────────────────
+ 
+    def schedule_post(self, db: Session, post_id: int, scheduled_at: datetime) -> Optional[CmsPost]:
+        """Mark a post as 'scheduled' to auto-publish at `scheduled_at`."""
+        post = db.query(CmsPost).filter(CmsPost.id == post_id).first()
+        if not post:
+            return None
+ 
+        if scheduled_at <= datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scheduled_at must be in the future",
+            )
+ 
+        post.status = PostStatus.scheduled
+        post.scheduled_at = scheduled_at
+        db.commit()
+        db.refresh(post)
+        logger.info(f"[CMS] Post {post_id} scheduled for {scheduled_at.isoformat()}")
+        return self.get_post(db, post.id)
+ 
+    def get_due_scheduled_posts(self, db: Session) -> List[CmsPost]:
+        """Posts whose scheduled_at has passed but are still 'scheduled'."""
+        now = datetime.utcnow()
+        return (
+            db.query(CmsPost)
+            .filter(
+                CmsPost.status == PostStatus.scheduled,
+                CmsPost.scheduled_at.isnot(None),
+                CmsPost.scheduled_at <= now,
+            )
+            .all()
+        )
+ 
+    def publish_due_scheduled_posts(self, db: Session) -> int:
+        """
+        Flip every due 'scheduled' post to 'published'.
+        Intended to be called periodically by a background job. Returns the
+        number of posts published.
+        """
+        due_posts = self.get_due_scheduled_posts(db)
+        if not due_posts:
+            return 0
+ 
+        now = datetime.utcnow()
+        for post in due_posts:
+            post.status = PostStatus.published
+            post.published_at = now
+            post.scheduled_at = None
+            logger.info(f"[CMS] Auto-published scheduled post {post.id} ('{post.title}')")
+ 
+        db.commit()
+        return len(due_posts)
 
 
 post_service = PostService()

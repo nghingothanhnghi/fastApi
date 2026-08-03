@@ -1,5 +1,5 @@
 # app/cms/schemas/post.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -22,7 +22,15 @@ class PostBase(BaseModel):
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     is_featured: bool = False
+    scheduled_at: Optional[datetime] = Field(
+        None, description="Required (future datetime) when status='scheduled'"
+    )
 
+    @model_validator(mode="after")
+    def _validate_scheduled_at(self):
+        if self.status == PostStatus.scheduled and not self.scheduled_at:
+            raise ValueError("scheduled_at is required when status is 'scheduled'")
+        return self
 
 class PostCreate(PostBase):
     slug: Optional[str] = Field(None, description="Auto-generated from title if omitted")
@@ -42,6 +50,17 @@ class PostUpdate(BaseModel):
     meta_description: Optional[str] = None
     is_featured: Optional[bool] = None
     tag_ids: Optional[List[int]] = None
+    scheduled_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def _validate_scheduled_at(self):
+        if self.status == PostStatus.scheduled and not self.scheduled_at:
+            raise ValueError("scheduled_at is required when status is 'scheduled'")
+        return self
+
+class PostScheduleRequest(BaseModel):
+    """Body for POST /cms/posts/{post_id}/schedule"""
+    scheduled_at: datetime = Field(..., description="Future datetime to auto-publish this post")        
 
 
 class AuthorOut(BaseModel):
@@ -79,6 +98,7 @@ class PostListItem(BaseModel):
     featured_image: Optional[MediaOut] = None
     is_featured: bool
     view_count: int
+    scheduled_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
     created_at: datetime
 

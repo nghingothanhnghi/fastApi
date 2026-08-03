@@ -1,4 +1,5 @@
 # app/cms/controllers/post_controller.py
+from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -82,6 +83,13 @@ class PostController:
         if not post:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
         return post
+
+    @staticmethod
+    def schedule_post(db: Session, post_id: int, scheduled_at: datetime):
+        post = post_service.schedule_post(db, post_id, scheduled_at)
+        if not post:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        return post    
 
 
 post_controller = PostController()
