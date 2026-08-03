@@ -1,10 +1,11 @@
 # app/cms/services/post_service.py
 from typing import List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
 from fastapi import HTTPException, status
 
+from app.cms.models import post
 from app.cms.models.post import CmsPost, PostStatus, PostType
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
@@ -52,9 +53,26 @@ class PostService:
             is_featured=data.is_featured,
             author_id=author_id,
             tags=tags,
+            scheduled_at=data.scheduled_at,
         )
         if post.status == PostStatus.published:
-            post.published_at = datetime.utcnow()
+            post.published_at = datetime.now(timezone.utc)
+
+        if post.status == PostStatus.scheduled:
+            if not post.scheduled_at:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="scheduled_at is required when status is 'scheduled'",
+                )
+            # ✅ normalize incoming value to aware-UTC before comparing
+            scheduled_at = post.scheduled_at
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+            if scheduled_at <= datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="scheduled_at must be in the future",
+                )
 
         db.add(post)
         db.commit()
@@ -119,6 +137,15 @@ class PostService:
         was_published = post.status == PostStatus.published
         new_status = update_data.get("status", post.status)
 
+        # ✅ NEW — validate scheduled_at presence before applying changes
+        if new_status == PostStatus.scheduled:
+            incoming_scheduled_at = update_data.get("scheduled_at", post.scheduled_at)
+            if not incoming_scheduled_at:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="scheduled_at is required when status is 'scheduled'",
+                )        
+
         for field, value in update_data.items():
             setattr(post, field, value)
 
@@ -127,7 +154,7 @@ class PostService:
 
         # Auto-stamp published_at the first time a post transitions to published
         if post.status == PostStatus.published and not was_published:
-            post.published_at = datetime.utcnow()
+            post.published_at = datetime.now(timezone.utc)
 
         # Leaving 'scheduled' (manually or via publish/archive) clears the
         # scheduled_at marker so the background job stops picking it up.
@@ -157,7 +184,7 @@ class PostService:
         if not post:
             return None
         post.status = PostStatus.published
-        post.published_at = datetime.utcnow()
+        post.published_at = datetime.now(timezone.utc)
         post.scheduled_at = None
         db.commit()
         db.refresh(post)
@@ -182,8 +209,12 @@ class PostService:
         post = db.query(CmsPost).filter(CmsPost.id == post_id).first()
         if not post:
             return None
+
+        # ✅ normalize incoming value to aware-UTC before comparing
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
  
-        if scheduled_at <= datetime.utcnow():
+        if scheduled_at <= datetime.now(timezone.utc):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="scheduled_at must be in the future",
@@ -198,7 +229,7 @@ class PostService:
  
     def get_due_scheduled_posts(self, db: Session) -> List[CmsPost]:
         """Posts whose scheduled_at has passed but are still 'scheduled'."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (
             db.query(CmsPost)
             .filter(
@@ -219,7 +250,7 @@ class PostService:
         if not due_posts:
             return 0
  
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for post in due_posts:
             post.status = PostStatus.published
             post.published_at = now
