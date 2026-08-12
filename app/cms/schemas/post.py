@@ -22,15 +22,14 @@ class PostBase(BaseModel):
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     is_featured: bool = False
-    scheduled_at: Optional[datetime] = Field(
-        None, description="Required (future datetime) when status='scheduled'"
-    )
+    scheduled_at: Optional[datetime] = Field(None, description="Required when status='scheduled'")
 
     @model_validator(mode="after")
     def _validate_scheduled_at(self):
         if self.status == PostStatus.scheduled and not self.scheduled_at:
             raise ValueError("scheduled_at is required when status is 'scheduled'")
         return self
+    
 
 class PostCreate(PostBase):
     slug: Optional[str] = Field(None, description="Auto-generated from title if omitted")
@@ -58,6 +57,20 @@ class PostUpdate(BaseModel):
             raise ValueError("scheduled_at is required when status is 'scheduled'")
         return self
 
+class PostReadBase(BaseModel):
+    """Same fields as PostBase, no validator — safe for arbitrary DB state."""
+    title: str
+    excerpt: Optional[str] = None
+    content: str = ""
+    post_type: PostType
+    status: PostStatus
+    category_id: Optional[int] = None
+    featured_image_id: Optional[int] = None
+    meta_title: Optional[str] = None
+    meta_description: Optional[str] = None
+    is_featured: bool = False
+    scheduled_at: Optional[datetime] = None    
+
 class PostScheduleRequest(BaseModel):
     """Body for POST /cms/posts/{post_id}/schedule"""
     scheduled_at: datetime = Field(..., description="Future datetime to auto-publish this post")        
@@ -70,7 +83,7 @@ class AuthorOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class PostOut(PostBase):
+class PostOut(PostReadBase):
     id: int
     slug: str
     author: Optional[AuthorOut] = None
