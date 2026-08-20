@@ -1,4 +1,4 @@
-# app/api/endpoints/auth.py
+# app/user/routes/auth_router.py
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm
