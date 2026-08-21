@@ -8,6 +8,7 @@ from .fan_rule import FanRule
 from .valve_rule import ValveRule
 from .water_pump_rule import WaterPumpRule
 from .nutrient_pump_rule import NutrientPumpRule
+from .sliding_door_rule import SlidingDoorRule
 
 
 register_rule(PumpRule())
@@ -16,3 +17,4 @@ register_rule(FanRule())
 register_rule(ValveRule())
 register_rule(WaterPumpRule())
 register_rule(NutrientPumpRule())
+register_rule(SlidingDoorRule())

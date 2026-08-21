@@ -64,6 +64,14 @@ def turn_actuator_off(
         db, actuator_id=actuator_id, on=False
     )
 
+@router.post("/actuator/{actuator_id}/stop", summary="Send STOP command (sliding door mid-travel halt)")
+def stop_actuator(
+    actuator_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    validate_actuator_access(db, actuator_id, current_user.id)
+    return system_controller.stop_actuator_by_id(db, actuator_id=actuator_id)
 
 
 @router.post("/actuator/{actuator_id}/manual", summary="Set actuator manual mode")

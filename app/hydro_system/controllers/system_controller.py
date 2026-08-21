@@ -198,6 +198,9 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
 def control_actuator_by_id(db: Session, actuator_id: int, on: bool):
     return actuator_controller.control_actuator_by_id(db, actuator_id, on)
 
+def stop_actuator_by_id(db: Session, actuator_id: int):
+    return actuator_controller.stop_actuator_by_id(db, actuator_id)
+
 def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
     """
     state:

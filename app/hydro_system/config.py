@@ -70,9 +70,10 @@ ACTUATOR_TYPES = {
     "water_pump": {"emoji_on": "💧", "emoji_off": "🚰", "label": "Water Pump"},
     "valve": {"emoji_on": "🔓", "emoji_off": "🔒", "label": "Valve"},
     "nutrient_pump": {"emoji_on": "🧪", "emoji_off": "✖️", "label": "Nutrient Pump"},
+     "sliding_door": {"emoji_on": "⬆️", "emoji_off": "⬇️", "label": "Sliding Door"},
 }
 
-SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve", "nutrient_pump"]
+SUPPORTED_ACTUATOR_TYPES = ["pump", "light", "fan", "water_pump", "valve", "nutrient_pump", "sliding_door"]
 
 
 # Water level sensor configuration

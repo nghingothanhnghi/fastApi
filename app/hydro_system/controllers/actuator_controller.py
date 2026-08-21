@@ -163,6 +163,39 @@ def control_actuator_by_id(
         "last_state_changed_at": actuator.last_state_changed_at,
     }
 
+def stop_actuator_by_id(db: Session, actuator_id: int, source: str = "user"):
+    """
+    Send a momentary STOP command (e.g. mid-travel garage door halt).
+    Does NOT change current_state — stop is a transient action, not a
+    persisted up/down position.
+    """
+    actuator = hydro_actuator_service.get_actuator(db, actuator_id)
+
+    if not actuator:
+        raise HTTPException(status_code=404, detail="Actuator not found")
+
+    log_device_action(
+        actuator.name or actuator.type,
+        actuator.type,
+        actuator.current_state,  # unchanged
+        actuator.device_id,
+        actuator.id,
+    )
+
+    log_actuator_action(
+        db,
+        actuator.id,
+        action="stop",
+        state="STOP",
+        source=source,
+    )
+
+    return {
+        "message": f"{actuator.name or actuator.type} stop command sent",
+        "actuator_id": actuator_id,
+        "current_state": actuator.current_state,
+    }
+
 def set_manual_mode(db: Session, actuator_id: int, state: Optional[bool]):
     """
     Set manual control mode for an actuator.
