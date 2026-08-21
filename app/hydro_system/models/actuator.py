@@ -53,6 +53,14 @@ class HydroActuator(Base):
     manual_state = Column(Boolean, nullable=True, default=None)  # True (Force ON), False (Force OFF), None (Auto)
 
     # ─────────────────────────────────────────────
+    # Pending one-shot command (e.g. "stop" for sliding door)
+    # ─────────────────────────────────────────────
+    # Cleared automatically the next time /hydro/status is read for
+    # this actuator (fire-once delivery, no ack round-trip). NOT a
+    # persisted position - current_state is untouched by stop.
+    pending_command = Column(String, nullable=True, default=None)    
+
+    # ─────────────────────────────────────────────
     # Control modes
     # ─────────────────────────────────────────────
     control_mode = Column(

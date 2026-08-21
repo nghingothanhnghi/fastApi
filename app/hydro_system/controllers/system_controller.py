@@ -69,6 +69,11 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             # if actuator.sensor_key and actuator.sensor_key in sensor_data:
             #     sensor_value = sensor_data[actuator.sensor_key]
             sensor_value = sensor_data.get(actuator.sensor_key) if actuator.sensor_key else None
+
+            # 🔥 one-shot command delivery (e.g. sliding-door stop) -
+            # read it and clear it in the same pass so the device sees
+            # it exactly once on its next poll
+            pending_command = hydro_actuator_service.consume_pending_command(db, actuator)            
             
             # ✅ MANUAL MODE HANDLING
             if actuator.manual_state is not None:
@@ -109,7 +114,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "interval_mode": rule_info.get("interval_mode"),
                 "oneshot": rule_info.get("oneshot"),
                 "sensor_triggered": rule_info.get("sensor_triggered"),
-
+                "pending_command": pending_command,   # "stop" or null
             })      
 
         # 5️⃣ Get currently growing batch for this device

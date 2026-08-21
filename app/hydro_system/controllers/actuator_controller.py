@@ -163,16 +163,22 @@ def control_actuator_by_id(
         "last_state_changed_at": actuator.last_state_changed_at,
     }
 
+# app/hydro_system/controllers/actuator_controller.py
+
 def stop_actuator_by_id(db: Session, actuator_id: int, source: str = "user"):
     """
-    Send a momentary STOP command (e.g. mid-travel garage door halt).
-    Does NOT change current_state — stop is a transient action, not a
-    persisted up/down position.
+    Queue a momentary STOP command (e.g. mid-travel sliding-door halt).
+    Does NOT change current_state - stop is a transient action, not a
+    persisted up/down position. Delivered to the device on its next
+    GET /hydro/status poll, then cleared (fire-once, see
+    hydro_actuator_service.consume_pending_command).
     """
     actuator = hydro_actuator_service.get_actuator(db, actuator_id)
 
     if not actuator:
         raise HTTPException(status_code=404, detail="Actuator not found")
+
+    hydro_actuator_service.set_pending_command(db, actuator_id, "stop")
 
     log_device_action(
         actuator.name or actuator.type,
@@ -191,7 +197,7 @@ def stop_actuator_by_id(db: Session, actuator_id: int, source: str = "user"):
     )
 
     return {
-        "message": f"{actuator.name or actuator.type} stop command sent",
+        "message": f"{actuator.name or actuator.type} stop command queued",
         "actuator_id": actuator_id,
         "current_state": actuator.current_state,
     }

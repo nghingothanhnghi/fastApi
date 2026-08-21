@@ -136,6 +136,30 @@ class HydroActuatorService:
         db.refresh(actuator)
 
         return actuator
+    
+
+    def set_pending_command(self, db: Session, actuator_id: int, command: Optional[str]) -> Optional[HydroActuator]:
+        """command: 'stop' to queue it for the device, None to clear."""
+        actuator = self.get_actuator(db, actuator_id)
+        if not actuator:
+            return None
+        actuator.pending_command = command
+        db.commit()
+        db.refresh(actuator)
+        return actuator
+
+    def consume_pending_command(self, db: Session, actuator: HydroActuator) -> Optional[str]:
+        """
+        Read-and-clear: returns the actuator's pending_command (or None)
+        and resets it to None in the same call, so /hydro/status only
+        ever delivers a queued stop once. Caller must already hold
+        `actuator` from the current session - this commits immediately.
+        """
+        command = actuator.pending_command
+        if command is not None:
+            actuator.pending_command = None
+            db.commit()
+        return command    
 
 # Export a single instance (singleton-style)
 hydro_actuator_service = HydroActuatorService()
