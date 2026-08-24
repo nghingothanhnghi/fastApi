@@ -74,40 +74,48 @@ def update_device(
     device_id: int = Path(..., gt=0),
     updates: HydroDeviceUpdate = Body(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update an existing device"""
-    return device_controller.update_device(db, device_id, updates)
+    """Update an existing device. Restricted to the device's owner,
+    same-client users, or SUPER_ADMIN - see
+    device_controller._ensure_device_access."""
+    return device_controller.update_device(db, device_id, updates, current_user)
 
 
 @device_router.delete("/{device_id}")
 def delete_device(
     device_id: int = Path(..., gt=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Delete a device by ID"""
-    return device_controller.delete_device(db, device_id)
+    """Delete a device by ID. Same ownership restriction as update."""
+    return device_controller.delete_device(db, device_id, current_user)
 
 @device_router.post("/{device_id}/activate")
 def activate_device(
     device_id: int = Path(..., gt=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     ):
     """Activate a specific device (enable heartbeat + hardware activation)"""
-    return device_controller.activate_device(db, device_id)
-
+    return device_controller.activate_device(db, device_id, current_user)
+ 
 @device_router.post("/{device_id}/deactivate")
 def deactivate_device(
     device_id: int = Path(..., gt=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     ):
     """Deactivate a specific device (disable heartbeat + shut down hardware)"""
-    return device_controller.deactivate_device(db, device_id)
+    return device_controller.deactivate_device(db, device_id, current_user)
 
 @device_router.post("/location/{location}/control")
 def control_devices_by_location(
     location: str = Path(..., min_length=1),
     on: bool = Query(..., description="true to turn ON, false to turn OFF"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Control all devices at a specific location (turns on/off all actuators on those devices)"""
-    return device_controller.control_devices_by_location(db, location, on)
+    return device_controller.control_devices_by_location(db, location, on, current_user)
