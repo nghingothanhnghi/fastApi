@@ -10,8 +10,8 @@ class SlidingDoorRule(ActuatorRule):
     """
     Sliding doors are manually/command-driven (up / stop / down), not
     sensor-automated like fans or pumps. This rule intentionally never
-    triggers automatically — control happens via explicit up/stop/down
-    commands (see actuator_controller.control_sliding_door).
+    triggers automatically — control happens via explicit up/down (control_actuator_by_id) and
+    stop (stop_actuator_by_id) commands in actuator_controller.py.
     """
 
     actuator_type = "sliding_door"
