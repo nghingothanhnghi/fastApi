@@ -160,8 +160,6 @@ def control_actuator_by_id(
         "last_state_changed_at": actuator.last_state_changed_at,
     }
 
-# app/hydro_system/controllers/actuator_controller.py
-
 def stop_actuator_by_id(db: Session, actuator_id: int, source: str = "user"):
     """
     Queue a momentary STOP command (e.g. mid-travel sliding-door halt).
