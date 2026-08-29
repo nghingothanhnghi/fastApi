@@ -28,6 +28,13 @@ QR_CODE_URL = os.getenv("QR_CODE_URL", "/static/qr_codes")
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+# Comma-separated list of additional allowed origins, e.g.
+# "https://app.example.com,https://admin.example.com"
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 

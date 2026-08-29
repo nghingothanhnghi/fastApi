@@ -7,4 +7,5 @@ class PasswordResetCode(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, nullable=False, index=True)
     code = Column(String(6), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

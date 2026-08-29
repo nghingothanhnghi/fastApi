@@ -47,9 +47,13 @@ configure_logging()
 # -----------------------------------------
 # Middleware
 # -----------------------------------------
+allowed_origins = config.CORS_ALLOWED_ORIGINS or (
+    [config.FRONTEND_URL] if config.FRONTEND_URL else ["http://localhost:5173"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or restrict to frontend URL, Change to specific domain in production
+    allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

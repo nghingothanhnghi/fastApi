@@ -202,10 +202,28 @@ def save_reset_code(db: Session, email: str, code: str):
     db.refresh(db_code)
     return db_code
 
+# def verify_reset_code(db: Session, email: str, code: str, expiry_minutes: int = 10):
+#     record = (
+#         db.query(PasswordResetCode)
+#         .filter(PasswordResetCode.email == email, PasswordResetCode.code == code)
+#         .order_by(PasswordResetCode.created_at.desc())
+#         .first()
+#     )
+#     if not record:
+#         return False
+
+#     expiry_time = record.created_at + timedelta(minutes=expiry_minutes)
+#     if datetime.utcnow() > expiry_time:
+#         return False
+
+#     return True
+
+MAX_RESET_ATTEMPTS = 5
+
 def verify_reset_code(db: Session, email: str, code: str, expiry_minutes: int = 10):
     record = (
         db.query(PasswordResetCode)
-        .filter(PasswordResetCode.email == email, PasswordResetCode.code == code)
+        .filter(PasswordResetCode.email == email)
         .order_by(PasswordResetCode.created_at.desc())
         .first()
     )
@@ -214,6 +232,14 @@ def verify_reset_code(db: Session, email: str, code: str, expiry_minutes: int = 
 
     expiry_time = record.created_at + timedelta(minutes=expiry_minutes)
     if datetime.utcnow() > expiry_time:
+        return False
+
+    if record.attempts >= MAX_RESET_ATTEMPTS:
+        return False
+
+    if record.code != code:
+        record.attempts += 1
+        db.commit()
         return False
 
     return True

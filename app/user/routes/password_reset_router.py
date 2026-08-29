@@ -18,16 +18,25 @@ async def request_reset_code(
     db: Session = Depends(get_db)
 ):
     user = crud_user.get_user_by_email(db, data.email)
-    if not user:
-        raise HTTPException(status_code=404, detail="Email not found")
+    # if not user:
+    #     raise HTTPException(status_code=404, detail="Email not found")
 
-    code = f"{random.randint(100000, 999999)}"
-    crud_user.save_reset_code(db, data.email, code)
+    # code = f"{random.randint(100000, 999999)}"
+    # crud_user.save_reset_code(db, data.email, code)
 
-    print(f"[DEBUG] Password reset code for {data.email}: {code}") 
+    # print(f"[DEBUG] Password reset code for {data.email}: {code}") 
 
-    background_tasks.add_task(send_reset_code_email, data.email, code)
-    return {"msg": "Reset code sent"}
+    # background_tasks.add_task(send_reset_code_email, data.email, code)
+    # return {"msg": "Reset code sent"}
+        # Always behave the same whether or not the email exists,
+    # so this endpoint can't be used to enumerate registered users.
+    if user:
+        code = f"{random.randint(100000, 999999)}"
+        crud_user.save_reset_code(db, data.email, code)
+        print(f"[DEBUG] Password reset code for {data.email}: {code}")
+        background_tasks.add_task(send_reset_code_email, data.email, code)
+
+    return {"msg": "If that email is registered, a reset code has been sent"}
 
 
 @router.post("/verify-code")

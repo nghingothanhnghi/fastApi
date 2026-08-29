@@ -131,6 +131,15 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.ADMIN))
 ):
+    target_user = crud_user.get_user(db, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Only SUPER_ADMIN can delete across tenants; a plain ADMIN is
+    # restricted to users in their own client_id.
+    if not current_user.is_super_admin() and target_user.client_id != current_user.client_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this user")
+
     try:
         crud_user.delete_user(db, user_id)
         logger.info(f"User deleted: {user_id}")
