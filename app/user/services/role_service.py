@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from fastapi import HTTPException, status
 
+from app.user.enums.role_enum import RoleEnum
+
 from ..models.role import Role
 from ..models.user_role import UserRole
 from ..models.user import User
@@ -169,7 +171,7 @@ class RoleService:
         self.db.commit()
         return True
 
-    def assign_role_to_user(self, user_id: int, role_id: int, assigned_by: Optional[int] = None) -> UserRole:
+    def assign_role_to_user(self, user_id, role_id, assigned_by=None, assigner_is_super_admin=False) -> UserRole:
         """Assign a role to a user"""
         # Check if user exists
         user = self.db.query(User).filter(User.id == user_id).first()
@@ -181,11 +183,19 @@ class RoleService:
         
         # Check if role exists and is active
         role = self.db.query(Role).filter(and_(Role.id == role_id, Role.is_active == True)).first()
+        # if not role:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_404_NOT_FOUND,
+        #         detail=f"Active role with ID {role_id} not found"
+        #     )
         if not role:
+            raise HTTPException(404, f"Active role with ID {role_id} not found")
+
+        if role.name == RoleEnum.SUPER_ADMIN.value and not assigner_is_super_admin:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Active role with ID {role_id} not found"
-            )
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only a Super Admin may grant the Super Admin role",
+        )        
         
         # Check if assignment already exists
         existing_assignment = self.db.query(UserRole).filter(

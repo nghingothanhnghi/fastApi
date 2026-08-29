@@ -53,20 +53,26 @@ def create_user(
         logger.warning(f"User creation failed: {detail}")
         raise HTTPException(status_code=400, detail=detail)
 
-
+# GET /users/{user_id} — require auth, allow self or same-client admin/super_admin
 @router.get("/{user_id}", response_model=UserOut)
 def get_user(
     user_id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
     ):
     db_user = crud_user.get_user(db, user_id)
     if not db_user:
         logger.warning(f"User not found: {user_id}")
         raise HTTPException(status_code=404, detail="User not found")  
     logger.info(f"User retrieved: {db_user.id}")
+
+    same_tenant_admin = current_user.is_admin() and current_user.client_id == db_user.client_id
+    if db_user.id != current_user.id and not current_user.is_super_admin() and not same_tenant_admin:
+        raise HTTPException(403, "Not authorized")
     return add_absolute_image_url(db_user, request)
 
+# GET /users/by-client/{client_id} — enforce tenant match unless super_admin
 @router.get("/by-client/{client_id}", response_model=list[UserOut])
 def get_users_by_client(
     client_id: str,
@@ -79,17 +85,24 @@ def get_users_by_client(
     users = crud_user.get_users_by_client(db, client_id, skip=skip, limit=limit)
 
     logger.info(f"{len(users)} users retrieved for client_id={client_id} (skip={skip}, limit={limit})")
+
+    if not current_user.is_super_admin() and current_user.client_id != client_id:
+        raise HTTPException(403, "Not authorized to view this client's users")
+
     return [add_absolute_image_url(u, request) for u in users]
 
+# GET /users (all) — scope non-super-admin callers to their own client
 @router.get("", response_model=List[UserWithRoles])
 def get_all_users(
     request: Request,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_user)
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
 ):
-    users = crud_user.get_all_users(db)
 
+    if current_user.is_super_admin():
+        users = crud_user.get_all_users(db)
+    else:
+        users = crud_user.get_users_by_client(db, current_user.client_id)    
     return [add_absolute_image_url(u, request) for u in users]
 
 

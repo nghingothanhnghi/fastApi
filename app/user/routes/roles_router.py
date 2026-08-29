@@ -80,7 +80,13 @@ def update_role(
     role_service: RoleService = Depends(get_role_service),
     current_user: User = Depends(require_roles(RoleEnum.ADMIN))
 ):
-    """Update a role (Admin only)"""
+    target = role_service.get_role_by_id(role_id)
+    if target and target.is_system_role:
+        if role_update.is_active is not None:
+            raise HTTPException(400, "Use the dedicated toggle endpoint for system roles")
+        if target.name == RoleEnum.SUPER_ADMIN.value and not current_user.is_super_admin():
+            raise HTTPException(403, "Only a Super Admin may modify the Super Admin role")
+        
     role = role_service.update_role(role_id, role_update)
     if not role:
         raise HTTPException(
@@ -118,7 +124,8 @@ def assign_role_to_user(
     user_role = role_service.assign_role_to_user(
         assignment.user_id, 
         assignment.role_id, 
-        current_user.id
+        current_user.id,
+        assigner_is_super_admin=current_user.is_super_admin(),
     )
     logger.info(f"Role {assignment.role_id} assigned to user {assignment.user_id} by {current_user.id}")
     return user_role

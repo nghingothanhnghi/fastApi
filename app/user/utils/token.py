@@ -47,7 +47,7 @@ def get_current_user(
         raise credentials_exception
 
     user = crud_user.get_user_by_username(db, username)
-    if not user:
+    if not user or not user.is_active:
         raise credentials_exception  # ✅ Ensure we raise here
     return user
 

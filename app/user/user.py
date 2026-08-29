@@ -15,6 +15,8 @@ from typing import List
 import secrets
 import string
 from uuid import uuid4
+from sqlalchemy.exc import IntegrityError
+from app.user.models.system_init import SystemInitLock
 
 def get_user(db: Session, user_id: int):
     return (
@@ -68,6 +70,21 @@ def create_user(
     ):
 
     role_service = RoleService(db)
+    is_bootstrap = current_user is None
+
+    if is_bootstrap:
+        # Atomically claim the "first user" slot. Whichever concurrent
+        # request's INSERT wins the primary-key race proceeds; the other
+        # gets IntegrityError immediately and must be rejected.
+        try:
+            db.add(SystemInitLock(id=1))
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise ValueError(
+                "Initial setup has already been completed by another request. "
+                "Please sign in as an authorized user to create accounts."
+            )    
     
     hashed_pw = hash_password(user.password)
 
@@ -84,31 +101,42 @@ def create_user(
     db.add(db_user)
     db.flush()  # Required to get db_user.id
 
-    total_users = db.query(User).count()
+    # total_users = db.query(User).count()
 
-    if total_users == 1:
+    # if total_users == 1:
 
-                # 🟢 First user: create default roles and assign SUPER_ADMIN
+    #             # 🟢 First user: create default roles and assign SUPER_ADMIN
+    #     role_service.create_default_roles()
+    #     # 🚨 First user gets SUPER_ADMIN role
+    #     super_admin_role = db.query(Role).filter_by(name=RoleEnum.SUPER_ADMIN).first()
+    #     if super_admin_role:
+    #         db.add(UserRole(
+    #             user_id=db_user.id,
+    #             role_id=super_admin_role.id,
+    #             assigned_by=db_user.id,
+    #             assigned_at=datetime.utcnow()
+    #         ))
+    # else:
+    #     # ✅ All other users get USER role
+    #     user_role = db.query(Role).filter_by(name=RoleEnum.USER).first()
+    #     if user_role:
+    #         db.add(UserRole(
+    #             user_id=db_user.id,
+    #             role_id=user_role.id,
+    #             assigned_by=(current_user.id if current_user else db_user.id),
+    #             assigned_at=datetime.utcnow()
+    #         ))
+
+    if is_bootstrap:
         role_service.create_default_roles()
-        # 🚨 First user gets SUPER_ADMIN role
         super_admin_role = db.query(Role).filter_by(name=RoleEnum.SUPER_ADMIN).first()
-        if super_admin_role:
-            db.add(UserRole(
-                user_id=db_user.id,
-                role_id=super_admin_role.id,
-                assigned_by=db_user.id,
-                assigned_at=datetime.utcnow()
-            ))
+        db.add(UserRole(user_id=db_user.id, role_id=super_admin_role.id,
+                         assigned_by=db_user.id, assigned_at=datetime.utcnow()))
     else:
-        # ✅ All other users get USER role
         user_role = db.query(Role).filter_by(name=RoleEnum.USER).first()
         if user_role:
-            db.add(UserRole(
-                user_id=db_user.id,
-                role_id=user_role.id,
-                assigned_by=(current_user.id if current_user else db_user.id),
-                assigned_at=datetime.utcnow()
-            ))
+            db.add(UserRole(user_id=db_user.id, role_id=user_role.id,
+                             assigned_by=current_user.id, assigned_at=datetime.utcnow()))    
 
     db.commit()
     db.refresh(db_user)
@@ -133,13 +161,28 @@ def update_user(db: Session, user_id: int, user_update: UserUpdate):
 
 
 def delete_user(db: Session, user_id: int):
-    total_users = db.query(User).count()
-    if total_users <= 1:
-        raise Exception("Cannot delete the only remaining user in the system.")
+    # total_users = db.query(User).count()
+    # if total_users <= 1:
+    #     raise Exception("Cannot delete the only remaining user in the system.")
 
     user = get_user(db, user_id)
     if not user:
         raise Exception("User not found.")
+
+    if user.is_super_admin():
+        remaining = (
+            db.query(User)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .filter(Role.name == RoleEnum.SUPER_ADMIN, User.id != user_id)
+            .count()
+        )
+        if remaining == 0:
+            raise ValueError("Cannot delete the last remaining Super Admin.")
+
+    total_users = db.query(User).count()
+    if total_users <= 1:
+        raise ValueError("Cannot delete the only remaining user in the system.")
 
     db.delete(user)
     db.commit()
