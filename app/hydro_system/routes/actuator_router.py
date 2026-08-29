@@ -4,6 +4,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.user.utils.token import get_current_user
+from app.user.models.user import User
 from app.hydro_system.schemas.actuator import (
     HydroActuatorCreate,
     HydroActuatorUpdate,
@@ -25,7 +27,7 @@ def read_actuator(actuator_id: int, db: Session = Depends(get_db)):
     return actuator
 
 @router.get("/device/{device_id}", response_model=list[HydroActuatorOut])
-def list_actuators_by_device(device_id: int, db: Session = Depends(get_db)):
+def list_actuators_by_device(device_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),):
     return hydro_actuator_service.get_actuators_by_device(db, device_id)
 
 @router.put("/{actuator_id}", response_model=HydroActuatorOut)
