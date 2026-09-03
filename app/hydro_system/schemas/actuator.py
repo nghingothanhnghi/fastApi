@@ -36,6 +36,7 @@ class HydroActuatorUpdate(BaseModel):
 class HydroActuatorOut(HydroActuatorBase):
     id: int
     device_id: int
+    current_state: bool
     created_at: datetime
     updated_at: Optional[datetime]
 
