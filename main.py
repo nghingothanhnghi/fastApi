@@ -24,6 +24,7 @@ from app.cms.config import CMS_MEDIA_DIR, CMS_MEDIA_URL
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
+from app.user.bootstrap import seed_default_super_admin
 
 from app.migration.controllers import ingest_api
 from app.transform_data.controllers import transform_api, template_api
@@ -43,7 +44,7 @@ app = FastAPI()
 # -----------------------------------------
 init_db()
 configure_logging()
-
+seed_default_super_admin()
 # -----------------------------------------
 # Middleware
 # -----------------------------------------

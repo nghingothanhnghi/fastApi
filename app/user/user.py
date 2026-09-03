@@ -63,80 +63,112 @@ def get_all_users(db: Session):
         .all()
     )
 
+# def create_user(
+#     db: Session, 
+#     user: UserCreate,
+#     current_user: User | None  # ⬅️ Now allows None
+#     ):
+
+#     role_service = RoleService(db)
+#     is_bootstrap = current_user is None
+
+#     if is_bootstrap:
+#         # Atomically claim the "first user" slot. Whichever concurrent
+#         # request's INSERT wins the primary-key race proceeds; the other
+#         # gets IntegrityError immediately and must be rejected.
+#         try:
+#             db.add(SystemInitLock(id=1))
+#             db.flush()
+#         except IntegrityError:
+#             db.rollback()
+#             raise ValueError(
+#                 "Initial setup has already been completed by another request. "
+#                 "Please sign in as an authorized user to create accounts."
+#             )    
+    
+#     hashed_pw = hash_password(user.password)
+
+#     user_data = user.dict()
+#     user_data.pop("password")
+
+#        # ✅ Assign client_id (generate if first user)
+#     user_data["client_id"] = current_user.client_id if current_user else str(uuid4())
+    
+#     # ✅ Track who created this user
+#     user_data["created_by_id"] = current_user.id if current_user else None
+
+#     db_user = User(**user_data, hashed_password=hashed_pw)
+#     db.add(db_user)
+#     db.flush()  # Required to get db_user.id
+
+#     if is_bootstrap:
+#         role_service.create_default_roles()
+#         super_admin_role = db.query(Role).filter_by(name=RoleEnum.SUPER_ADMIN).first()
+#         db.add(UserRole(user_id=db_user.id, role_id=super_admin_role.id,
+#                          assigned_by=db_user.id, assigned_at=datetime.utcnow()))
+#     else:
+#         user_role = db.query(Role).filter_by(name=RoleEnum.USER).first()
+#         if user_role:
+#             db.add(UserRole(user_id=db_user.id, role_id=user_role.id,
+#                              assigned_by=current_user.id, assigned_at=datetime.utcnow()))    
+
+#     db.commit()
+#     db.refresh(db_user)
+#     return db_user
+
 def create_user(
     db: Session, 
     user: UserCreate,
-    current_user: User | None  # ⬅️ Now allows None
+    current_user: User | None  # None = anonymous (bootstrap OR public self-signup)
     ):
 
     role_service = RoleService(db)
-    is_bootstrap = current_user is None
+    is_bootstrap = False
 
-    if is_bootstrap:
-        # Atomically claim the "first user" slot. Whichever concurrent
-        # request's INSERT wins the primary-key race proceeds; the other
-        # gets IntegrityError immediately and must be rejected.
+    if current_user is None:
+        # Try to atomically claim the "first user" slot.
         try:
             db.add(SystemInitLock(id=1))
             db.flush()
+            is_bootstrap = True
         except IntegrityError:
+            # Lock already claimed -> this is just a normal public
+            # self-signup, not the first user. Fall through.
             db.rollback()
-            raise ValueError(
-                "Initial setup has already been completed by another request. "
-                "Please sign in as an authorized user to create accounts."
-            )    
-    
+            is_bootstrap = False
+
     hashed_pw = hash_password(user.password)
 
     user_data = user.dict()
     user_data.pop("password")
 
-       # ✅ Assign client_id (generate if first user)
+    # Bootstrap and public self-signup both get their own fresh client_id;
+    # admin-created users inherit the admin's client_id.
     user_data["client_id"] = current_user.client_id if current_user else str(uuid4())
-    
-    # ✅ Track who created this user
     user_data["created_by_id"] = current_user.id if current_user else None
 
     db_user = User(**user_data, hashed_password=hashed_pw)
     db.add(db_user)
     db.flush()  # Required to get db_user.id
 
-    # total_users = db.query(User).count()
-
-    # if total_users == 1:
-
-    #             # 🟢 First user: create default roles and assign SUPER_ADMIN
-    #     role_service.create_default_roles()
-    #     # 🚨 First user gets SUPER_ADMIN role
-    #     super_admin_role = db.query(Role).filter_by(name=RoleEnum.SUPER_ADMIN).first()
-    #     if super_admin_role:
-    #         db.add(UserRole(
-    #             user_id=db_user.id,
-    #             role_id=super_admin_role.id,
-    #             assigned_by=db_user.id,
-    #             assigned_at=datetime.utcnow()
-    #         ))
-    # else:
-    #     # ✅ All other users get USER role
-    #     user_role = db.query(Role).filter_by(name=RoleEnum.USER).first()
-    #     if user_role:
-    #         db.add(UserRole(
-    #             user_id=db_user.id,
-    #             role_id=user_role.id,
-    #             assigned_by=(current_user.id if current_user else db_user.id),
-    #             assigned_at=datetime.utcnow()
-    #         ))
-
     if is_bootstrap:
         role_service.create_default_roles()
         super_admin_role = db.query(Role).filter_by(name=RoleEnum.SUPER_ADMIN).first()
-        db.add(UserRole(user_id=db_user.id, role_id=super_admin_role.id,
-                         assigned_by=db_user.id, assigned_at=datetime.utcnow()))
+        db.add(UserRole(
+            user_id=db_user.id,
+            role_id=super_admin_role.id,
+            assigned_by=db_user.id,
+            assigned_at=datetime.utcnow()
+        ))
     else:
         user_role = db.query(Role).filter_by(name=RoleEnum.USER).first()
         if user_role:
-            db.add(UserRole(user_id=db_user.id, role_id=user_role.id,
-                             assigned_by=current_user.id, assigned_at=datetime.utcnow()))    
+            db.add(UserRole(
+                user_id=db_user.id,
+                role_id=user_role.id,
+                assigned_by=(current_user.id if current_user else db_user.id),
+                assigned_at=datetime.utcnow()
+            ))
 
     db.commit()
     db.refresh(db_user)

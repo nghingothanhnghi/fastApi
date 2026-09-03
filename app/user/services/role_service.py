@@ -51,19 +51,28 @@ class RoleService:
         self.db.commit()
         self.db.refresh(db_role)
         return db_role
-
-    # def get_role_by_id(self, role_id: int) -> Optional[Role]:
-    #     """Get role by ID"""
-    #     return self.db.query(Role).filter(Role.id == role_id).first()
     
+    # def get_role_by_id(self, role_id: int) -> Optional[Role]:
+    #     role = self.db.query(Role).filter(Role.id == role_id).first()
+    #     if role and role.permissions:
+    #         try:
+    #             role.permissions = json.loads(role.permissions)
+    #         except Exception:
+    #             role.permissions = []
+    #     return role
+
     def get_role_by_id(self, role_id: int) -> Optional[Role]:
-        role = self.db.query(Role).filter(Role.id == role_id).first()
-        if role and role.permissions:
-            try:
-                role.permissions = json.loads(role.permissions)
-            except Exception:
-                role.permissions = []
-        return role
+        return self.db.query(Role).filter(Role.id == role_id).first()
+
+    def get_role_permissions_list(self, role_id: int) -> list[str]:
+        """Use this when you need the parsed permissions list, without mutating the ORM object."""
+        role = self.get_role_by_id(role_id)
+        if not role or not role.permissions:
+            return []
+        try:
+            return json.loads(role.permissions)
+        except json.JSONDecodeError:
+            return []    
 
     def get_role_by_name(self, role_name: str) -> Optional[Role]:
         """Get role by name"""

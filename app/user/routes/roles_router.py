@@ -221,22 +221,32 @@ def get_my_roles(
     roles = role_service.get_user_roles(current_user.id)
     return roles
 
+# @router.get("/my/permissions")
+# def get_my_permissions(
+#     current_user: User = Depends(get_current_user)
+# ):
+#     """Get current user's permissions"""
+#     import json
+#     permissions = set()
+    
+#     for role in current_user.roles:
+#         if role.permissions:
+#             try:
+#                 role_permissions = json.loads(role.permissions)
+#                 permissions.update(role_permissions)
+#             except (json.JSONDecodeError, TypeError):
+#                 continue
+    
+#     return {"permissions": list(permissions)}
+
 @router.get("/my/permissions")
 def get_my_permissions(
+    role_service: RoleService = Depends(get_role_service),
     current_user: User = Depends(get_current_user)
 ):
-    """Get current user's permissions"""
-    import json
     permissions = set()
-    
     for role in current_user.roles:
-        if role.permissions:
-            try:
-                role_permissions = json.loads(role.permissions)
-                permissions.update(role_permissions)
-            except (json.JSONDecodeError, TypeError):
-                continue
-    
+        permissions.update(role_service.get_role_permissions_list(role.id))
     return {"permissions": list(permissions)}
 
 

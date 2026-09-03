@@ -22,22 +22,52 @@ router = APIRouter(prefix="/users", tags=["Users"])
 logger = logging.getLogger(__name__)
 
 
+# @router.post("/", response_model=UserOut)
+# def create_user(
+#     user: UserCreate,
+#     db: Session = Depends(get_db),
+#     # current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
+#     current_user: User | None = Depends(get_current_user_optional),  # Allow unauthenticated for first user
+#     ):
+#     try:
+#         user_count = db.query(User).count()
+
+#         # 🚨 Require roles only if users already exist
+#         if user_count > 0:
+#             role_checker = require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN)
+#             current_user = role_checker(current_user)  # raises 403 if not authorized
+
+#         # 🆕 Pass current_user to use their client_id
+#         created_user = crud_user.create_user(db, user, current_user)
+#         logger.info(f"User created: {created_user.id} (client_id={created_user.client_id})")
+#         return created_user
+#     except IntegrityError as e:
+#         db.rollback()
+#         msg = str(e.orig).lower()
+#         if "email" in msg:
+#             detail = "Email already exists"
+#         elif "username" in msg:
+#             detail = "Username already exists"
+#         else:
+#             detail = "Duplicate entry"
+#         logger.warning(f"User creation failed: {detail}")
+#         raise HTTPException(status_code=400, detail=detail)
+
 @router.post("/", response_model=UserOut)
 def create_user(
     user: UserCreate,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN))
-    current_user: User | None = Depends(get_current_user_optional),  # Allow unauthenticated for first user
-    ):
+    current_user: User | None = Depends(get_current_user_optional),
+):
     try:
-        user_count = db.query(User).count()
-
-        # 🚨 Require roles only if users already exist
-        if user_count > 0:
+        # If the caller sent credentials, they must be an admin creating
+        # a user on behalf of someone else -> enforce role check.
+        # If there's no token at all, treat this as a public self-signup
+        # (or the very first bootstrap user, handled in crud_user.create_user).
+        if current_user is not None:
             role_checker = require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN)
-            current_user = role_checker(current_user)  # raises 403 if not authorized
+            current_user = role_checker(current_user)
 
-        # 🆕 Pass current_user to use their client_id
         created_user = crud_user.create_user(db, user, current_user)
         logger.info(f"User created: {created_user.id} (client_id={created_user.client_id})")
         return created_user
