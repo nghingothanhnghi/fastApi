@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from pydantic import BaseModel
 
-
 class OAuthUserInfo(BaseModel):
     provider: str
     provider_user_id: str
