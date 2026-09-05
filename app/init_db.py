@@ -22,6 +22,7 @@ from .payments.models.payment import PaymentTransaction
 from .jackpot.models.draw import Draw, Ticket, PrizeResult
 from .product.models.product import Product, ProductVariant
 from .cms.models import CmsCategory, CmsTag, CmsMedia, CmsPost, CmsMenu, CmsMenuItem
+from .auth_provider.models.external_identity import ExternalIdentity
 def init_db():
 # ✅ This registers all imported models and creates the tables
     Base.metadata.create_all(bind=engine)

@@ -7,6 +7,8 @@ from app.android_system.routes import ( devices_router, tap_router, screen_route
 
 from app.user.routes import (user_router, roles_router, auth_router, password_reset_router)
 
+from app.auth_provider.routes import oauth_router
+
 from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router, ws_router)
 # from app.camera_object_detection.websocket import router as hardware_ws_router
 
@@ -65,6 +67,7 @@ app.middleware("http")(catch_exceptions_middleware)
 # Routers
 # -----------------------------------------
 app.include_router(auth_router.router)
+app.include_router(oauth_router.router)
 app.include_router(user_router.router)
 app.include_router(roles_router.router)
 app.include_router(password_reset_router.router)
