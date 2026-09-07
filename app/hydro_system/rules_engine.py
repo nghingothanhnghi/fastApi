@@ -59,6 +59,17 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
     }
 
 
+def is_flow_blocked(flow_rate: float | None, thresholds: dict) -> bool:
+    if flow_rate is None:
+        return False
+    return flow_rate < thresholds.get("flow_critical", 0.1)
+
+
+def is_flow_low(flow_rate: float | None, thresholds: dict) -> bool:
+    if flow_rate is None:
+        return False
+    return flow_rate < thresholds.get("flow_min", 0.5)
+
 # =========================
 # SCHEDULE / INTERVAL
 # =========================
@@ -212,7 +223,8 @@ def check_rules(
     thresholds: dict = DEFAULT_THRESHOLDS,
     actuators: list = [],
     overrides: dict = None,
-    recipes: list = []  # ✅ ADD THIS
+    recipes: list = [],  # ✅ ADD THIS
+    flow_readings: dict = None,   # ✅ NEW — {actuator_id: flow_rate}
 ) -> dict:
     """
     Evaluate sensor data and decide actions for each actuator, using individual thresholds if available.
@@ -222,6 +234,7 @@ def check_rules(
     """
     actions = []
     alerts = []
+    flow_readings = flow_readings or {}
 
     # Merge overrides if provided
     if overrides:
@@ -238,6 +251,7 @@ def check_rules(
 
         # ✅ MANUAL override
         manual = getattr(actuator, "manual_state", None)
+        actuator_flow = flow_readings.get(actuator_id)  # ✅ per-actuator, not per-device
         logger.info(f"[RULE] actuator={actuator_id} manual={manual}")   
 
 
@@ -298,6 +312,15 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
+        # ✅ NEW — per-actuator flow safety check
+        elif (
+            actuator_type in ["pump", "water_pump"]
+            and actuator.current_state
+            and is_flow_blocked(actuator_flow, actuator_thresholds)
+        ):
+            final_on = False
+            reason = "safety_no_flow"            
+
         # 🥈 MANUAL (STRONG OVERRIDE)
         elif manual is True:
             final_on = True
@@ -349,9 +372,31 @@ def check_rules(
             # 🌡 SENSOR INFO
             "sensor_triggered": should_activate,
 
+            "flow_rate": actuator_flow,                               # ✅ NEW
+            "flow_blocked": is_flow_blocked(actuator_flow, actuator_thresholds),  # ✅ NEW            
+
             "thresholds_used": actuator_thresholds
 
         })
+
+        if is_flow_blocked(actuator_flow, actuator_thresholds):
+            alerts.append({
+                "type": "critical",
+                "message": f"No flow on actuator '{actuator.name or actuator.type}' — possible blockage or dry run",
+                "sensor": "flow_rate",
+                "actuator_id": actuator_id,
+                "value": actuator_flow,
+                "action_required": "Check pump, tubing, and water supply immediately",
+            })
+        elif is_flow_low(actuator_flow, actuator_thresholds):
+            alerts.append({
+                "type": "warning",
+                "message": f"Low flow on actuator '{actuator.name or actuator.type}'",
+                "sensor": "flow_rate",
+                "actuator_id": actuator_id,
+                "value": actuator_flow,
+                "action_required": "Inspect for partial blockage or low pressure",
+            })        
 
     # Global/system alerts
     ec = sensor_data.get("ec", 0)
