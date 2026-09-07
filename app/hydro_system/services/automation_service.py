@@ -12,6 +12,7 @@ from app.hydro_system.services.plant_batch_service import plant_batch_service
 from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
+from app.hydro_system.services.flow_reading_service import flow_reading_service
 
 from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES
 from app.hydro_system.rules_engine import check_rules
@@ -171,6 +172,11 @@ class AutomationService:
                 for actuator in actuators
             }
 
+            # ✅ NEW — fetch latest flow reading per actuator in one query
+            flow_readings = flow_reading_service.get_latest_map_for_actuators(
+                db, list(actuator_map.keys())
+            )            
+
             # ──────────────────────────────────────────────────────────────
             # STEP 1 — MANUAL OVERRIDE
             # ──────────────────────────────────────────────────────────────
@@ -223,6 +229,7 @@ class AutomationService:
                 sensor_data=sensor_data,
                 actuators=auto_actuators,
                 recipes=recipes,
+                flow_readings=flow_readings,
             )
 
             # Collect alerts
