@@ -1,4 +1,5 @@
 # app/hydro_system/services/flow_reading_service.py
+from datetime import datetime
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -89,5 +90,52 @@ class FlowReadingService:
             .all()
         )
 
+    def get_statistics(self, db: Session, actuator_id: int, start: datetime, end: datetime) -> dict:
+        """
+        Aggregate raw flow readings for one sensor (actuator_id) over a date
+        range: total volume (trapezoidal integration of L/min over elapsed
+        minutes), average flow, peak flow, and reading count.
+        """
+        readings = (
+            db.query(HydroFlowReading)
+            .filter(
+                HydroFlowReading.actuator_id == actuator_id,
+                HydroFlowReading.created_at >= start,
+                HydroFlowReading.created_at <= end,
+            )
+            .order_by(HydroFlowReading.created_at.asc())
+            .all()
+        )
+
+        if not readings:
+            return {
+                "sensor_id": actuator_id,
+                "period_start": start,
+                "period_end": end,
+                "total_volume_liters": 0.0,
+                "average_flow_lpm": 0.0,
+                "max_flow_lpm": 0.0,
+                "reading_count": 0,
+            }
+
+        flows = [r.flow_rate for r in readings]
+
+        total_volume = 0.0
+        for prev, curr in zip(readings, readings[1:]):
+            dt_minutes = (curr.created_at - prev.created_at).total_seconds() / 60.0
+            if dt_minutes <= 0:
+                continue
+            avg_flow = (prev.flow_rate + curr.flow_rate) / 2.0
+            total_volume += avg_flow * dt_minutes
+
+        return {
+            "sensor_id": actuator_id,
+            "period_start": start,
+            "period_end": end,
+            "total_volume_liters": round(total_volume, 3),
+            "average_flow_lpm": round(sum(flows) / len(flows), 3),
+            "max_flow_lpm": round(max(flows), 3),
+            "reading_count": len(readings),
+        }
 
 flow_reading_service = FlowReadingService()

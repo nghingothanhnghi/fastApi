@@ -12,7 +12,7 @@ from app.auth_provider.routes import oauth_router
 from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router, ws_router)
 # from app.camera_object_detection.websocket import router as hardware_ws_router
 
-from app.hydro_system.routes import ( system_router, sensor_router, actuator_router, schedule_router, batch_router, flow_reading_router)
+from app.hydro_system.routes import ( system_router, sensor_router, actuator_router, schedule_router, batch_router, flow_reading_router, irrigation_router, flow_sensor_router, )
 
 
 
@@ -92,6 +92,8 @@ app.include_router(actuator_router.router)   # Handles /actuator/ endpoints
 app.include_router(schedule_router.router)   # Handles /schedules/ endpoints
 app.include_router(batch_router.router)
 app.include_router(flow_reading_router.router)
+app.include_router(irrigation_router.router)     # /irrigation/*
+app.include_router(flow_sensor_router.router)    # /flow-sensors/*
 
 app.include_router(payment_router.router)  # Handles /payments/ endpoints
 

@@ -10,6 +10,9 @@ from .hydro_system.models.growth_stage import GrowthStage
 from .hydro_system.models.growth_recipe import GrowthRecipe
 from .hydro_system.models.schedule import HydroSchedule
 from .hydro_system.models.flow_reading import HydroFlowReading
+from .hydro_system.models.irrigation import (
+    IrrigationSession, ZoneBaselineSettings, WaterEfficiencyAlert,
+)
 
 from .user.models.user import User
 from .user.models.password_reset import PasswordResetCode
