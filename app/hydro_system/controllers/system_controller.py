@@ -14,6 +14,7 @@ from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.models.growth_stage import GrowthStage
+from app.hydro_system.models.irrigation import IrrigationSession, IrrigationSessionStatus
 from sqlalchemy.orm import joinedload
 from datetime import date
 from app.core.logging_config import get_logger
@@ -176,6 +177,30 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "status": batch.status
             }
 
+        # 6️⃣ Currently running irrigation sessions
+        running_sessions = (
+            db.query(IrrigationSession)
+            .filter(
+                IrrigationSession.device_id == device.id,
+                IrrigationSession.status == IrrigationSessionStatus.running,
+            )
+            .all()
+        )
+
+        irrigation_info = {
+            "active_count": len(running_sessions),
+            "running_sessions": [
+                {
+                    "session_id": s.id,
+                    "actuator_id": s.actuator_id,
+                    "start_time": s.start_time,
+                    "target_volume_liters": s.target_volume_liters,
+                    "trigger_type": s.trigger_type,
+                }
+                for s in running_sessions
+            ],
+        }
+
         # --- Compile full device status ---
         results.append({
             "device_id": device.id,
@@ -184,6 +209,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             "sensors": sensor_data,
             "actuators": actuators_state,
             "growing_batch": batch_info,
+            "irrigation": irrigation_info,
             "system": {
                 "scheduler_state": 
                     system_state_service.get_scheduler_status()
