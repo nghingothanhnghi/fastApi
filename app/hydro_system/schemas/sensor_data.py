@@ -10,6 +10,7 @@ class SensorPayloadSchema(BaseModel):
     water_level: Optional[float] = Field(None, description="Water level percentage (0-100%)", ge=0, le=100)
     ec: Optional[float] = Field(None, description="Electrical Conductivity (mS/cm)", ge=0)
     ppm: Optional[float] = Field(None, description="Parts Per Million", ge=0)
+    rain_detected: Optional[bool] = Field(None, description="True if rain sensor detects rain")
 
 class SensorDataSchema(BaseModel):
     id: int
@@ -20,6 +21,7 @@ class SensorDataSchema(BaseModel):
     water_level: Optional[float] = Field(None, description="Water level percentage (0-100%)")
     ec: Optional[float] = Field(None, description="Electrical Conductivity (mS/cm)")
     ppm: Optional[float] = Field(None, description="Parts Per Million")
+    rain_detected: Optional[bool] = Field(None, description="True if rain sensor detects rain")
     created_at: datetime
 
     model_config = {

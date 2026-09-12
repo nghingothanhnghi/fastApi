@@ -9,7 +9,7 @@ from .valve_rule import ValveRule
 from .water_pump_rule import WaterPumpRule
 from .nutrient_pump_rule import NutrientPumpRule
 from .sliding_door_rule import SlidingDoorRule
-
+from .rain_rule import RainRule
 
 register_rule(PumpRule())
 register_rule(LightRule())
@@ -18,3 +18,4 @@ register_rule(ValveRule())
 register_rule(WaterPumpRule())
 register_rule(NutrientPumpRule())
 register_rule(SlidingDoorRule())
+register_rule(RainRule())

@@ -42,6 +42,14 @@ def _mock_water_level(config=WATER_LEVEL_CONFIG):
     logger.info(f"💧 Simulated water level: {water_percent}% (raw: {raw_distance_cm} cm)")
     return water_percent
 
+def _mock_rain() -> bool:
+    # ~15% chance of rain in mock mode
+    return random.random() < 0.15
+
+def _mock_rain_intensity() -> float:
+    # 0 = no rain, higher = stronger rain
+    return round(random.uniform(0, 50), 1) if random.random() < 0.15 else 0.0
+
 # ------------------------------
 # Real implementations (ESP32 / MicroPython hooks)
 # ------------------------------
@@ -73,6 +81,38 @@ def _real_ec(device_id=None):          return _real_latest_sensor("ec", device_i
 def _real_ppm(device_id=None):         return _real_latest_sensor("ppm", device_id)
 def _real_water_level(device_id=None, config=WATER_LEVEL_CONFIG):
     return _real_latest_sensor("water_level", device_id)
+def _real_rain(device_id: int = None) -> bool:
+    session: Session = SessionLocal()
+    try:
+        query = session.query(SensorData)
+        if device_id:
+            query = query.filter(SensorData.device_id == device_id)
+        latest = query.order_by(SensorData.created_at.desc()).first()
+        if latest and latest.rain_detected is not None:
+            return bool(latest.rain_detected)
+        logger.warning(f"⚠️ No rain sensor data found (device={device_id}), returning False")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Error fetching rain_detected from DB: {e}")
+        return False
+    finally:
+        session.close()
+def _real_rain_intensity(device_id: int = None) -> float:
+    session: Session = SessionLocal()
+    try:
+        query = session.query(SensorData)
+        if device_id:
+            query = query.filter(SensorData.device_id == device_id)
+        latest = query.order_by(SensorData.created_at.desc()).first()
+        if latest and latest.rain_intensity is not None:
+            return float(latest.rain_intensity)
+        logger.warning(f"⚠️ No rain intensity data found (device={device_id}), returning 0.0")
+        return 0.0
+    except Exception as e:
+        logger.error(f"❌ Error fetching rain_intensity from DB: {e}")
+        return 0.0
+    finally:
+        session.close()
 
 # ------------------------------
 # Public API (same names)
@@ -99,6 +139,11 @@ def read_ppm():
 def read_water_level(config=WATER_LEVEL_CONFIG):
     return _mock_water_level(config) if USE_MOCK_HYDROSYSTEMMAINBOARD else _real_water_level(config)
 
+def read_rain() -> bool:
+    return _mock_rain() if USE_MOCK_HYDROSYSTEMMAINBOARD else _real_rain()
+
+def read_rain_intensity() -> float:
+    return _mock_rain_intensity() if USE_MOCK_HYDROSYSTEMMAINBOARD else _real_rain_intensity()
 # ------------------------------
 # Aggregated read + persistence
 # ------------------------------
@@ -128,6 +173,8 @@ def read_sensors(device_id: int = None, persist: bool = True):
             "ec": _real_ec(device_id) if not USE_MOCK_HYDROSYSTEMMAINBOARD else _mock_ec(),
             "ppm": _real_ppm(device_id) if not USE_MOCK_HYDROSYSTEMMAINBOARD else _mock_ppm(),
             "water_level": _real_water_level(device_id) if not USE_MOCK_HYDROSYSTEMMAINBOARD else _mock_water_level(),
+            "rain_detected": _real_rain(device_id) if not USE_MOCK_HYDROSYSTEMMAINBOARD else _mock_rain(),
+            "rain_intensity": _real_rain_intensity(device_id) if not USE_MOCK_HYDROSYSTEMMAINBOARD else _mock_rain_intensity(),
         }
 
         logger.info(f"📈 Sensor readings: {sensor_data}")
@@ -143,6 +190,8 @@ def read_sensors(device_id: int = None, persist: bool = True):
                 ec=sensor_data["ec"],
                 ppm=sensor_data["ppm"],
                 water_level=sensor_data["water_level"],
+                rain_detected=sensor_data["rain_detected"],
+                rain_intensity=sensor_data["rain_intensity"]
             )
             session.add(db_record)
             session.commit()
@@ -162,7 +211,9 @@ def read_sensors(device_id: int = None, persist: bool = True):
             "moisture": None,
             "ec": None,
             "ppm": None,
-            "water_level": None
+            "water_level": None,
+            "rain_detected": None,
+            "rain_intensity": None
         }
     finally:
         session.close()

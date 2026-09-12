@@ -37,6 +37,8 @@ def collect_and_process(*, db):
                 "ec",
                 "ppm",
                 "device_id",
+                "rain_detected",
+                "rain_intensity"
             }
 
             clean_data = {

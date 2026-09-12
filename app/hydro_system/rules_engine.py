@@ -58,6 +58,9 @@ def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
         "critical_threshold": thresholds.get("water_level_critical", 10)
     }
 
+def is_rain_detected(sensor_data: dict) -> bool:
+    """Return True if the rain sensor detects rain, otherwise False."""
+    return bool(sensor_data.get("rain_detected", False))
 
 def is_flow_blocked(flow_rate: float | None, thresholds: dict) -> bool:
     if flow_rate is None:
@@ -312,6 +315,10 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
+        elif actuator_type == "sliding_door" and sensor_data.get("rain_intensity", 0) > actuator_thresholds.get("rain_strong_threshold", 10.0):
+            final_on = True  # or False, depending on which state = "closed"
+            reason = "safety_strong_rain"            
+
         # ✅ NEW — per-actuator flow safety check
         elif (
             actuator_type in ["pump", "water_pump"]
@@ -328,7 +335,14 @@ def check_rules(
 
         elif manual is False:
             final_on = False
-            reason = "manual_off"
+            reason = "manual_off"                        
+
+        # ✅ Rain override — distinguishes light rain vs strong rain in the reason
+        elif actuator_type in ["pump", "water_pump", "valve"] and sensor_data.get("rain_detected", False):
+            final_on = False
+            rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+            strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
+            reason = "rain_strong" if rain_intensity >= strong_threshold else "rain_detected"
 
         # 🥉 ONE-SHOT (🔥 NEW)
         elif oneshot_status == "running":
@@ -375,9 +389,12 @@ def check_rules(
             "flow_rate": actuator_flow,                               # ✅ NEW
             "flow_blocked": is_flow_blocked(actuator_flow, actuator_thresholds),  # ✅ NEW            
 
+            "rain_detected": sensor_data.get("rain_detected", False),      # ✅ NEW
+            "rain_intensity": sensor_data.get("rain_intensity", None), 
+
             "thresholds_used": actuator_thresholds
 
-        })
+        })          
 
         if is_flow_blocked(actuator_flow, actuator_thresholds):
             alerts.append({
@@ -435,6 +452,27 @@ def check_rules(
             "value": ppm,
             "action_required": "Nutrient dosing recommended"
         })
+
+    if sensor_data.get("rain_detected", False):
+        rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+        strong_threshold = thresholds.get("rain_strong_threshold", 10.0)
+
+        if rain_intensity >= strong_threshold:
+            alerts.append({
+                "type": "warning",
+                "message": f"Strong rain detected ({rain_intensity} mm/hr) — irrigation suppressed",
+                "sensor": "rain_intensity",
+                "value": rain_intensity,
+                "action_required": "None — automatic suppression active; monitor for flooding/runoff"
+            })
+        else:
+            alerts.append({
+                "type": "info",
+                "message": f"Light rain detected ({rain_intensity} mm/hr) — irrigation suppressed",
+                "sensor": "rain_intensity",
+                "value": rain_intensity,
+                "action_required": "None — automatic suppression active"
+            })        
 
     if is_water_level_critical(sensor_data, thresholds):
         alerts.append({
