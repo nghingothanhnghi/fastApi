@@ -2,9 +2,7 @@
 # This file defines the SQLAlchemy model for sensor data in the hydroponics system.
 # It includes fields for temperature, humidity, light, moisture, water_level, and a timestamp for when the data was created.
 # It is used to store and retrieve sensor readings from a database.
-from xmlrpc.client import Boolean
-
-from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, Boolean
 from app.database import Base
 from datetime import datetime
 from sqlalchemy.orm import relationship
