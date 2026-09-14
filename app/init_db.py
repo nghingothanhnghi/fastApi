@@ -27,6 +27,13 @@ from .jackpot.models.draw import Draw, Ticket, PrizeResult
 from .product.models.product import Product, ProductVariant
 from .cms.models import CmsCategory, CmsTag, CmsMedia, CmsPost, CmsMenu, CmsMenuItem
 from .auth_provider.models.external_identity import ExternalIdentity
+
+# --- AI Vision module ---
+from .ai_vision.models import (
+    Plant as AiVisionPlant, Camera as AiVisionCamera, PlantImage, AIInferenceJob,
+    VisionPrediction, PlantGrowthRecord, PlantHealthRecord, PlantAnomaly, AIRecommendation,
+)
+
 def init_db():
 # ✅ This registers all imported models and creates the tables
     Base.metadata.create_all(bind=engine)

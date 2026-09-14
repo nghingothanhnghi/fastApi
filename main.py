@@ -25,6 +25,15 @@ from app.product.routes import product_router
 from app.cms.routes import cms_router
 from app.cms.config import CMS_MEDIA_DIR, CMS_MEDIA_URL
 
+# --- AI Vision module (new) ---
+from app.ai_vision.routes import plant_router as ai_plant_router
+from app.ai_vision.routes import image_router as ai_image_router
+from app.ai_vision.routes import inference_router as ai_inference_router
+from app.ai_vision.routes import health_router as ai_health_router
+from app.ai_vision.routes import recommendation_router as ai_recommendation_router
+from app.ai_vision import config as ai_vision_config
+from app.ai_vision.jobs.inference_job import process_queued_inference_jobs
+
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
 from app.init_db import init_db
@@ -107,6 +116,14 @@ app.include_router(ingest_api.router)
 app.include_router(transform_api.router)
 app.include_router(template_api.router)
 
+# --- AI Vision module (new) ---
+app.include_router(ai_plant_router.router)
+app.include_router(ai_plant_router.camera_router)
+app.include_router(ai_image_router.router)
+app.include_router(ai_inference_router.router)
+app.include_router(ai_health_router.router)
+app.include_router(ai_recommendation_router.router)
+
 # -----------------------------------------
 # Static File Mounts (profile images, products, etc.)
 # -----------------------------------------
@@ -154,6 +171,8 @@ try:
     add_cron_job(draw_job, job_id="jackpot_draw_job", day_of_week="tue,thu,sat", hour=18, minute=0, job_name="Jackpot Draw Job")
     # CMS: publish any 'scheduled' post whose scheduled_at has passed, checked every minute
     add_job(publish_scheduled_posts_job, job_id="cms_scheduled_publish_job", seconds=60, job_name="CMS Scheduled Publish Job")
+    # AI Vision: poll for queued image-analysis jobs every 15 seconds
+    add_job(process_queued_inference_jobs, job_id="ai_vision_inference_job", seconds=15, job_name="AI Vision Inference Job")
 
     # Start hardware detection WebSocket background tasks
     import asyncio
