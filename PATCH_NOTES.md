@@ -76,3 +76,32 @@ curl localhost:8000/api/v1/plants/1/recommendations
   registry with both your `PlantBatch.plant = relationship("Plant")` and
   this module present: fails with the exact reported error before the
   rename, configures cleanly after.
+
+- **2026-09-14 (2)**: Fixed two bugs hit during first real pipeline run:
+  1. `SensorFusionService.get_window()` (`integrations/hydroponic_client.py`)
+     returned raw `datetime` objects for `window_start`/`window_end`, which
+     then get stored in `PlantHealthRecord.sensor_snapshot` — a JSON column.
+     SQLite's JSON serializer can't handle `datetime` directly. Fixed by
+     calling `.isoformat()` on both before they go into the dict.
+  2. `run_full_pipeline`'s `except` block (`controllers/vision_controller.py`)
+     tried to `db.commit()` a "failed" status update without first calling
+     `db.rollback()`. Since the *original* failure was mid-flush, the
+     session's transaction was already dead, so the second commit raised a
+     `PendingRollbackError` that masked the real error in the HTTP response.
+     Fixed by calling `db.rollback()` at the top of the except block.
+
+  Both reproduced and verified fixed against a live SQLite JSON column
+  before repackaging (not just reasoned about) — see conversation for the
+  repro script.
+
+- **2026-09-14 (3)**: Fixed a falsy-zero bug in `services/growth_service.py`
+  found while reviewing real `/plants/{id}/growth` output: `if baseline_rate:`
+  and `if configured:` both treat a legitimate `0.0` the same as "not set",
+  because `0.0` is falsy in Python. This meant a plant with genuinely flat
+  growth (baseline = 0.0%/day) always got `deviation_from_baseline_pct: null`
+  instead of the correct `0.0`. Fixed to explicitly check `is not None`, and
+  to handle true division-by-zero (nonzero growth off a zero baseline is
+  mathematically undefined as a percentage) as its own case rather than
+  lumping it in with "no baseline yet". Verified against four cases
+  (flat/flat, nonzero-off-zero-baseline, normal case, no-baseline-yet)
+  before repackaging.
