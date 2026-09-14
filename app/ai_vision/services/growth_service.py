@@ -30,8 +30,15 @@ class GrowthService:
             growth_rate = round(growth_pct / days_elapsed, 3)
 
             baseline_rate = self._get_baseline_rate(db, image.plant_id)
-            if baseline_rate:
-                deviation_pct = round(((growth_rate - baseline_rate) / baseline_rate) * 100, 2)
+            if baseline_rate is not None:
+                if baseline_rate == 0:
+                    # Both flat -> genuinely no deviation. Nonzero growth off
+                    # a zero baseline is mathematically undefined as a
+                    # percentage (would be division by zero) - report None
+                    # rather than crash or silently lie with 0/inf.
+                    deviation_pct = 0.0 if growth_rate == 0 else None
+                else:
+                    deviation_pct = round(((growth_rate - baseline_rate) / baseline_rate) * 100, 2)
 
         record = PlantGrowthRecord(
             plant_id=image.plant_id,
@@ -56,7 +63,7 @@ class GrowthService:
         plant = db.query(VisionPlant).filter(VisionPlant.id == plant_id).first()
         if plant and plant.expected_growth_profile:
             configured = plant.expected_growth_profile.get("canopy_growth_pct_per_day")
-            if configured:
+            if configured is not None:
                 return configured
 
         recent: List[PlantGrowthRecord] = (
