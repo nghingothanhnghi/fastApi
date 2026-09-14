@@ -51,9 +51,9 @@ class GrowthService:
         """Baseline = plant's own expected_growth_profile if set, else the
         trailing average of its last 5 growth_rate readings. Configurable,
         never hard-coded, per the brief."""
-        from app.ai_vision.models.plant import Plant
+        from app.ai_vision.models.plant import VisionPlant
 
-        plant = db.query(Plant).filter(Plant.id == plant_id).first()
+        plant = db.query(VisionPlant).filter(VisionPlant.id == plant_id).first()
         if plant and plant.expected_growth_profile:
             configured = plant.expected_growth_profile.get("canopy_growth_pct_per_day")
             if configured:

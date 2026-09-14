@@ -1,4 +1,4 @@
-from .plant import Plant, Camera
+from .plant import VisionPlant, VisionCamera
 from .image import PlantImage
 from .inference_job import AIInferenceJob
 from .vision_prediction import VisionPrediction
@@ -8,6 +8,6 @@ from .plant_anomaly import PlantAnomaly
 from .ai_recommendation import AIRecommendation
 
 __all__ = [
-    "Plant", "Camera", "PlantImage", "AIInferenceJob", "VisionPrediction",
+    "VisionPlant", "VisionCamera", "PlantImage", "AIInferenceJob", "VisionPrediction",
     "PlantGrowthRecord", "PlantHealthRecord", "PlantAnomaly", "AIRecommendation",
 ]

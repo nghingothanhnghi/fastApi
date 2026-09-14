@@ -4,7 +4,7 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
-class Camera(Base):
+class VisionCamera(Base):
     __tablename__ = "ai_vision_cameras"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -18,10 +18,10 @@ class Camera(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    plants = relationship("Plant", back_populates="camera")
+    plants = relationship("VisionPlant", back_populates="camera")
 
 
-class Plant(Base):
+class VisionPlant(Base):
     __tablename__ = "ai_vision_plants"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -38,7 +38,7 @@ class Plant(Base):
     hydro_batch_id = Column(Integer, ForeignKey("plant_batches.id"), nullable=True)
 
     camera_id = Column(Integer, ForeignKey("ai_vision_cameras.id"), nullable=True)
-    camera = relationship("Camera", back_populates="plants")
+    camera = relationship("VisionCamera", back_populates="plants")
 
     expected_growth_profile = Column(JSON, nullable=True)  # e.g. {"canopy_growth_pct_per_day": 3.8}
 
@@ -46,4 +46,4 @@ class Plant(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def __repr__(self):
-        return f"<Plant(id={self.id}, species={self.species!r}, status={self.status})>"
+        return f"<VisionPlant(id={self.id}, species={self.species!r}, status={self.status})>"

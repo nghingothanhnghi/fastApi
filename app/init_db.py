@@ -30,7 +30,7 @@ from .auth_provider.models.external_identity import ExternalIdentity
 
 # --- AI Vision module ---
 from .ai_vision.models import (
-    Plant as AiVisionPlant, Camera as AiVisionCamera, PlantImage, AIInferenceJob,
+    VisionPlant, VisionCamera, PlantImage, AIInferenceJob,
     VisionPrediction, PlantGrowthRecord, PlantHealthRecord, PlantAnomaly, AIRecommendation,
 )
 
