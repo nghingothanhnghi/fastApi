@@ -106,6 +106,15 @@ curl localhost:8000/api/v1/plants/1/recommendations
   (flat/flat, nonzero-off-zero-baseline, normal case, no-baseline-yet)
   before repackaging.
 
+- **Zero-baseline deviation gap fixed**: `AnomalyService.is_growth_anomalous`
+  now takes the full `PlantGrowthRecord` instead of a bare float, and falls
+  back to an absolute `growth_rate_pct_per_day` threshold
+  (`GROWTH_ANOMALY_ABS_PCT_PER_DAY`, default 15%/day) whenever
+  `baseline_growth_rate_pct_per_day == 0.0`, since percent-of-zero deviation
+  is undefined and was previously always treated as "not anomalous". Also
+  fixes a latent crash in `check_growth()` (`None > -50`) that would have
+  fired the moment this code path was actually exercised.
+
 ## Verified end-to-end (2026-09-14)
 
 Full pipeline confirmed working against a real running instance and real

@@ -76,10 +76,26 @@ class GrowthService:
         rates = [r.growth_rate_pct_per_day for r in recent]
         return round(sum(rates) / len(rates), 3) if rates else None
 
-    def is_growth_anomalous(self, deviation_from_baseline_pct: Optional[float]) -> bool:
-        if deviation_from_baseline_pct is None:
-            return False
-        return abs(deviation_from_baseline_pct) / 100 >= config.GROWTH_ANOMALY_THRESHOLD
+    def is_growth_anomalous(self, growth_record: PlantGrowthRecord) -> bool:
+        """
+        Normal case: compare deviation_from_baseline_pct against GROWTH_ANOMALY_THRESHOLD.
+
+        Zero-baseline case: deviation_from_baseline_pct is None whenever
+        baseline_growth_rate_pct_per_day == 0.0 (see record_growth() — percent-of-zero
+        is mathematically undefined, not "no deviation"). Previously that meant
+        "never anomalous", which hid real changes. Fall back to comparing the
+        absolute growth rate against GROWTH_ANOMALY_ABS_PCT_PER_DAY instead.
+        """
+        deviation = growth_record.deviation_from_baseline_pct
+        if deviation is not None:
+            return abs(deviation) / 100 >= config.GROWTH_ANOMALY_THRESHOLD
+
+        baseline_rate = growth_record.baseline_growth_rate_pct_per_day
+        growth_rate = growth_record.growth_rate_pct_per_day
+        if baseline_rate == 0 and growth_rate is not None:
+            return abs(growth_rate) >= config.GROWTH_ANOMALY_ABS_PCT_PER_DAY
+
+        return False
 
 
 growth_service = GrowthService()

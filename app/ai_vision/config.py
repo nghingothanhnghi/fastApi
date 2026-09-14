@@ -14,6 +14,11 @@ PLANT_HEALTH_WARNING_THRESHOLD = int(os.getenv("PLANT_HEALTH_WARNING_THRESHOLD",
 PLANT_HEALTH_CRITICAL_THRESHOLD = int(os.getenv("PLANT_HEALTH_CRITICAL_THRESHOLD", "50"))
 
 GROWTH_ANOMALY_THRESHOLD = float(os.getenv("GROWTH_ANOMALY_THRESHOLD", "0.30"))  # 30% deviation from baseline
+# Fallback for when baseline_growth_rate_pct_per_day == 0.0: percent-based
+# deviation is undefined there (division by zero), so instead we compare the
+# absolute growth rate against this threshold. Without this, any change off
+# a flat baseline was silently never flagged as anomalous.
+GROWTH_ANOMALY_ABS_PCT_PER_DAY = float(os.getenv("GROWTH_ANOMALY_ABS_PCT_PER_DAY", "15.0"))
 SENSOR_WINDOW_MINUTES = int(os.getenv("AI_SENSOR_WINDOW_MINUTES", "15"))
 
 IMAGE_MAX_SIZE_MB = int(os.getenv("IMAGE_MAX_SIZE_MB", "10"))
