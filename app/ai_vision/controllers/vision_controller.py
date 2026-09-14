@@ -46,6 +46,12 @@ def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
 
     except Exception as e:
         logger.error(f"AI vision pipeline failed for image {image.id}: {e}", exc_info=True)
+        # A failed flush/commit above leaves the session's transaction in a
+        # rolled-back state - must explicitly roll back here before this
+        # session can be used again, or this commit fails with a confusing
+        # secondary "transaction has been rolled back" error that masks
+        # the real exception `e`.
+        db.rollback()
         job.status = "failed"
         job.error_message = str(e)
         image.processing_status = "failed"

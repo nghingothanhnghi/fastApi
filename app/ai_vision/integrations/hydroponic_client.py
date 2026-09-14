@@ -39,8 +39,8 @@ class SensorFusionService:
             return round(sum(values) / len(values), 2) if values else None
 
         snapshot = {
-            "window_start": window_start,
-            "window_end": timestamp,
+            "window_start": window_start.isoformat(),
+            "window_end": timestamp.isoformat(),
             "temperature": avg("temperature"),
             "humidity": avg("humidity"),
             "light": avg("light"),
