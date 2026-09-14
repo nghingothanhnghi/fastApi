@@ -41,3 +41,5 @@ scripts/
 # Ignore scripts for ESP32
 esp32/
 
+# Ignore uploaded files
+upload/
