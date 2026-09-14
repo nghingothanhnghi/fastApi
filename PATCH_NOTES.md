@@ -105,3 +105,53 @@ curl localhost:8000/api/v1/plants/1/recommendations
   lumping it in with "no baseline yet". Verified against four cases
   (flat/flat, nonzero-off-zero-baseline, normal case, no-baseline-yet)
   before repackaging.
+
+## Verified end-to-end (2026-09-14)
+
+Full pipeline confirmed working against a real running instance and real
+`SensorData`: camera create -> plant create -> image upload (auto-queues
+inference) -> async background job AND manual `/vision/analyze/{id}` both
+completing successfully -> growth tracking with baseline math -> health
+scoring fused with real sensor readings -> anomaly detection -> evidence-based
+recommendation with `status: "pending_review"`. Not just "should work" —
+walked through with real curl output at every step.
+
+## Known limitations found during this verification (not yet fixed)
+
+1. **Mock health classifier has a hard ceiling of "normal" status.**
+   `MockLeafHealthClassifier` can set at most one `visual_indicator`
+   (`leaf_yellowing`) and one `possible_issue` (`possible_nutrient_deficiency`),
+   capping the total score deduction at `-25` (100 -> 75). Since
+   `PLANT_HEALTH_WARNING_THRESHOLD=70`, a score of 75 is always `"normal"` —
+   `"warning"`/`"critical"` are structurally unreachable via any image with
+   this mock model. Practical effect: `anomaly_service.check_health()` can
+   never fire from HTTP testing today; only `check_growth()` can. This isn't
+   a bug in the scoring formula itself, just a limitation of the placeholder
+   classifier — resolves itself once a real trained classifier is wired in
+   (Phase 2), but worth knowing before assuming the health-anomaly branch
+   has been exercised.
+
+2. **Growth deviation reports `null` instead of a number when the baseline
+   is exactly `0.0`, even for a genuinely extreme change.** Confirmed with
+   real data: a `-638%/day` growth rate against a `0.0` baseline produced
+   `deviation_from_baseline_pct: null` rather than any anomaly-triggering
+   value, because expressing "how much did it deviate" as a percentage of
+   zero is undefined (see the 2026-09-14 (3) fix above — this is that fix
+   working as designed, not a regression, but it has a real blind spot).
+   A large absolute change right after a run of perfectly flat data can
+   currently produce a `null` deviation and silently skip the anomaly
+   check. Fix for Phase 2: fall back to an absolute-change threshold
+   (e.g. `abs(canopy_area_new - canopy_area_old) > X px`) when
+   `baseline_growth_rate_pct_per_day == 0`, instead of only ever working
+   in percentage terms.
+
+3. **`/vision/analyze/{image_id}` and the background poller can both run
+   the pipeline on the same image if you call the endpoint manually before
+   the ~15s poller gets to it first.** Not a bug — `AI_ENABLED=true` means
+   every upload auto-queues, and `/vision/analyze/{id}` is documented as
+   "runs synchronously, always" for admin/debug use — but it means you can
+   end up with two separate growth/health/anomaly records for one image if
+   you don't wait for the queued job to finish first. Decide in Phase 2
+   whether `/vision/analyze/{id}` should instead re-use/cancel an
+   already-`completed` job for the same image rather than always creating
+   a fresh one.
