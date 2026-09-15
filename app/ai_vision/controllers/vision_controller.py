@@ -14,14 +14,8 @@ logger = get_logger(__name__)
 
 
 def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
-    """The single place that wires detection -> growth -> health -> anomaly
-    -> recommendation together, so the background job and any future manual
-    "re-analyze" endpoint both go through the same code path."""
     image = image_service.get_image(db, job.image_id)
-    job.status = "processing"
-    job.started_at = datetime.utcnow()
-    image.processing_status = "processing"
-    db.commit()
+    # already "processing" via _claim_job — no need to re-set/commit here
 
     try:
         predictions = vision_service.run_predictions(db, image)
@@ -42,16 +36,11 @@ def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
         job.status = "completed"
         job.completed_at = datetime.utcnow()
         image.processing_status = "completed"
-        db.commit()
+        db.commit()   # single durable commit for predictions + growth + health + anomalies + recommendation + job status
 
     except Exception as e:
         logger.error(f"AI vision pipeline failed for image {image.id}: {e}", exc_info=True)
-        # A failed flush/commit above leaves the session's transaction in a
-        # rolled-back state - must explicitly roll back here before this
-        # session can be used again, or this commit fails with a confusing
-        # secondary "transaction has been rolled back" error that masks
-        # the real exception `e`.
-        db.rollback()
+        db.rollback()   # now actually discards ALL partial analysis rows, not just the flush buffer
         job.status = "failed"
         job.error_message = str(e)
         image.processing_status = "failed"
