@@ -35,5 +35,10 @@ from .ai_vision.models import (
 )
 
 def init_db():
-# ✅ This registers all imported models and creates the tables
+    # Imports above register every model before SQLAlchemy creates missing
+    # tables. Run explicitly with: python -m app.init_db
     Base.metadata.create_all(bind=engine)
+
+
+if __name__ == "__main__":
+    init_db()

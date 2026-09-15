@@ -9,6 +9,7 @@ AI_ENABLED = os.getenv("AI_ENABLED", "true").lower() in ("true", "1", "yes")
 AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "plant-detector")
 AI_MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "v1")
 AI_CONFIDENCE_THRESHOLD = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.60"))
+AI_JOB_LEASE_SECONDS = int(os.getenv("AI_JOB_LEASE_SECONDS", "600"))
 
 PLANT_HEALTH_WARNING_THRESHOLD = int(os.getenv("PLANT_HEALTH_WARNING_THRESHOLD", "70"))
 PLANT_HEALTH_CRITICAL_THRESHOLD = int(os.getenv("PLANT_HEALTH_CRITICAL_THRESHOLD", "50"))

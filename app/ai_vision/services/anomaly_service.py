@@ -67,8 +67,7 @@ class AnomalyService:
             description=description, evidence=evidence,
         )
         db.add(anomaly)
-        db.commit()
-        db.refresh(anomaly)
+        db.flush()
         return anomaly
 
 

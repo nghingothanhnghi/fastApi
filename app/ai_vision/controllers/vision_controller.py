@@ -14,8 +14,9 @@ logger = get_logger(__name__)
 
 
 def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
+    """Persist all derived analysis rows atomically for an already-claimed job."""
     image = image_service.get_image(db, job.image_id)
-    # already "processing" via _claim_job — no need to re-set/commit here
+    image.processing_status = "processing"
 
     try:
         predictions = vision_service.run_predictions(db, image)

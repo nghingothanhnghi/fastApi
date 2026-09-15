@@ -50,8 +50,7 @@ class GrowthService:
             deviation_from_baseline_pct=deviation_pct,
         )
         db.add(record)
-        db.commit()
-        db.refresh(record)
+        db.flush()
         return record
 
     def _get_baseline_rate(self, db: Session, plant_id: int) -> Optional[float]:

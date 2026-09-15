@@ -4,6 +4,7 @@ from fastapi import UploadFile, HTTPException, status
 from app.ai_vision.models.image import PlantImage
 from app.ai_vision.models.inference_job import AIInferenceJob
 from app.ai_vision.integrations.storage_client import image_storage_service
+from app.ai_vision.services.inference_job_service import inference_job_service
 from app.ai_vision.services.plant_service import plant_service
 from app.ai_vision import config
 from app.core.logging_config import get_logger
@@ -42,17 +43,7 @@ class ImageService:
         return image
 
     def queue_inference(self, db: Session, image: PlantImage) -> AIInferenceJob:
-        job = AIInferenceJob(
-            image_id=image.id,
-            model_name=config.AI_MODEL_NAME,
-            model_version=config.AI_MODEL_VERSION,
-            status="queued",
-        )
-        image.processing_status = "queued"
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-        return job
+        return inference_job_service.get_or_create_active(db, image)
 
     def get_image(self, db: Session, image_id: int) -> PlantImage:
         image = db.query(PlantImage).filter(PlantImage.id == image_id).first()

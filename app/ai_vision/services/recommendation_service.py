@@ -47,8 +47,7 @@ class RecommendationService:
             status="pending_review",
         )
         db.add(recommendation)
-        db.commit()
-        db.refresh(recommendation)
+        db.flush()
         return recommendation
 
     @staticmethod

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.ai_vision.services.image_service import image_service
+from app.ai_vision.services.inference_job_service import inference_job_service
 from app.ai_vision.controllers.vision_controller import run_full_pipeline
 from app.ai_vision.schemas.image_schema import InferenceJobOut
 
@@ -14,7 +15,14 @@ def analyze_image_now(image_id: int, db: Session = Depends(get_db)):
     """Manual re-analyze - runs synchronously for admin/debug use. Regular
     ingestion always goes through the async queue (image_router)."""
     image = image_service.get_image(db, image_id)
-    job = image_service.queue_inference(db, image)
+    job = inference_job_service.get_or_create_active(db, image)
+    if job.status == "processing":
+        return job
+
+    if not inference_job_service.claim(db, job.id):
+        return inference_job_service.get(db, job.id)
+
+    job = inference_job_service.get(db, job.id)
     run_full_pipeline(db, job)
     db.refresh(job)
     return job

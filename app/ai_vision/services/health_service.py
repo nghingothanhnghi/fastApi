@@ -45,8 +45,7 @@ class HealthService:
             model_version=health_prediction.model_version,
         )
         db.add(record)
-        db.commit()
-        db.refresh(record)
+        db.flush()
         return record
 
     @staticmethod

@@ -32,9 +32,10 @@ class VisionService:
             db.add(prediction)
             predictions.append(prediction)
 
-        db.commit()
-        for p in predictions:
-            db.refresh(p)
+        # The pipeline controller owns the transaction. Flush assigns IDs so
+        # later pipeline stages can reference these rows without making a
+        # partial analysis durable.
+        db.flush()
 
         logger.info(
             "Vision predictions completed",
