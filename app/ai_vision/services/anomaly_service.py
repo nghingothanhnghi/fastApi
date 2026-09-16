@@ -4,6 +4,7 @@ from app.ai_vision.models.plant_anomaly import PlantAnomaly
 from app.ai_vision.models.plant_growth import PlantGrowthRecord
 from app.ai_vision.models.plant_health import PlantHealthRecord
 from app.ai_vision.services.growth_service import growth_service
+from app.ai_vision.repositories.anomaly_repository import anomaly_tracker_repository
 from app.ai_vision import config
 
 

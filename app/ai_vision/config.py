@@ -20,6 +20,13 @@ GROWTH_ANOMALY_THRESHOLD = float(os.getenv("GROWTH_ANOMALY_THRESHOLD", "0.30")) 
 # absolute growth rate against this threshold. Without this, any change off
 # a flat baseline was silently never flagged as anomalous.
 GROWTH_ANOMALY_ABS_PCT_PER_DAY = float(os.getenv("GROWTH_ANOMALY_ABS_PCT_PER_DAY", "15.0"))
+
+# Debounce: number of consecutive threshold-crossing evaluations required
+# for the same (plant_id, anomaly_type) before AnomalyService actually
+# persists a PlantAnomaly. A single clean reading resets the streak to 0.
+# See app/ai_vision/models/anomaly_tracker.py.
+ANOMALY_DEBOUNCE_COUNT = int(os.getenv("ANOMALY_DEBOUNCE_COUNT", "3"))
+
 SENSOR_WINDOW_MINUTES = int(os.getenv("AI_SENSOR_WINDOW_MINUTES", "15"))
 
 IMAGE_MAX_SIZE_MB = int(os.getenv("IMAGE_MAX_SIZE_MB", "10"))
