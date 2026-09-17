@@ -315,9 +315,21 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
-        elif actuator_type == "sliding_door" and sensor_data.get("rain_intensity", 0) > actuator_thresholds.get("rain_strong_threshold", 10.0):
-            final_on = True  # or False, depending on which state = "closed"
-            reason = "safety_strong_rain"            
+        # elif actuator_type == "sliding_door" and sensor_data.get("rain_intensity", 0) > actuator_thresholds.get("rain_strong_threshold", 10.0):
+        #     final_on = True  # or False, depending on which state = "closed"
+        #     reason = "safety_strong_rain"
+
+        elif sensor_data.get("rain_detected", False):
+            rain_actions = actuator_thresholds.get("rain_actuator_actions", {})
+            rain_action = rain_actions.get(actuator_type, "ignore")
+
+            if rain_action != "ignore":
+                rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+                strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
+                is_strong = rain_intensity >= strong_threshold
+
+                final_on = (rain_action == "on")
+                reason = f"rain_strong_{rain_action}" if is_strong else f"rain_light_{rain_action}"        
 
         # ✅ NEW — per-actuator flow safety check
         elif (
@@ -338,11 +350,11 @@ def check_rules(
             reason = "manual_off"                        
 
         # ✅ Rain override — distinguishes light rain vs strong rain in the reason
-        elif actuator_type in ["pump", "water_pump", "valve"] and sensor_data.get("rain_detected", False):
-            final_on = False
-            rain_intensity = sensor_data.get("rain_intensity", 0) or 0
-            strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
-            reason = "rain_strong" if rain_intensity >= strong_threshold else "rain_detected"
+        # elif actuator_type in ["pump", "water_pump", "valve"] and sensor_data.get("rain_detected", False):
+        #     final_on = False
+        #     rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+        #     strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
+        #     reason = "rain_strong" if rain_intensity >= strong_threshold else "rain_detected"
 
         # 🥉 ONE-SHOT (🔥 NEW)
         elif oneshot_status == "running":

@@ -19,8 +19,15 @@ DEFAULT_THRESHOLDS = {
     "ec_max": 2.5,             # mS/cm - maximum electrical conductivity
     "ppm_min": 600,            # ppm - minimum parts per million
     "ppm_max": 1000,           # ppm - maximum parts per million
-    "rain_detected_action": "close_door", # what to do when rain is detected (informational)
     "rain_strong_threshold": 10.0, # mm/h - threshold for strong rain detection
+    "rain_actuator_actions": {
+        "pump": "off",
+        "water_pump": "off",
+        "valve": "off",
+        "nutrient_pump": "off",
+        "light": "ignore",
+        "fan": "ignore",
+    },
 }
 
 # Optional: Default actuator templates per device type
