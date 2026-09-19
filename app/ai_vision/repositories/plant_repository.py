@@ -31,6 +31,17 @@ class PlantRepository:
         db.refresh(plant)
         return plant
 
+    def get_by_hydro_batch_id(self, db: Session, hydro_batch_id: int) -> Optional[VisionPlant]:
+        return (
+            db.query(VisionPlant)
+            .filter(VisionPlant.hydro_batch_id == hydro_batch_id)
+            .order_by(VisionPlant.created_at.desc())
+            .first()
+        )
+
+    def get_by_hydro_plant_id(self, db: Session, hydro_plant_id: int) -> List[VisionPlant]:
+        return db.query(VisionPlant).filter(VisionPlant.hydro_plant_id == hydro_plant_id).all()
+
 
 class CameraRepository:
     def create(self, db: Session, **kwargs) -> VisionCamera:

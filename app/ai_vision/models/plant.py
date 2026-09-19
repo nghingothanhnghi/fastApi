@@ -34,8 +34,8 @@ class VisionPlant(Base):
 
     # Optional link into the existing hydro batch/plant metadata, so vision
     # data can be correlated with GrowthStage/GrowthRecipe without duplicating them.
-    hydro_plant_id = Column(Integer, ForeignKey("plants.id"), nullable=True)
-    hydro_batch_id = Column(Integer, ForeignKey("plant_batches.id"), nullable=True)
+    hydro_plant_id = Column(Integer, ForeignKey("plants.id"), nullable=True, index=True)
+    hydro_batch_id = Column(Integer, ForeignKey("plant_batches.id"), nullable=True, index=True)
 
     camera_id = Column(Integer, ForeignKey("ai_vision_cameras.id"), nullable=True)
     camera = relationship("VisionCamera", back_populates="plants")

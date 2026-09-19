@@ -34,6 +34,18 @@ def update_plant(plant_id: int, data: PlantUpdate, db: Session = Depends(get_db)
         raise HTTPException(404, "Plant not found")
     return plant
 
+@router.get("/by-hydro-batch/{hydro_batch_id}", response_model=PlantOut)
+def get_by_hydro_batch(hydro_batch_id: int, db: Session = Depends(get_db)):
+    plant = plant_service.get_by_hydro_batch(db, hydro_batch_id)
+    if not plant:
+        raise HTTPException(404, f"No vision plant linked to hydro batch {hydro_batch_id}")
+    return plant
+
+
+@router.post("/link-batch/{hydro_batch_id}", response_model=PlantOut)
+def link_batch(hydro_batch_id: int, db: Session = Depends(get_db)):
+    """Idempotent: returns the existing linked VisionPlant, or creates one."""
+    return plant_service.link_or_create_from_hydro_batch(db, hydro_batch_id)
 
 camera_router = APIRouter(prefix="/api/v1/cameras", tags=["AI Vision - Cameras"])
 
