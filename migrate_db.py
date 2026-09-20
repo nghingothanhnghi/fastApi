@@ -1,7 +1,8 @@
 import sqlite3
 import os
 
-db_path = os.path.join('app', 'data', 'database.db')
+db_path = os.path.join("app", "data", "database.db")
+
 if not os.path.exists(db_path):
     print(f"Database not found at {db_path}")
     exit(1)
@@ -9,9 +10,51 @@ if not os.path.exists(db_path):
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
-cursor.execute('SELECT * FROM sensor_data WHERE device_id = 1 ORDER BY created_at DESC LIMIT 5')
-data = cursor.fetchall()
-for row in data:
-    print(row)
 
-conn.close()
+def add_client_id_column(table_name):
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "client_id" in columns:
+        print(f"{table_name}: client_id already exists")
+        return
+
+    cursor.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN client_id TEXT"
+    )
+
+    print(f"{table_name}: client_id added")
+
+
+def add_client_id_index(table_name):
+    index_name = f"ix_{table_name}_client_id"
+
+    cursor.execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS {index_name}
+        ON {table_name} (client_id)
+        """
+    )
+
+    print(f"{table_name}: client_id index ready")
+
+
+try:
+    # Add missing client_id columns
+    add_client_id_column("ai_vision_cameras")
+    add_client_id_column("ai_vision_plants")
+
+    # Match SQLAlchemy index=True
+    add_client_id_index("ai_vision_cameras")
+    add_client_id_index("ai_vision_plants")
+
+    conn.commit()
+
+    print("\nMigration completed successfully.")
+
+except sqlite3.Error as e:
+    conn.rollback()
+    print(f"Database error: {e}")
+
+finally:
+    conn.close()
