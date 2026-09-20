@@ -15,6 +15,9 @@ class VisionCamera(Base):
     hydro_device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=True)
     is_active = Column(Boolean, default=True)
 
+    # ✅ NEW — tenant scoping, same convention as HydroDevice.client_id
+    client_id = Column(String, nullable=True, index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -31,6 +34,9 @@ class VisionPlant(Base):
     growing_system = Column(String(50), nullable=True)  # nft, dwc, ebb_flow, aeroponic...
     planted_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(30), nullable=False, default="growing")  # growing|harvested|removed
+
+    # ✅ NEW — tenant scoping
+    client_id = Column(String, nullable=True, index=True)
 
     # Optional link into the existing hydro batch/plant metadata, so vision
     # data can be correlated with GrowthStage/GrowthRecipe without duplicating them.

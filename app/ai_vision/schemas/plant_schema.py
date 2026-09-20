@@ -15,6 +15,7 @@ class CameraCreate(BaseModel):
 class CameraOut(CameraCreate):
     id: int
     is_active: bool
+    client_id: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -41,6 +42,7 @@ class PlantUpdate(BaseModel):
 class PlantOut(PlantCreate):
     id: int
     status: str
+    client_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

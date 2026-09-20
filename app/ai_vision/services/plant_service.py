@@ -16,13 +16,16 @@ class PlantService:
     def get_all_plants(self, db: Session, status: Optional[str] = None) -> List[VisionPlant]:
         return plant_repository.get_all(db, status)
 
+    def get_all_plants_by_client(self, db: Session, client_id: str, status: Optional[str] = None) -> List[VisionPlant]:
+        return plant_repository.get_all_by_client(db, client_id, status)
+
     def update_plant(self, db: Session, plant_id: int, updates: dict) -> Optional[VisionPlant]:
         return plant_repository.update(db, plant_id, updates)
 
     def get_by_hydro_batch(self, db: Session, hydro_batch_id: int) -> Optional[VisionPlant]:
         return plant_repository.get_by_hydro_batch_id(db, hydro_batch_id)
 
-    def link_or_create_from_hydro_batch(self, db: Session, hydro_batch_id: int) -> VisionPlant:
+    def link_or_create_from_hydro_batch(self, db: Session, hydro_batch_id: int, client_id: Optional[str]) -> VisionPlant:
         existing = self.get_by_hydro_batch(db, hydro_batch_id)
         if existing:
             return existing
@@ -38,6 +41,7 @@ class PlantService:
             hydro_plant_id=info["plant_id"],
             hydro_batch_id=info["batch_id"],
             status="growing",
+            client_id=client_id,
         )
 
     def create_camera(self, db: Session, **kwargs) -> VisionCamera:
@@ -45,6 +49,10 @@ class PlantService:
 
     def get_all_cameras(self, db: Session) -> List[VisionCamera]:
         return camera_repository.get_all(db)
+
+    # ✅ NEW
+    def get_all_cameras_by_client(self, db: Session, client_id: str) -> List[VisionCamera]:
+        return camera_repository.get_all_by_client(db, client_id)
 
 
 plant_service = PlantService()

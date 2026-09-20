@@ -131,11 +131,12 @@ app.include_router(ai_recommendation_router.router)
 os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 os.makedirs(config.MEDIA_DIR, exist_ok=True)
 os.makedirs(config.QR_CODE_DIR, exist_ok=True)
-# alongside your other os.makedirs() calls
 os.makedirs(CMS_MEDIA_DIR, exist_ok=True)
+os.makedirs(ai_vision_config.AI_VISION_IMAGE_DIR, exist_ok=True)
 
 # alongside your other app.mount() calls
 app.mount(CMS_MEDIA_URL, StaticFiles(directory=CMS_MEDIA_DIR), name="cms_media")
+
 
 # Serve /uploads/profile_images/* → uploads/profile_images/
 app.mount(
@@ -156,6 +157,13 @@ app.mount(
     config.QR_CODE_URL,
     StaticFiles(directory=config.QR_CODE_DIR),
     name="qr_codes"
+)
+
+# Serve /static/ai_vision_images/* → uploads/ai_vision_images/
+app.mount(
+    ai_vision_config.AI_VISION_IMAGE_URL,
+    StaticFiles(directory=ai_vision_config.AI_VISION_IMAGE_DIR),
+    name="ai_vision_images"
 )
 
 # -----------------------------------------

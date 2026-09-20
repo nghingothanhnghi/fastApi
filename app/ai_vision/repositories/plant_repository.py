@@ -21,6 +21,13 @@ class PlantRepository:
             query = query.filter(VisionPlant.status == status)
         return query.order_by(VisionPlant.created_at.desc()).all()
 
+    # ✅ NEW — tenant-scoped listing, mirrors HydroDeviceService.get_devices_by_client
+    def get_all_by_client(self, db: Session, client_id: str, status: Optional[str] = None) -> List[VisionPlant]:
+        query = db.query(VisionPlant).filter(VisionPlant.client_id == client_id)
+        if status:
+            query = query.filter(VisionPlant.status == status)
+        return query.order_by(VisionPlant.created_at.desc()).all()
+
     def update(self, db: Session, plant_id: int, updates: dict) -> Optional[VisionPlant]:
         plant = self.get(db, plant_id)
         if not plant:
@@ -57,6 +64,12 @@ class CameraRepository:
     def get_all(self, db: Session) -> List[VisionCamera]:
         return db.query(VisionCamera).filter(VisionCamera.is_active == True).all()
 
+    # ✅ NEW
+    def get_all_by_client(self, db: Session, client_id: str) -> List[VisionCamera]:
+        return db.query(VisionCamera).filter(
+            VisionCamera.is_active == True,
+            VisionCamera.client_id == client_id,
+        ).all()
 
 plant_repository = PlantRepository()
 camera_repository = CameraRepository()
