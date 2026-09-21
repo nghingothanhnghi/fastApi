@@ -15,7 +15,11 @@ class VisionService:
         if cv_image is None:
             raise ValueError(f"Could not load image at {image.storage_path}")
 
-        results = inference_manager.run_all(["detection", "health"], cv_image)
+        # V3: added "disease" alongside the V1/V2 "detection"/"health" tasks.
+        # Each task currently runs independently on the same full frame -
+        # see disease_classifier.py's docstring for the known limitation
+        # around not yet cropping to the detector's bbox.
+        results = inference_manager.run_all(["detection", "health", "disease"], cv_image)
 
         predictions = []
         for result in results:

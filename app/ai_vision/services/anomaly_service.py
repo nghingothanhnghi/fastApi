@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.ai_vision.models.plant_anomaly import PlantAnomaly
 from app.ai_vision.models.plant_growth import PlantGrowthRecord
 from app.ai_vision.models.plant_health import PlantHealthRecord
+from app.ai_vision.models.vision_prediction import VisionPrediction
 from app.ai_vision.services.growth_service import growth_service
 from app.ai_vision.repositories.anomaly_repository import anomaly_tracker_repository
 from app.ai_vision import config
@@ -11,11 +12,10 @@ from app.ai_vision import config
 
 class AnomalyService:
     """
-    Debounced threshold checks (V2 increment called out in README.md /
-    PATCH_NOTES.md "known limitations"): a PlantAnomaly is only persisted
-    once the same condition has been observed on
-    config.ANOMALY_DEBOUNCE_COUNT consecutive evaluations for that
-    (plant_id, anomaly_type) pair. A single clean reading resets the streak.
+    Debounced threshold checks: a PlantAnomaly is only persisted once the
+    same condition has been observed on config.ANOMALY_DEBOUNCE_COUNT
+    consecutive evaluations for that (plant_id, anomaly_type) pair. A
+    single clean reading resets the streak.
 
     Debounce state lives in AnomalyTracker (see
     repositories/anomaly_repository.py) so it survives across job runs and
@@ -58,7 +58,7 @@ class AnomalyService:
             severity = "high" if abs(growth_rate) >= (config.GROWTH_ANOMALY_ABS_PCT_PER_DAY * 2) else "medium"
             description = (
                 f"Growth rate is {growth_rate}%/day against a flat (0%/day) baseline "
-                f"across {tracker.consecutive_count} consecutive readings — "
+                f"across {tracker.consecutive_count} consecutive readings - "
                 f"flagged via absolute-change threshold (>= {config.GROWTH_ANOMALY_ABS_PCT_PER_DAY}%/day)"
             )
 
@@ -103,6 +103,49 @@ class AnomalyService:
                 "sensor_snapshot": health_record.sensor_snapshot,
                 "consecutive_readings": tracker.consecutive_count,
             },
+        )
+        anomaly_tracker_repository.mark_triggered(db, tracker)
+        return [anomaly]
+
+    def check_disease(self, db: Session, plant_id: int, disease_prediction: VisionPrediction) -> list[PlantAnomaly]:
+        """
+        V3: same debounce mechanism as check_growth/check_health, applied to
+        the classical-CV disease/pest signal (see
+        ai/inference/disease_classifier.py). A single frame with a stray
+        shadow or leaf overlap won't raise an anomaly - it takes
+        config.ANOMALY_DEBOUNCE_COUNT consecutive readings with the same
+        indicator present.
+        """
+        raw = disease_prediction.raw_output
+        indicators = raw.get("visual_indicators") or []
+        is_anomalous = bool(indicators)
+
+        tracker = anomaly_tracker_repository.record_evaluation(
+            db,
+            plant_id=plant_id,
+            anomaly_type="disease_pest",
+            is_crossing=is_anomalous,
+            value=raw.get("spot_area_ratio"),
+        )
+
+        if not is_anomalous or tracker.consecutive_count < config.ANOMALY_DEBOUNCE_COUNT:
+            return []
+
+        severity = (
+            "high" if ("leaf_spots" in indicators and (raw.get("spot_area_ratio") or 0) > 0.03)
+            else "medium"
+        )
+        description = (
+            f"Leaf disease/pest indicators detected ({', '.join(indicators)}) "
+            f"across {tracker.consecutive_count} consecutive readings "
+            f"(solidity={raw.get('leaf_solidity')}, spot_count={raw.get('spot_count')})"
+        )
+
+        anomaly = self._create(
+            db, plant_id, "disease_pest",
+            severity=severity,
+            description=description,
+            evidence={**raw, "consecutive_readings": tracker.consecutive_count},
         )
         anomaly_tracker_repository.mark_triggered(db, tracker)
         return [anomaly]
