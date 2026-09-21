@@ -10,6 +10,17 @@ AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "plant-detector")
 AI_MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "v1")
 AI_CONFIDENCE_THRESHOLD = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.60"))
 AI_JOB_LEASE_SECONDS = int(os.getenv("AI_JOB_LEASE_SECONDS", "600"))
+# --- V2: real detector / classifier ---
+# Set to "false" to force the V1 mock detector+classifier (useful for local
+# dev without ultralytics/torch/opencv installed, or CI without model
+# downloads).
+AI_USE_REAL_MODELS = os.getenv("AI_USE_REAL_MODELS", "true").lower() in ("true", "1", "yes")
+
+# Ultralytics YOLO weights for the real plant detector. Any COCO-pretrained
+# YOLOv8 checkpoint works out of the box ("potted plant" is a COCO class);
+# point this at a fine-tuned plant/leaf checkpoint later without touching
+# any other code.
+AI_DETECTOR_WEIGHTS = os.getenv("AI_DETECTOR_WEIGHTS", "yolov8n.pt")
 
 PLANT_HEALTH_WARNING_THRESHOLD = int(os.getenv("PLANT_HEALTH_WARNING_THRESHOLD", "70"))
 PLANT_HEALTH_CRITICAL_THRESHOLD = int(os.getenv("PLANT_HEALTH_CRITICAL_THRESHOLD", "50"))
