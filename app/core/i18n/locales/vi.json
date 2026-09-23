@@ -27,6 +27,7 @@
     "not_found": "Không tìm thấy thiết bị điều khiển",
     "created": "Tạo thiết bị điều khiển thành công",
     "updated": "Cập nhật thiết bị điều khiển thành công",
+    "manual_mode_updated":"Cập nhật chế độ thủ công thành công",
     "deleted": "Xóa thiết bị điều khiển thành công"
   },
   "validation": {

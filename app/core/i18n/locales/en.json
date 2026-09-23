@@ -27,6 +27,7 @@
     "not_found": "Actuator not found",
     "created": "Actuator created successfully",
     "updated": "Actuator updated successfully",
+    "manual_mode_updated":"Manual mode updated successfully",
     "deleted": "Actuator deleted successfully"
   },
   "validation": {

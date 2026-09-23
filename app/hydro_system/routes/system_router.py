@@ -2,6 +2,8 @@
 # Description: This module defines the API endpoints for controlling the hydroponic system.
 from fastapi import APIRouter, Query, Depends, Body, Path
 from app.database import get_db
+from app.core.i18n.dependency import get_translator
+from app.core.i18n.translator import Translator
 from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from sqlalchemy.orm import Session
@@ -80,6 +82,7 @@ def set_manual_mode(
     state: Optional[bool] = Body(None, embed=True),  # true / false / null
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    translator: Translator = Depends(get_translator),
 ):
     """
     state:
@@ -94,7 +97,7 @@ def set_manual_mode(
     return {
             "success": True,
             "data": result,
-            "message": "Manual mode updated successfully"
+            "message": translator.t("actuator.manual_mode_updated"),
     }
 
 # --- Scheduler Control ---
