@@ -2,7 +2,7 @@
 
 from typing import Final
 
-DEFAULT_LOCALE: Final = "en"
+DEFAULT_LOCALE: Final = "vi"
 
 SUPPORTED_LOCALES: Final = {
     "en",
