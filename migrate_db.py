@@ -39,6 +39,22 @@ def add_client_id_index(table_name):
     print(f"{table_name}: client_id index ready")
 
 
+def add_rain_raw_column():
+    table_name = "sensor_data"
+
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "rain_raw" in columns:
+        print(f"{table_name}: rain_raw already exists")
+        return
+
+    cursor.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN rain_raw INTEGER"
+    )
+
+    print(f"{table_name}: rain_raw added")
+
 try:
     # Add missing client_id columns
     add_client_id_column("ai_vision_cameras")
@@ -47,6 +63,9 @@ try:
     # Match SQLAlchemy index=True
     add_client_id_index("ai_vision_cameras")
     add_client_id_index("ai_vision_plants")
+
+    # Add rain_raw to sensor_data
+    add_rain_raw_column()
 
     conn.commit()
 

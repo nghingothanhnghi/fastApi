@@ -20,6 +20,9 @@ class SensorData(Base):
     ppm = Column(Float, nullable=True) # Parts Per Million
     rain_detected = Column(Boolean, nullable=True)  # Whether rain is detected
     rain_intensity = Column(Float, nullable=True)   # Intensity of rain detected (e.g., mm/h)
+
+    rain_raw = Column(Integer, nullable=True)  # unconverted analog reading, calibration/debug only
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     device_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=True)
