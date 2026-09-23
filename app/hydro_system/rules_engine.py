@@ -9,6 +9,10 @@ from app.hydro_system.helpers.schedule_helper import (
     get_schedule_context,
     get_utc_now,
 )
+from app.hydro_system.helpers.comparision_helper import (
+    safe_lt,
+    safe_gt,
+)
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,43 +23,41 @@ logger = get_logger(__name__)
 # =========================
 
 def should_refill_water_tank(sensor_data: dict, thresholds: dict) -> bool:
-    """Check if water tank needs refilling"""
-    water_level = sensor_data.get("water_level", 0)
-    return water_level < thresholds.get("water_level_min", 20)
+    return safe_lt(sensor_data.get("water_level"), thresholds.get("water_level_min", 20))
 
 def is_water_level_critical(sensor_data: dict, thresholds: dict) -> bool:
-    """Check if water level is critically low (emergency alert)"""
-    water_level = sensor_data.get("water_level", 0)
-    return water_level < thresholds.get("water_level_critical", 10)
+    return safe_lt(sensor_data.get("water_level"), thresholds.get("water_level_critical", 10))
 
 def get_water_level_status(sensor_data: dict, thresholds: dict) -> dict:
     """Get detailed water level status and recommendations"""
     water_level = sensor_data.get("water_level", 0)
     
+    if water_level is None:
+        return {
+            "status": "unknown",
+            "message": "No water level reading available this cycle.",
+            "priority": "low",
+            "current_level": None,
+            "min_threshold": thresholds.get("water_level_min", 20),
+            "critical_threshold": thresholds.get("water_level_critical", 10),
+        }
+
     if water_level < thresholds.get("water_level_critical", 10):
-        status = "critical"
-        message = "CRITICAL: Water level extremely low! Immediate refill required."
-        priority = "high"
+        status, message, priority = "critical", "CRITICAL: Water level extremely low! Immediate refill required.", "high"
     elif water_level < thresholds.get("water_level_min", 20):
-        status = "low"
-        message = "Water level low. Refill recommended."
-        priority = "medium"
+        status, message, priority = "low", "Water level low. Refill recommended.", "medium"
     elif water_level > 80:
-        status = "optimal"
-        message = "Water level optimal."
-        priority = "low"
+        status, message, priority = "optimal", "Water level optimal.", "low"
     else:
-        status = "adequate"
-        message = "Water level adequate."
-        priority = "low"
-    
+        status, message, priority = "adequate", "Water level adequate.", "low"
+
     return {
         "status": status,
         "message": message,
         "priority": priority,
         "current_level": water_level,
         "min_threshold": thresholds.get("water_level_min", 20),
-        "critical_threshold": thresholds.get("water_level_critical", 10)
+        "critical_threshold": thresholds.get("water_level_critical", 10),
     }
 
 def is_rain_detected(sensor_data: dict) -> bool:
@@ -307,11 +309,11 @@ def check_rules(
         reason = "off"
 
         # 🥇 SAFETY
-        if actuator_type == "fan" and sensor_data.get("temperature", 0) > actuator_thresholds.get("temperature_critical", 35):
+        if actuator_type == "fan" and safe_gt(sensor_data.get("temperature"), actuator_thresholds.get("temperature_critical", 35)):
             final_on = True
             reason = "safety_high_temp"
 
-        elif actuator_type in ["pump", "water_pump", "nutrient_pump"] and sensor_data.get("water_level", 0) < actuator_thresholds.get("water_level_critical", 10):
+        elif actuator_type in ["pump", "water_pump", "nutrient_pump"] and safe_lt(sensor_data.get("water_level"), actuator_thresholds.get("water_level_critical", 10)):
             final_on = False
             reason = "safety_low_water"
 
@@ -428,10 +430,10 @@ def check_rules(
             })        
 
     # Global/system alerts
-    ec = sensor_data.get("ec", 0)
-    ppm = sensor_data.get("ppm", 0)
+    ec = sensor_data.get("ec")
+    ppm = sensor_data.get("ppm")
 
-    if ec > thresholds.get("ec_max", 2.5):
+    if safe_gt(ec, thresholds.get("ec_max", 2.5)):
         alerts.append({
             "type": "warning",
             "message": "EC level high",
@@ -439,7 +441,7 @@ def check_rules(
             "value": ec,
             "action_required": "Dilute with fresh water"
         })
-    elif ec > 0 and ec < thresholds.get("ec_min", 1.2):
+    elif ec is not None and 0 < ec < thresholds.get("ec_min", 1.2):
         alerts.append({
             "type": "info",
             "message": "EC level low",
@@ -448,7 +450,7 @@ def check_rules(
             "action_required": "Nutrient dosing required"
         })
 
-    if ppm > thresholds.get("ppm_max", 1500):
+    if safe_gt(ppm, thresholds.get("ppm_max", 1500)):
         alerts.append({
             "type": "warning",
             "message": "PPM level high",
@@ -456,7 +458,7 @@ def check_rules(
             "value": ppm,
             "action_required": "Dilute with fresh water"
         })
-    elif ppm > 0 and ppm < thresholds.get("ppm_min", 600):
+    elif ppm is not None and 0 < ppm < thresholds.get("ppm_min", 600):
         alerts.append({
             "type": "info",
             "message": "PPM level low",
@@ -504,8 +506,8 @@ def check_rules(
         })
 
     # Compound alert
-    if sensor_data.get("moisture", 0) < thresholds.get("moisture_min", 30) and \
-       sensor_data.get("water_level", 0) < thresholds.get("water_level_min", 20):
+    if safe_lt(sensor_data.get("moisture"), thresholds.get("moisture_min", 30)) and \
+       safe_lt(sensor_data.get("water_level"), thresholds.get("water_level_min", 20)):
         alerts.append({
             "type": "warning",
             "message": "Cannot irrigate: Both soil moisture and water level are low",

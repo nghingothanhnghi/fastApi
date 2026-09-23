@@ -83,6 +83,10 @@ def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
         light=payload.data.light,
         moisture=payload.data.moisture,
         water_level=payload.data.water_level,
+        ec=payload.data.ec,
+        ppm=payload.data.ppm,
+        rain_detected=payload.data.rain_detected,
+        rain_intensity=payload.data.rain_intensity,
         device_id=device.id,   # ✅ Always store DB FK
         created_at=datetime.utcnow(),
     )
@@ -91,12 +95,20 @@ def create_sensor_data(payload: SensorDataCreateSchema, db: Session):
     db.refresh(new_data)
     
     # ✅ Reactive Automation: Run rules immediately on new data
+    # ✅ FIXED — same fields mirrored into the automation-facing dict.
+    # Do NOT default any of these to 0 here — a None must stay None so
+    # check_rules can distinguish "sensor absent this cycle" from "sensor
+    # read zero", per safe_lt/safe_gt below.
     sensor_data_dict = {
         "temperature": new_data.temperature,
         "humidity": new_data.humidity,
         "light": new_data.light,
         "moisture": new_data.moisture,
         "water_level": new_data.water_level,
+        "ec": new_data.ec,
+        "ppm": new_data.ppm,
+        "rain_detected": new_data.rain_detected,
+        "rain_intensity": new_data.rain_intensity,
         "device_id": device.id
     }
     # handle_automation(db, sensor_data_dict, device_id=device.id)

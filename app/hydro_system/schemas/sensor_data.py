@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from typing import Optional, Union
 
@@ -11,6 +11,20 @@ class SensorPayloadSchema(BaseModel):
     ec: Optional[float] = Field(None, description="Electrical Conductivity (mS/cm)", ge=0)
     ppm: Optional[float] = Field(None, description="Parts Per Million", ge=0)
     rain_detected: Optional[bool] = Field(None, description="True if rain sensor detects rain")
+    rain_intensity: Optional[float] = Field(None, ge=0)
+
+    # ✅ NEW — fields your ESP32 actually sends; previously dropped silently
+    # because they weren't declared (Pydantic ignores unknown fields by
+    # default). rain_level_pct feeds rain_intensity if rain_intensity
+    # isn't sent directly; rain_raw is kept for calibration only.
+    rain_level_pct: Optional[float] = Field(None, ge=0, le=100)
+    rain_raw: Optional[int] = Field(None)
+
+    @model_validator(mode="after")
+    def _derive_rain_intensity(self):
+        if self.rain_intensity is None and self.rain_level_pct is not None:
+            self.rain_intensity = self.rain_level_pct
+        return self
 
 class SensorDataSchema(BaseModel):
     id: int
