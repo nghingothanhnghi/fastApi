@@ -1,0 +1,36 @@
+{
+  "common": {
+    "success": "Thành công",
+    "error": "Đã xảy ra lỗi",
+    "not_found": "Không tìm thấy dữ liệu",
+    "invalid_request": "Yêu cầu không hợp lệ",
+    "unauthorized": "Chưa được xác thực",
+    "forbidden": "Bạn không có quyền thực hiện thao tác này"
+  },
+  "auth": {
+    "login_success": "Đăng nhập thành công",
+    "login_failed": "Đăng nhập thất bại",
+    "invalid_credentials": "Tên đăng nhập hoặc mật khẩu không hợp lệ",
+    "user_not_found": "Không tìm thấy người dùng",
+    "email_already_exists": "Email đã tồn tại",
+    "username_already_exists": "Tên đăng nhập đã tồn tại",
+    "account_disabled": "Tài khoản của bạn đã bị vô hiệu hóa"
+  },
+  "device": {
+    "not_found": "Không tìm thấy thiết bị",
+    "created": "Tạo thiết bị thành công",
+    "updated": "Cập nhật thiết bị thành công",
+    "deleted": "Xóa thiết bị thành công",
+    "connected": "Thiết bị {name} đã kết nối"
+  },
+  "actuator": {
+    "not_found": "Không tìm thấy thiết bị điều khiển",
+    "created": "Tạo thiết bị điều khiển thành công",
+    "updated": "Cập nhật thiết bị điều khiển thành công",
+    "deleted": "Xóa thiết bị điều khiển thành công"
+  },
+  "validation": {
+    "required": "{field} là bắt buộc",
+    "invalid": "{field} không hợp lệ"
+  }
+}

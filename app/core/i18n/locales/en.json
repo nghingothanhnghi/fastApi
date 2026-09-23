@@ -1,0 +1,36 @@
+{
+  "common": {
+    "success": "Success",
+    "error": "An error occurred",
+    "not_found": "Resource not found",
+    "invalid_request": "Invalid request",
+    "unauthorized": "Unauthorized",
+    "forbidden": "Forbidden"
+  },
+  "auth": {
+    "login_success": "Login successful",
+    "login_failed": "Login failed",
+    "invalid_credentials": "Invalid username or password",
+    "user_not_found": "User not found",
+    "email_already_exists": "Email already exists",
+    "username_already_exists": "Username already exists",
+    "account_disabled": "Your account is disabled"
+  },
+  "device": {
+    "not_found": "Device not found",
+    "created": "Device created successfully",
+    "updated": "Device updated successfully",
+    "deleted": "Device deleted successfully",
+    "connected": "Device {name} connected"
+  },
+  "actuator": {
+    "not_found": "Actuator not found",
+    "created": "Actuator created successfully",
+    "updated": "Actuator updated successfully",
+    "deleted": "Actuator deleted successfully"
+  },
+  "validation": {
+    "required": "{field} is required",
+    "invalid": "{field} is invalid"
+  }
+}

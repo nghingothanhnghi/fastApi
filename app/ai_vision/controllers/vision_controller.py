@@ -7,6 +7,8 @@ from app.ai_vision.services.growth_service import growth_service
 from app.ai_vision.services.health_service import health_service
 from app.ai_vision.services.anomaly_service import anomaly_service
 from app.ai_vision.services.recommendation_service import recommendation_service
+from app.ai_vision.services.growth_prediction_service import growth_prediction_service  # ⚠️ V5
+from app.ai_vision.services.plant_service import plant_service                          # ⚠️ V5
 from app.ai_vision.models.inference_job import AIInferenceJob
 from app.core.logging_config import get_logger
 
@@ -29,9 +31,13 @@ def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
             growth_record = growth_service.record_growth(db, image, by_task["detection"])
             growth_anomalies = anomaly_service.check_growth(db, growth_record)
 
-        # V3: disease/pest indicators feed into the same debounced anomaly
-        # pipeline as growth/health, then flow into the recommendation below
-        # alongside them.
+            # V5: forward-looking projection, computed off the same growth
+            # record. Read-only forecast — never touches actuator/schedule
+            # write paths (see safety boundary in ai_vision_implementation.md).
+            plant = plant_service.get_plant(db, image.plant_id)
+            if plant:
+                growth_prediction_service.predict_growth(db, plant, growth_record)
+                
         if "disease" in by_task:
             disease_anomalies = anomaly_service.check_disease(db, image.plant_id, by_task["disease"])
 

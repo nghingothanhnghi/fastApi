@@ -7,8 +7,9 @@ from .plant_health import PlantHealthRecord
 from .plant_anomaly import PlantAnomaly
 from .anomaly_tracker import AnomalyTracker
 from .ai_recommendation import AIRecommendation
+from .growth_prediction import PlantGrowthPrediction
 
 __all__ = [
     "VisionPlant", "VisionCamera", "PlantImage", "AIInferenceJob", "VisionPrediction",
-    "PlantGrowthRecord", "PlantHealthRecord", "PlantAnomaly", "AnomalyTracker", "AIRecommendation",
+    "PlantGrowthRecord", "PlantHealthRecord", "PlantAnomaly", "AnomalyTracker", "AIRecommendation", "PlantGrowthPrediction",
 ]

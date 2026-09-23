@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
+from app.core.i18n.middleware import I18nMiddleware
+
 from app.android_system.routes import ( devices_router, tap_router, screen_router, health_router, scheduler_health_router)
 
 from app.user.routes import (user_router, roles_router, auth_router, password_reset_router)
@@ -31,6 +33,7 @@ from app.ai_vision.routes import image_router as ai_image_router
 from app.ai_vision.routes import inference_router as ai_inference_router
 from app.ai_vision.routes import health_router as ai_health_router
 from app.ai_vision.routes import recommendation_router as ai_recommendation_router
+from app.ai_vision.routes import prediction_router as ai_prediction_router  # ⚠️ V5
 from app.ai_vision import config as ai_vision_config
 from app.ai_vision.jobs.inference_job import process_queued_inference_jobs
 
@@ -71,7 +74,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.add_middleware(I18nMiddleware)
+
 app.middleware("http")(catch_exceptions_middleware)
+
 
 
 # -----------------------------------------
@@ -123,7 +131,7 @@ app.include_router(ai_image_router.router)
 app.include_router(ai_inference_router.router)
 app.include_router(ai_health_router.router)
 app.include_router(ai_recommendation_router.router)
-
+app.include_router(ai_prediction_router.router)
 # -----------------------------------------
 # Static File Mounts (profile images, products, etc.)
 # -----------------------------------------
