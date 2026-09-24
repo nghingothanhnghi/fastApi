@@ -2,8 +2,11 @@
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from app.core.logging_config import get_logger 
 
 from .config import DEFAULT_LOCALE, SUPPORTED_LOCALES
+
+logger = get_logger(__name__)
 
 LANG_COOKIE_NAME = "lang"
 LANG_QUERY_PARAM = "lang"
@@ -100,6 +103,13 @@ class I18nMiddleware(BaseHTTPMiddleware):
         call_next,
     ):
         request.state.locale = resolve_locale(request)
+
+        logger.info( 
+            "[i18n] path=%r cookie=%r accept-language=%r resolved=%r", 
+            request.url.path, request.cookies.get(LANG_COOKIE_NAME), 
+            request.headers.get("Accept-Language"), 
+            request.state.locale, 
+        )
 
         response = await call_next(request)
 
