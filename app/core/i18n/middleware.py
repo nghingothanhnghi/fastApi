@@ -5,10 +5,21 @@ from starlette.requests import Request
 
 from .config import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
+LANG_COOKIE_NAME = "lang"
+LANG_QUERY_PARAM = "lang"
 
-def normalize_locale(locale: str | None) -> str:
+
+def normalize_locale(locale: str | None) -> str | None:
+    """
+    Normalize a raw locale string (e.g. "en-US", "vi_VN") to one of our
+    supported language codes, or None if it doesn't match anything we
+    support. Returning None (instead of always falling back to
+    DEFAULT_LOCALE) lets callers that iterate over multiple candidates
+    (see parse_accept_language) correctly skip unsupported entries instead
+    of short-circuiting on the first one.
+    """
     if not locale:
-        return DEFAULT_LOCALE
+        return None
 
     locale = locale.strip().lower()
 
@@ -19,7 +30,7 @@ def normalize_locale(locale: str | None) -> str:
     if language in SUPPORTED_LOCALES:
         return language
 
-    return DEFAULT_LOCALE
+    return None
 
 
 def parse_accept_language(header: str | None) -> str:
@@ -54,10 +65,32 @@ def parse_accept_language(header: str | None) -> str:
     for locale, _ in languages:
         normalized = normalize_locale(locale)
 
-        if normalized in SUPPORTED_LOCALES:
+        if normalized is not None:
             return normalized
 
     return DEFAULT_LOCALE
+
+
+def resolve_locale(request: Request) -> str:
+    """
+    Resolve the locale for this request, in priority order:
+      1. Explicit cookie (persists a user's choice across every request)
+      2. Explicit ?lang= query param (manual/one-off override)
+      3. Accept-Language header (browser default)
+      4. DEFAULT_LOCALE (final fallback)
+    """
+    # 1. Cookie
+    cookie_locale = normalize_locale(request.cookies.get(LANG_COOKIE_NAME))
+    if cookie_locale is not None:
+        return cookie_locale
+
+    # 2. Query param
+    query_locale = normalize_locale(request.query_params.get(LANG_QUERY_PARAM))
+    if query_locale is not None:
+        return query_locale
+
+    # 3. Accept-Language header (falls back to DEFAULT_LOCALE internally)
+    return parse_accept_language(request.headers.get("Accept-Language"))
 
 
 class I18nMiddleware(BaseHTTPMiddleware):
@@ -66,13 +99,7 @@ class I18nMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next,
     ):
-        accept_language = request.headers.get(
-            "Accept-Language"
-        )
-
-        request.state.locale = parse_accept_language(
-            accept_language
-        )
+        request.state.locale = resolve_locale(request)
 
         response = await call_next(request)
 
