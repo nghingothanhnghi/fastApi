@@ -317,10 +317,6 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
-        # elif actuator_type == "sliding_door" and sensor_data.get("rain_intensity", 0) > actuator_thresholds.get("rain_strong_threshold", 10.0):
-        #     final_on = True  # or False, depending on which state = "closed"
-        #     reason = "safety_strong_rain"
-
         elif sensor_data.get("rain_detected", False):
             rain_actions = actuator_thresholds.get("rain_actuator_actions", {})
             rain_action = rain_actions.get(actuator_type, "ignore")
