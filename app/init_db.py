@@ -10,6 +10,7 @@ from .hydro_system.models.growth_stage import GrowthStage
 from .hydro_system.models.growth_recipe import GrowthRecipe
 from .hydro_system.models.schedule import HydroSchedule
 from .hydro_system.models.flow_reading import HydroFlowReading
+from .hydro_system.models.rain_debounce import RainSensorDebounceState   # NEW
 from .hydro_system.models.irrigation import (
     IrrigationSession, ZoneBaselineSettings, WaterEfficiencyAlert,
 )

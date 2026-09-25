@@ -12,6 +12,7 @@ from app.hydro_system.config import DEFAULT_THRESHOLDS, ACTIVE_BATCH_STATUSES
 from app.hydro_system.services.threshold_service import threshold_service
 from app.hydro_system.services.device_service import hydro_device_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
+from app.hydro_system.services.rain_debounce_service import rain_debounce_service
 from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.irrigation import IrrigationSession, IrrigationSessionStatus
@@ -50,10 +51,25 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         actuators = hydro_actuator_service.get_actuators_by_device(db, device.id)
 
         auto_actuators = [a for a in actuators if a.manual_state is None]
-        
+
+        # 🌧 Debounce the raw rain reading before it drives automation -
+        # a single stray/stuck reading no longer flips actuators off. The
+        # raw value stays visible in `sensors` for diagnosis; only the
+        # rules evaluation uses the debounced one.
+        raw_rain_detected = bool(sensor_data.get("rain_detected", False))
+        effective_rain_detected = rain_debounce_service.get_effective_rain_state(
+            db, device.id, raw_rain_detected
+        )
+        sensor_data["rain_detected_effective"] = effective_rain_detected
+        rules_sensor_data = (
+            {**sensor_data, "rain_detected": effective_rain_detected}
+            if effective_rain_detected != raw_rain_detected
+            else sensor_data
+        )
+
         # 3️⃣ Evaluate automation rules based on sensor values and thresholds
         rules_result = check_rules(
-            sensor_data,
+            rules_sensor_data,
             thresholds,
             actuators=auto_actuators,
             recipes=[]

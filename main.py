@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
@@ -53,6 +53,11 @@ from app.cms.jobs.scheduled_publish_job import publish_scheduled_posts_job
 from app.utils.background_tasks import start_hardware_detection_background_tasks
 from app.core import config
 
+from fastapi.responses import JSONResponse
+import traceback, logging
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
 
 # -----------------------------------------
@@ -78,9 +83,13 @@ app.add_middleware(
 
 app.add_middleware(I18nMiddleware)
 
-app.middleware("http")(catch_exceptions_middleware)
+# app.middleware("http")(catch_exceptions_middleware)
 
-
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Exception occurred: {exc}")
+    logger.error(traceback.format_exc())
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 # -----------------------------------------
 # Routers

@@ -13,9 +13,11 @@ from app.hydro_system.services.recipe_engine_service import recipe_engine_servic
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 from app.hydro_system.services.flow_reading_service import flow_reading_service
+from app.hydro_system.services.rain_debounce_service import rain_debounce_service
 
 from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES
 from app.hydro_system.rules_engine import check_rules
+
 
 from app.core.logging_config import get_logger
 
@@ -108,6 +110,21 @@ class AutomationService:
         actions_taken = {}
 
         try:
+
+            # ──────────────────────────────────────────────────────────────
+            # Debounce rain_detected before it can influence control
+            # ──────────────────────────────────────────────────────────────
+            # A single noisy/stuck reading previously forced every
+            # water-related actuator OFF immediately (see the rain branch
+            # in rules_engine.check_rules), bypassing manual and scheduled
+            # control. Require several consecutive agreeing readings
+            # before the effective rain state can flip.
+            raw_rain_detected = bool(sensor_data.get("rain_detected", False))
+            effective_rain_detected = rain_debounce_service.get_effective_rain_state(
+                db, device_id, raw_rain_detected
+            )
+            if effective_rain_detected != raw_rain_detected:
+                sensor_data = {**sensor_data, "rain_detected": effective_rain_detected}
 
             # ──────────────────────────────────────────────────────────────
             # Load active batch + recipes

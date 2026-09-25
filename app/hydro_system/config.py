@@ -30,6 +30,12 @@ DEFAULT_THRESHOLDS = {
     },
 }
 
+# Number of consecutive disagreeing rain_detected readings required before
+# the effective (debounced) rain state flips. Protects against a single
+# noisy, or momentarily-stuck, rain sensor forcing pumps/valves off (or
+# back on) immediately. See services/rain_debounce_service.py.
+RAIN_DEBOUNCE_COUNT = 3
+
 # Optional: Default actuator templates per device type
 # Useful for initial device provisioning or testing
 DEFAULT_ACTUATORS = [
