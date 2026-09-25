@@ -14,23 +14,6 @@ class NutrientPumpRule(ActuatorRule):
         actuator=None
     ) -> bool:
 
-        # ec = sensor_data.get("ec", 0)
-        # ppm = sensor_data.get("ppm", 0)
-
-        # if ec > 0:
-        #     return ec < thresholds.get(
-        #         "ec_min",
-        #         1.2
-        #     )
-
-        # if ppm > 0:
-        #     return ppm < thresholds.get(
-        #         "ppm_min",
-        #         600
-        #     )
-
-        # return False
-
         ec = sensor_data.get("ec")
         ppm = sensor_data.get("ppm")
 

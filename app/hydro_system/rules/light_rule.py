@@ -14,13 +14,6 @@ class LightRule(ActuatorRule):
         actuator=None
     ) -> bool:
 
-        # light = sensor_data.get("light", 0)
-
-        # return light < thresholds.get(
-        #     "light_min",
-        #     300
-        # )
-
         light = sensor_data.get("light")
 
         return safe_lt(light, thresholds.get("light_min", 300))        

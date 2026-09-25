@@ -14,13 +14,6 @@ class FanRule(ActuatorRule):
         actuator=None
     ) -> bool:
 
-        # temperature = sensor_data.get("temperature", 0)
-
-        # return temperature > thresholds.get(
-        #     "temperature_max",
-        #     28
-        # )
-
         temperature = sensor_data.get("temperature")
 
         return safe_gt(temperature, thresholds.get("temperature_max", 28))        

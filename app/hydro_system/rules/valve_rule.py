@@ -18,23 +18,6 @@ class ValveRule(ActuatorRule):
         actuator=None
     ) -> bool:
 
-        # moisture = sensor_data.get("moisture", 0)
-        # water_level = sensor_data.get("water_level", 0)
-
-        # if water_level < thresholds.get(
-        #     "water_level_min",
-        #     20
-        # ):
-        #     logger.warning(
-        #         "Cannot open valve: Water level too low"
-        #     )
-        #     return False
-
-        # return moisture < thresholds.get(
-        #     "moisture_min",
-        #     30
-        # )
-
         moisture = sensor_data.get("moisture")
         water_level = sensor_data.get("water_level")
 
