@@ -10,6 +10,10 @@ from app.ai_vision.services.recommendation_service import recommendation_service
 from app.ai_vision.services.growth_prediction_service import growth_prediction_service  # ⚠️ V5
 from app.ai_vision.services.plant_service import plant_service                          # ⚠️ V5
 from app.ai_vision.models.inference_job import AIInferenceJob
+
+from app.ai_vision.integrations.camera_client import load_image_from_path
+from app.ai_vision.integrations.annotation_client import save_annotated_image
+
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +27,10 @@ def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
     try:
         predictions = vision_service.run_predictions(db, image)
         by_task = {p.task: p for p in predictions}
+
+        # NEW — generate + attach the annotated overlay image
+        cv_image = load_image_from_path(image.storage_path)
+        image.annotated_url = save_annotated_image(cv_image, by_task)
 
         growth_anomalies = []
         disease_anomalies = []

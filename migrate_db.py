@@ -55,6 +55,13 @@ def add_rain_raw_column():
 
     print(f"{table_name}: rain_raw added")
 
+def add_annotated_url_column():
+    cursor.execute("PRAGMA table_info(ai_vision_images)")
+    if "annotated_url" in [r[1] for r in cursor.fetchall()]:
+        return
+    cursor.execute("ALTER TABLE ai_vision_images ADD COLUMN annotated_url TEXT")
+
+
 try:
     # Add missing client_id columns
     add_client_id_column("ai_vision_cameras")
@@ -66,6 +73,8 @@ try:
 
     # Add rain_raw to sensor_data
     add_rain_raw_column()
+
+    add_annotated_url_column()
 
     conn.commit()
 

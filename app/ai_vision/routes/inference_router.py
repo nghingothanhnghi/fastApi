@@ -10,6 +10,8 @@ from app.ai_vision.helpers.access_helper import ensure_plant_access
 from app.ai_vision.services.inference_job_service import inference_job_service
 from app.ai_vision.controllers.vision_controller import run_full_pipeline
 from app.ai_vision.schemas.image_schema import InferenceJobOut
+from app.ai_vision.models.inference_job import AIInferenceJob
+from app.ai_vision.models.image import PlantImage
 
 router = APIRouter(prefix="/api/v1", tags=["AI Vision - Inference"])
 
@@ -19,6 +21,14 @@ def _ensure_image_access(db: Session, image_id: int, current_user: User):
     if plant:
         ensure_plant_access(plant, current_user)
     return image
+
+def _with_image_urls(job: AIInferenceJob, image: PlantImage) -> AIInferenceJob:
+    """Attach the image's URLs onto the job instance (transient, not
+    persisted) so InferenceJobOut can serialize them without a second query
+    from the frontend."""
+    job.public_url = image.public_url
+    job.annotated_url = image.annotated_url
+    return job
 
 @router.post("/vision/analyze/{image_id}", response_model=InferenceJobOut)
 def analyze_image_now(
@@ -32,15 +42,17 @@ def analyze_image_now(
 
     job = inference_job_service.get_or_create_active(db, image)
     if job.status == "processing":
-        return job
+        return _with_image_urls(job, image)
 
     if not inference_job_service.claim(db, job.id):
-        return inference_job_service.get(db, job.id)
+        job = inference_job_service.get(db, job.id)
+        return _with_image_urls(job, image)
 
     job = inference_job_service.get(db, job.id)
     run_full_pipeline(db, job)
     db.refresh(job)
-    return job
+    db.refresh(image)  # pick up annotated_url set inside the pipeline
+    return _with_image_urls(job, image)
 
 
 @router.get("/ai/inference/{job_id}", response_model=InferenceJobOut)
@@ -50,5 +62,5 @@ def get_inference_job(
     current_user: User = Depends(get_current_user),
 ):
     job = image_service.get_job(db, job_id)
-    _ensure_image_access(db, job.image_id, current_user)
-    return job
+    image = _ensure_image_access(db, job.image_id, current_user)
+    return _with_image_urls(job, image)

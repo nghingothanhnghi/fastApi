@@ -12,6 +12,7 @@ class PlantImage(Base):
 
     storage_path = Column(String(500), nullable=False)   # relative/backend key, never a full-res DB blob
     public_url = Column(String(500), nullable=True)
+    annotated_url = Column(String(500), nullable=True)
     image_hash = Column(String(64), nullable=True, index=True)  # sha256, for de-dupe
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
