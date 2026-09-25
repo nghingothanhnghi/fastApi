@@ -1,7 +1,7 @@
 # app/hydro_system/rules/light_rule.py
 
 from .base_rule import ActuatorRule
-
+from app.hydro_system.helpers.comparision_helper import safe_lt
 
 class LightRule(ActuatorRule):
 
@@ -14,9 +14,13 @@ class LightRule(ActuatorRule):
         actuator=None
     ) -> bool:
 
-        light = sensor_data.get("light", 0)
+        # light = sensor_data.get("light", 0)
 
-        return light < thresholds.get(
-            "light_min",
-            300
-        )
+        # return light < thresholds.get(
+        #     "light_min",
+        #     300
+        # )
+
+        light = sensor_data.get("light")
+
+        return safe_lt(light, thresholds.get("light_min", 300))        
