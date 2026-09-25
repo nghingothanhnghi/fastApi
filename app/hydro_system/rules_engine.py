@@ -266,6 +266,14 @@ def check_rules(
         # Check schedule first
         scheduled_on, has_schedule = is_in_schedule(actuator)
 
+        logger.info(
+            "[SCHEDULE RESULT] "
+            f"actuator_id={actuator.id} "
+            f"type={actuator.type} "
+            f"scheduled_on={scheduled_on} "
+            f"has_schedule={has_schedule}"
+        )
+
         # recipe
         recipe = next(
             (r for r in recipes if r.actuator_type == actuator_type),
@@ -274,6 +282,15 @@ def check_rules(
 
         # ✅ INTERVAL
         interval_on, interval_status = is_in_interval(actuator, recipe)
+
+        logger.info(
+            "[INTERVAL RESULT] "
+            f"actuator_id={actuator.id} "
+            f"type={actuator.type} "
+            f"interval_on={interval_on} "
+            f"interval_status={interval_status} "
+            f"recipe={recipe}"
+        )        
 
         oneshot_on, oneshot_status = is_in_oneshot(actuator)
 
@@ -362,18 +379,34 @@ def check_rules(
         # 🟡 SCHEDULE (LOCK MODE)
         elif has_schedule:
             final_on = scheduled_on
-            reason = "schedule"
+            # reason = "schedule"
+            reason = "schedule_on" if scheduled_on else "schedule_off"
 
         # 🔁 INTERVAL (🔥 MAIN CONTROL FOR WATER SYSTEM)
         elif interval_status != "inactive":
             final_on = interval_on
-            reason = "interval"
+            # reason = "interval"
+            reason = "interval_on" if interval_on else "interval_off"
 
         # 🌱 SENSOR
         else:
             final_on = should_activate
-            reason = "sensor" if should_activate else "off"
-        
+            # reason = "sensor" if should_activate else "off"
+            reason = "sensor_on" if should_activate else "sensor_off"
+
+        logger.info(
+            "[FINAL DECISION] "
+            f"actuator_id={actuator_id} "
+            f"type={actuator_type} "
+            f"sensor={should_activate} "
+            f"scheduled_on={scheduled_on} "
+            f"has_schedule={has_schedule} "
+            f"interval={interval_status} "
+            f"manual={manual} "
+            f"rain={sensor_data.get('rain_detected')} "
+            f"final_on={final_on} "
+            f"reason={reason}"
+        )
 
         actions.append({
             "actuator_id": actuator_id,
