@@ -364,13 +364,6 @@ def check_rules(
             final_on = False
             reason = "manual_off"                        
 
-        # ✅ Rain override — distinguishes light rain vs strong rain in the reason
-        # elif actuator_type in ["pump", "water_pump", "valve"] and sensor_data.get("rain_detected", False):
-        #     final_on = False
-        #     rain_intensity = sensor_data.get("rain_intensity", 0) or 0
-        #     strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
-        #     reason = "rain_strong" if rain_intensity >= strong_threshold else "rain_detected"
-
         # 🥉 ONE-SHOT (🔥 NEW)
         elif oneshot_status == "running":
             final_on = True
@@ -380,19 +373,19 @@ def check_rules(
         elif has_schedule:
             final_on = scheduled_on
             # reason = "schedule"
-            reason = "schedule_on" if scheduled_on else "schedule_off"
+            reason = "schedule" if scheduled_on else "schedule_off"
 
         # 🔁 INTERVAL (🔥 MAIN CONTROL FOR WATER SYSTEM)
         elif interval_status != "inactive":
             final_on = interval_on
             # reason = "interval"
-            reason = "interval_on" if interval_on else "interval_off"
+            reason = "interval" if interval_on else "interval_off"
 
         # 🌱 SENSOR
         else:
             final_on = should_activate
             # reason = "sensor" if should_activate else "off"
-            reason = "sensor_on" if should_activate else "sensor_off"
+            reason = "sensor" if should_activate else "sensor_off"
 
         logger.info(
             "[FINAL DECISION] "
