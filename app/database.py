@@ -21,7 +21,15 @@ if not DATABASE_URL:
 # ✅ SQLite-specific connect args
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args=connect_args,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=1800,   # recycle stale connections
+    pool_pre_ping=True,  # detect dead connections before using the
+)
 
 # ✅ SQLite tuning: WAL mode lets readers proceed while a writer commits
 # (instead of blocking every other connection), and busy_timeout makes a
