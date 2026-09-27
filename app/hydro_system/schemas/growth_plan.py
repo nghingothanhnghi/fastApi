@@ -32,6 +32,10 @@ class GrowthPlanOut(GrowthPlanBase):
 
 # 🔥 With nested stages (and their recipes), for a single-call plan view
 class GrowthPlanWithStages(GrowthPlanOut):
+    """ 
+    Growth plan with all stages and their nested recipes. A GrowthPlan belongs to a Plant.
+    GrowthStages belong to this GrowthPlan through plan_id. 
+    """    
     stages: List[GrowthStageOut] = []
 
     model_config = {

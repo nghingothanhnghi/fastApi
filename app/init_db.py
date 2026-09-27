@@ -5,6 +5,7 @@ from .hydro_system.models.device import HydroDevice
 from .hydro_system.models.actuator import HydroActuator
 from .hydro_system.models.sensor_data import SensorData
 from .hydro_system.models.plant import Plant
+from .hydro_system.models.growth_plan import GrowthPlan
 from .hydro_system.models.plant_batch import PlantBatch
 from .hydro_system.models.growth_stage import GrowthStage
 from .hydro_system.models.growth_recipe import GrowthRecipe
