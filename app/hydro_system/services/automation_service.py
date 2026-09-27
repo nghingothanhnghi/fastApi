@@ -41,13 +41,22 @@ class AutomationService:
                 .all()
             )
 
-            stages_by_plant: dict[int, list[GrowthStage]] = {}
+            # ✅ CHANGED — grouped by plan_id (was plant_id). A plant can now
+            # have multiple GrowthPlans (e.g. Tomato/Summer, Tomato/NFT),
+            # each with its own independent day_start/day_end timeline, so
+            # progression must be scoped per-plan rather than per-plant or
+            # two plans' stages would collide when resolving "the" active
+            # stage for a given elapsed day count.
+            stages_by_plan: dict[int, list[GrowthStage]] = {}
 
             for stage in all_stages:
-                stages_by_plant.setdefault(stage.plant_id, []).append(stage)
+                # stages_by_plant.setdefault(stage.plant_id, []).append(stage)
+                if stage.plan_id:
+                    stages_by_plan.setdefault(stage.plan_id, []).append(stage)                
 
             for batch in batches:
-                stages = stages_by_plant.get(batch.plant_id, [])
+                # stages = stages_by_plant.get(batch.plant_id, [])
+                stages = stages_by_plan.get(batch.plan_id, [])
                 old_stage_id = batch.current_stage_id
 
                 plant_batch_service.update_growth_progress(
@@ -104,6 +113,12 @@ class AutomationService:
         - Apply manual overrides
         - Evaluate automation rules
         - Execute state changes
+
+        NOTE: unchanged by multi-plan support. This loop already resolves
+        recipes purely from `batch.current_stage.recipes` (a concrete
+        GrowthStage the batch is currently on), so it has no dependency on
+        plant_id vs plan_id — whichever plan produced that stage, the
+        recipes attached to it are applied exactly the same way.        
         """
 
         alerts = []

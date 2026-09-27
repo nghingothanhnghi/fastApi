@@ -10,10 +10,17 @@ class PlantBatch(Base):
 
     id = Column(Integer, primary_key=True)
     plant_id = Column(Integer, ForeignKey("plants.id"))
+
+    # ✅ NEW — which cultivation plan (of possibly several) this batch
+    # follows for the plant species above. Nullable for backward
+    # compatibility with existing rows / migration backfill.
+    plan_id = Column(Integer, ForeignKey("growth_plans.id"), nullable=True)
+
     current_stage_id = Column(Integer, ForeignKey("growth_stages.id"), nullable=True)
     zone_id = Column(Integer, ForeignKey("devices_hydro.id"), nullable=True)  # link to HydroDevice.id
 
     plant = relationship("Plant")
+    plan = relationship("GrowthPlan")
     current_stage = relationship("GrowthStage")
     device = relationship("HydroDevice")
 

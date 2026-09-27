@@ -6,6 +6,11 @@ from typing import Optional
 
 class BatchCreate(BaseModel):
     plant_id: int
+    # ✅ NEW — which cultivation plan this batch follows. Optional: if
+    # omitted, plant_batch_service.create_batch falls back to the plant's
+    # default plan (see growth_plan_service.get_default_plan_for_plant),
+    # preserving old single-plan-per-plant behavior for existing callers.
+    plan_id: Optional[int] = None    
     current_stage_id: Optional[int] = None
     zone_id: Optional[int] = None
     start_date: date
@@ -14,6 +19,7 @@ class BatchCreate(BaseModel):
 class BatchOut(BaseModel):
     id: int
     plant_id: int
+    plan_id: Optional[int] = None
     current_stage_id: Optional[int]
     zone_id: Optional[int]
     start_date: date
@@ -25,6 +31,7 @@ class BatchOut(BaseModel):
 
 class BatchUpdate(BaseModel):
     plant_id: Optional[int] = None
+    plan_id: Optional[int] = None
     current_stage_id: Optional[int] = None
     zone_id: Optional[int] = None
     start_date: Optional[date] = None
@@ -32,6 +39,7 @@ class BatchUpdate(BaseModel):
 
 class BatchDetail(BatchOut):
     plant_name: Optional[str] = None
+    plan_name: Optional[str] = None
     current_stage_name: Optional[str] = None
     days_growing: Optional[int] = None
 

@@ -3,6 +3,13 @@
 # STEP 1 FIX — Circular import removed:
 #   BEFORE: imported controllers/recipe_engine_controller  ❌
 #   AFTER:  imports services/recipe_engine_service          ✅
+#
+# STEP 2 — Multi-plan support:
+#   A Plant species can now have several GrowthPlans (e.g. Tomato/Summer,
+#   Tomato/Indoor, Tomato/NFT), each owning its own GrowthStage timeline.
+#   PlantBatch.plan_id says which plan a given batch follows; all
+#   stage-progression lookups below are scoped by plan_id instead of
+#   plant_id so two plans' day_start/day_end ranges never collide.
 
 from sqlalchemy.orm import Session, joinedload
 from datetime import date
@@ -12,6 +19,7 @@ from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.schemas.batch import BatchCreate, BatchDetail
 from app.hydro_system.services.growth_recipe_service import growth_recipe_service
+from app.hydro_system.services.growth_plan_service import growth_plan_service
 # ✅ service imports service — no controller import
 from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.core.logging_config import get_logger
@@ -22,7 +30,17 @@ logger = get_logger(__name__)
 class PlantBatchService:
 
     def create_batch(self, db: Session, batch_in: BatchCreate) -> PlantBatch:
-        batch = PlantBatch(**batch_in.dict())
+        data = batch_in.dict()
+
+        # ✅ NEW — if the caller didn't pick a cultivation plan, fall back to
+        # the plant's default plan (or its earliest plan). Keeps existing
+        # callers working unchanged for plants that only have one plan.
+        if not data.get("plan_id"):
+            default_plan = growth_plan_service.get_default_plan_for_plant(db, data["plant_id"])
+            if default_plan:
+                data["plan_id"] = default_plan.id
+
+        batch = PlantBatch(**data)
         db.add(batch)
         db.commit()
         db.refresh(batch)
@@ -62,11 +80,13 @@ class PlantBatchService:
         return BatchDetail(
             id=batch.id,
             plant_id=batch.plant_id,
+            plan_id=batch.plan_id,
             current_stage_id=batch.current_stage_id,
             zone_id=batch.zone_id,
             start_date=batch.start_date,
             status=batch.status,
             plant_name=batch.plant.name if batch.plant else None,
+            plan_name=batch.plan.name if batch.plan else None,
             current_stage_name=batch.current_stage.name if batch.current_stage else None,
             days_growing=(
                 (date.today() - batch.start_date).days if batch.start_date else None
@@ -80,22 +100,27 @@ class PlantBatchService:
             db.query(PlantBatch)
             .options(
                 joinedload(PlantBatch.plant),
+                joinedload(PlantBatch.plan),
                 joinedload(PlantBatch.current_stage),
                 joinedload(PlantBatch.device),
             )
             .all()
         )
 
-        # Load all stages in one query, grouped by plant_id
-        stages_by_plant: dict[int, list] = {}
+        # Load all stages in one query, grouped by plan_id (was plant_id) —
+        # a plant can now have multiple cultivation plans, each with its own
+        # possibly-overlapping day_start/day_end ranges, so progression must
+        # be scoped to the plan a batch actually follows.
+        stages_by_plan: dict[int, list] = {}
         for stage in (
             db.query(GrowthStage).order_by(GrowthStage.day_start.asc()).all()
         ):
-            stages_by_plant.setdefault(stage.plant_id, []).append(stage)
+            if stage.plan_id:
+                stages_by_plan.setdefault(stage.plan_id, []).append(stage)
 
         for batch in batches:
             self.update_growth_progress(
-                db, batch, stages_by_plant.get(batch.plant_id, [])
+                db, batch, stages_by_plan.get(batch.plan_id, [])
             )
 
         db.commit()
@@ -110,6 +135,7 @@ class PlantBatchService:
             db.query(PlantBatch)
             .options(
                 joinedload(PlantBatch.plant),
+                joinedload(PlantBatch.plan),
                 joinedload(PlantBatch.current_stage),
             )
             .filter(PlantBatch.id == batch_id)
@@ -118,9 +144,10 @@ class PlantBatchService:
         if not batch:
             return None
 
+        # ✅ scoped by plan_id (was plant_id) — see get_all_batches_detail
         stages = (
             db.query(GrowthStage)
-            .filter(GrowthStage.plant_id == batch.plant_id)
+            .filter(GrowthStage.plan_id == batch.plan_id)
             .order_by(GrowthStage.day_start.asc())
             .all()
         )

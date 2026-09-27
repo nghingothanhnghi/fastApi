@@ -4,25 +4,59 @@ from typing import List, Optional
 from app.hydro_system.models.growth_recipe import GrowthRecipe
 from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageWithRecipesUpdate
+from app.hydro_system.services.growth_plan_service import growth_plan_service
 
 class GrowthStageService:
+    # def create_stage(self, db: Session, stage_in: GrowthStageCreate) -> GrowthStage:
+    #     stage = GrowthStage(**stage_in.dict())
+    #     db.add(stage)
+    #     db.commit()
+    #     db.refresh(stage)
+    #     return stage
+
     def create_stage(self, db: Session, stage_in: GrowthStageCreate) -> GrowthStage:
-        stage = GrowthStage(**stage_in.dict())
+        # ✅ plant_id is derived from the plan, not passed in directly, so a
+        # stage can never be created under a plan/plant mismatch.
+        plan = growth_plan_service.get_plan(db, stage_in.plan_id)
+        if not plan:
+            raise ValueError(f"Growth plan {stage_in.plan_id} not found")
+
+        stage = GrowthStage(
+            plan_id=plan.id,
+            plant_id=plan.plant_id,
+            **stage_in.dict(exclude={"plan_id"}),
+        )
         db.add(stage)
         db.commit()
         db.refresh(stage)
-        return stage
+        return stage    
 
     def get_stage(self, db: Session, stage_id: int) -> Optional[GrowthStage]:
         return db.query(GrowthStage).filter(GrowthStage.id == stage_id).first()
 
-    def get_stages_by_plant(self, db: Session, plant_id: int):
+    def get_stages_by_plant(self, db: Session, plant_id: int):        
+        """
+        Admin / back-compat listing across ALL plans of a plant. Progression
+        logic (batches, automation) must use get_stages_by_plan instead,
+        since two plans for the same plant can have overlapping
+        day_start/day_end ranges and mixing them would break stage
+        resolution.
+        """        
         return (
             db.query(GrowthStage)
             .options(joinedload(GrowthStage.recipes))
             .filter(GrowthStage.plant_id == plant_id)
             .all()
         )
+
+    def get_stages_by_plan(self, db: Session, plan_id: int):
+        return (
+            db.query(GrowthStage)
+            .options(joinedload(GrowthStage.recipes))
+            .filter(GrowthStage.plan_id == plan_id)
+            .order_by(GrowthStage.day_start.asc())
+            .all()
+        )    
     
     def update_stage(self, db: Session, stage_id: int, updates: dict) -> Optional[GrowthStage]:
         stage = self.get_stage(db, stage_id)
