@@ -9,7 +9,9 @@ from app.hydro_system.schemas.growth_plan import (
     GrowthPlanCreate,
     GrowthPlanOut,
     GrowthPlanUpdate,
+    GrowthPlanWithStages,
 )
+from app.hydro_system.schemas.growth_stage import GrowthStageOut
 from app.hydro_system.services.growth_plan_service import growth_plan_service
 from app.hydro_system.services.growth_stage_service import growth_stage_service
 from app.core.logging_config import get_logger

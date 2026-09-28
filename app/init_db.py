@@ -33,7 +33,7 @@ from .auth_provider.models.external_identity import ExternalIdentity
 # --- AI Vision module ---
 from .ai_vision.models import (
     VisionPlant, VisionCamera, PlantImage, AIInferenceJob,
-    VisionPrediction, PlantGrowthRecord, PlantHealthRecord, PlantAnomaly, AIRecommendation,
+    VisionPrediction, PlantGrowthRecord, PlantHealthRecord, PlantAnomaly, AnomalyTracker, AIRecommendation, PlantGrowthPrediction,
 )
 
 def init_db():
