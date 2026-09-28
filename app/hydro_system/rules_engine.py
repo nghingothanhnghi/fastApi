@@ -2,7 +2,7 @@
 # Description: Rules engine to determine actions based on sensor data
 import app.hydro_system.rules
 from app.hydro_system.rules.registry import get_rule
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from app.hydro_system.config import DEFAULT_THRESHOLDS
 from app.hydro_system.services.threshold_service import threshold_service
 from app.hydro_system.helpers.schedule_helper import (
@@ -180,22 +180,48 @@ def is_in_interval(actuator, recipe=None) -> tuple[bool, str]:
     # last log
     last_log = None
     if hasattr(actuator, "logs") and actuator.logs:
-        last_log = sorted(actuator.logs, key=lambda x: x.timestamp, reverse=True)[0]
+        last_log = sorted(
+            actuator.logs, 
+            key=lambda x: x.timestamp, 
+            reverse=True,
+        )[0]
 
     if not last_log:
         return True, "active_on"
 
     # diff_min = (now - last_log.timestamp).total_seconds() / 60
-    diff_min = (
-        utc_now - last_log.timestamp
-    ).total_seconds() / 60
+    # diff_min = (
+    #     utc_now - last_log.timestamp
+    # ).total_seconds() / 60
+
+    # last_state = (last_log.state or "OFF").upper()
+
+    # if last_state == "ON":
+    #     return (diff_min < on_min), "active_on" if diff_min < on_min else "active_off"
+    # else:
+    #     return (diff_min >= off_min), "active_on" if diff_min >= off_min else "active_off"
+
+    ts = last_log.timestamp
+
+    # Normalize legacy/database naive timestamps to UTC-aware
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    diff_min = (utc_now - ts).total_seconds() / 60
 
     last_state = (last_log.state or "OFF").upper()
 
     if last_state == "ON":
-        return (diff_min < on_min), "active_on" if diff_min < on_min else "active_off"
+        return (
+            diff_min < on_min,
+            "active_on" if diff_min < on_min else "active_off",
+        )
     else:
-        return (diff_min >= off_min), "active_on" if diff_min >= off_min else "active_off"
+        return (
+            diff_min >= off_min,
+            "active_on" if diff_min >= off_min else "active_off",
+        )
+
     
 def is_in_oneshot(actuator) -> tuple[bool, str]:
     """
@@ -325,6 +351,10 @@ def check_rules(
         final_on = False
         reason = "off"
 
+        # Rain action for this specific actuator
+        rain_actions = actuator_thresholds.get("rain_actuator_actions", {})
+        rain_action = rain_actions.get(actuator_type, "ignore")        
+
         # 🥇 SAFETY
         if actuator_type == "fan" and safe_gt(sensor_data.get("temperature"), actuator_thresholds.get("temperature_critical", 35)):
             final_on = True
@@ -334,17 +364,35 @@ def check_rules(
             final_on = False
             reason = "safety_low_water"
 
-        elif sensor_data.get("rain_detected", False):
-            rain_actions = actuator_thresholds.get("rain_actuator_actions", {})
-            rain_action = rain_actions.get(actuator_type, "ignore")
+        # elif sensor_data.get("rain_detected", False):
+        #     rain_actions = actuator_thresholds.get("rain_actuator_actions", {})
+        #     rain_action = rain_actions.get(actuator_type, "ignore")
 
-            if rain_action != "ignore":
-                rain_intensity = sensor_data.get("rain_intensity", 0) or 0
-                strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
-                is_strong = rain_intensity >= strong_threshold
+        #     if rain_action != "ignore":
+        #         rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+        #         strong_threshold = actuator_thresholds.get("rain_strong_threshold", 10.0)
+        #         is_strong = rain_intensity >= strong_threshold
 
-                final_on = (rain_action == "on")
-                reason = f"rain_strong_{rain_action}" if is_strong else f"rain_light_{rain_action}"        
+        #         final_on = (rain_action == "on")
+        #         reason = f"rain_strong_{rain_action}" if is_strong else f"rain_light_{rain_action}"        
+
+        # 🌧️ RAIN
+        # Only enter this priority branch when rain has an actual
+        # action configured for this actuator.
+        elif sensor_data.get("rain_detected", False) and rain_action != "ignore":
+            rain_intensity = sensor_data.get("rain_intensity", 0) or 0
+            strong_threshold = actuator_thresholds.get(
+                "rain_strong_threshold",
+                10.0,
+            )
+            is_strong = rain_intensity >= strong_threshold
+
+            final_on = rain_action == "on"
+            reason = (
+                f"rain_strong_{rain_action}"
+                if is_strong
+                else f"rain_light_{rain_action}"
+            )
 
         # ✅ NEW — per-actuator flow safety check
         elif (
