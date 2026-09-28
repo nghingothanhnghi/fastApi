@@ -9,12 +9,10 @@ from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.actuator import HydroActuator
 
 from app.hydro_system.services.plant_batch_service import plant_batch_service
-# from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 from app.hydro_system.services.flow_reading_service import flow_reading_service
 from app.hydro_system.services.rain_debounce_service import rain_debounce_service
-from app.hydro_system.services.schedule_service import hydro_schedule_service
 
 from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES, ACTIVE_BATCH_STATUSES
 from app.hydro_system.rules_engine import check_rules
@@ -41,109 +39,43 @@ class AutomationService:
                 .all()
             )
 
-            # Group stages by growth plan.
-            #
             # A plant can have multiple GrowthPlans, each with its own
-            # independent growth timeline.
+            # independent timeline: group stages by plan.
             stages_by_plan: dict[int, list[GrowthStage]] = {}
-
             for stage in all_stages:
                 if stage.plan_id:
                     stages_by_plan.setdefault(stage.plan_id, []).append(stage)
 
             for batch in batches:
-                stages = stages_by_plan.get(batch.plan_id, [])
-
                 old_stage_id = batch.current_stage_id
                 old_status = batch.status
 
+                # update_growth_progress() owns everything: stage resolution,
+                # applying recipes, clearing stale plant_auto schedules (empty
+                # stage / batch leaving the active lifecycle), and skipping
+                # manually finished (harvested/failed) or plan-less batches.
                 plant_batch_service.update_growth_progress(
                     db,
                     batch,
-                    stages,
+                    stages_by_plan.get(batch.plan_id, []),
                 )
 
-                new_stage_id = batch.current_stage_id
-                new_status = batch.status
-
-                # ==============================================================
-                # 🌱 GROWTH STAGE CHANGE
-                # ==============================================================
-                if old_stage_id != new_stage_id:
-                    current_stage = next(
-                        (
-                            stage
-                            for stage in stages
-                            if stage.id == new_stage_id
-                        ),
-                        None,
-                    )
-
+                if old_stage_id != batch.current_stage_id:
                     logger.info(
                         f"[GrowthCycle] batch={batch.id} "
-                        f"stage {old_stage_id} → {new_stage_id}"
+                        f"stage {old_stage_id} → {batch.current_stage_id}"
                     )
-
-                # update_growth_progress() already applies recipes when
-                # the new stage has recipes. Do NOT call
-                # apply_stage_recipes() here again, otherwise schedules
-                # are duplicated.
-                #
-                # However, when the new stage has NO recipes (or the
-                # stage becomes None), there is nothing inside the recipe
-                # engine to trigger the cleanup. Remove the old plant_auto
-                # schedules explicitly.
-                if (
-                    batch.zone_id
-                    and (
-                        current_stage is None
-                        or not current_stage.recipes
-                    )
-                ):
-                    deleted = (
-                        hydro_schedule_service
-                        .delete_by_device_and_source(
-                            db=db,
-                            device_id=batch.zone_id,
-                            source="plant_auto",
-                        )
-                    )
-
+                if old_status != batch.status:
                     logger.info(
                         f"[GrowthCycle] batch={batch.id} "
-                        f"stage changed to "
-                        f"'{current_stage.name if current_stage else 'None'}' "
-                        f"with no recipes; "
-                        f"cleared plant_auto schedules "
-                        f"for device={batch.zone_id}"
-                    )
-
-                # ==============================================================
-                # 🛑 BATCH LEAVES ACTIVE LIFECYCLE
-                # ==============================================================
-                if (
-                    old_status in ACTIVE_BATCH_STATUSES
-                    and new_status not in ACTIVE_BATCH_STATUSES
-                    and batch.zone_id
-                ):
-                    hydro_schedule_service.delete_by_device_and_source(
-                        db=db,
-                        device_id=batch.zone_id,
-                        source="plant_auto",
-                    )
-
-                    logger.info(
-                        f"[GrowthCycle] batch={batch.id} "
-                        f"status {old_status} → {new_status}; "
-                        f"cleared plant_auto schedules "
-                        f"for device={batch.zone_id}"
+                        f"status {old_status} → {batch.status}"
                     )
 
             db.commit()
 
         except Exception:
             db.rollback()
-            raise        
+            raise      
 
     # ──────────────────────────────────────────────────────────────────────
     # ⚡ REAL-TIME AUTOMATION LOOP

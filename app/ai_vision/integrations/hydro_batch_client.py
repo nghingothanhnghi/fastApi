@@ -22,22 +22,29 @@ class HydroBatchClient:
             "zone_id": batch.zone_id,        # == HydroDevice.id
             "status": batch.status,
         }
+    
     def get_batch_growth_timeline(self, db: Session, batch_id: int) -> Optional[dict]:
         """
         V5: read-only batch timing + stage window, used to project a
         stage-transition date against vision-measured growth rate. Never
         writes back to hydro_system.
+
+        Scoped by the batch's growth PLAN (not plant): two plans of the same
+        plant can have overlapping day ranges, so mixing them would produce a
+        wrong "next stage" / stage end.
         """
         batch = db.query(PlantBatch).filter(PlantBatch.id == batch_id).first()
         if not batch:
             return None
 
-        stages = (
-            db.query(GrowthStage)
-            .filter(GrowthStage.plant_id == batch.plant_id)
-            .order_by(GrowthStage.day_start.asc())
-            .all()
-        )
+        stages = []
+        if batch.plan_id:
+            stages = (
+                db.query(GrowthStage)
+                .filter(GrowthStage.plan_id == batch.plan_id)
+                .order_by(GrowthStage.day_start.asc())
+                .all()
+            )
 
         current_stage = None
         next_stage = None
@@ -55,7 +62,7 @@ class HydroBatchClient:
             "current_stage_name": current_stage.name if current_stage else None,
             "current_stage_day_end": current_stage.day_end if current_stage else None,
             "next_stage_day_start": next_stage.day_start if next_stage else None,
-        }    
+        } 
 
 
 hydro_batch_client = HydroBatchClient()

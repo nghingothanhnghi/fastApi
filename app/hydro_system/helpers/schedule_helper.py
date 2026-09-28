@@ -1,6 +1,6 @@
 # app/hydro_system/helpers/schedule_helper.py
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from zoneinfo import ZoneInfo
 
 from app.hydro_system.config import TIMEZONE
@@ -17,6 +17,14 @@ def get_local_now() -> datetime:
     """
     return datetime.now(timezone.utc).astimezone(LOCAL_TZ)
 
+def get_local_today() -> date:
+    """
+    Current local calendar date (Asia/Ho_Chi_Minh).
+
+    Used for batch growth progression (days_growing) so it does not flip
+    at 07:00 local time when the server runs in UTC.
+    """
+    return get_local_now().date()
 
 def get_utc_now() -> datetime:
     """

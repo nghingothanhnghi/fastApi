@@ -17,7 +17,7 @@ from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.irrigation import IrrigationSession, IrrigationSessionStatus
 from sqlalchemy.orm import joinedload
-from datetime import date
+from app.hydro_system.helpers.schedule_helper import get_local_today
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -138,6 +138,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         batch_info = None
         batch = db.query(PlantBatch).options(
             joinedload(PlantBatch.plant),
+            joinedload(PlantBatch.plan),
             joinedload(PlantBatch.current_stage)
         ).filter(
             PlantBatch.zone_id == device.id,
@@ -145,16 +146,18 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
         ).first()
 
         if batch:
-            days_growing = (date.today() - batch.start_date).days
+            days_growing = (get_local_today() - batch.start_date).days
 
-              # ✅ NEW: load stages with recipes
-            stages = db.query(GrowthStage).options(
-                joinedload(GrowthStage.recipes)
-            ).filter(
-                GrowthStage.plant_id == batch.plant_id
-            ).order_by(GrowthStage.day_start).all()
+            # Stages of the batch's OWN plan only (a plant can have several
+            # plans with overlapping day ranges). No plan -> no timeline.
+            stages = []
+            if batch.plan_id:
+                stages = db.query(GrowthStage).options(
+                    joinedload(GrowthStage.recipes)
+                ).filter(
+                    GrowthStage.plan_id == batch.plan_id
+                ).order_by(GrowthStage.day_start).all()
 
-            # ✅ serialize stages
             stages_data = [
                 {
                     "id": s.id,
@@ -180,14 +183,14 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
             batch_info = {
                 "id": batch.id,
                 "plant_name": batch.plant.name if batch.plant else "Unknown",
+                "plan_id": batch.plan_id,
+                "plan_name": batch.plan.name if batch.plan else None,
                 "start_date": batch.start_date,
                 "days_growing": days_growing,
 
-                # ✅ stage info
                 "current_stage": batch.current_stage.name if batch.current_stage else "None",
                 "current_stage_id": batch.current_stage.id if batch.current_stage else None,
 
-                # ✅ timeline
                 "stages": stages_data,
 
                 "status": batch.status

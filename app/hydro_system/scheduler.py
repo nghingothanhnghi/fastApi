@@ -45,11 +45,14 @@ def start_sensor_job():
 def start_batch_stage_job():
     """
     Update plant batch stages automatically.
+    Runs once immediately (so a restart re-syncs stages/schedules right away),
+    then every 12 hours.
     """
     add_job(
         update_batch_stages,
         job_id=BATCH_STAGE_JOB_ID,
         job_name="Batch Stage Update Job",
+        run_immediately=True,
         hours=12,
     )
 

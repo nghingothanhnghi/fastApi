@@ -3,6 +3,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from tzlocal import get_localzone
+from datetime import datetime
 import threading
 import logging
 
@@ -49,10 +50,14 @@ def start_scheduler():
             scheduler.start()
             print("[Scheduler] Started.")
 
-def add_job(func, job_id: str, job_name: str = None, **kwargs):
+def add_job(func, job_id: str, job_name: str = None, run_immediately: bool = False, **kwargs):
     """
-    Register a job with an interval trigger. 
+    Register a job with an interval trigger.
     Accepts interval parameters like seconds=60, minutes=5, hours=12.
+
+    run_immediately=True fires the job once right away (first run) instead of
+    waiting a full interval. Without it a 12h job would not run for 12h after
+    every restart.
     """
     with scheduler_lock:
         existing = scheduler.get_job(job_id)
@@ -60,7 +65,17 @@ def add_job(func, job_id: str, job_name: str = None, **kwargs):
             logger.info(f"[Scheduler] Job '{job_id}' already exists.")
             return
 
-        scheduler.add_job(func, IntervalTrigger(**kwargs), id=job_id, replace_existing=True)
+        extra = {}
+        if run_immediately:
+            extra["next_run_time"] = datetime.now(scheduler.timezone)
+
+        scheduler.add_job(
+            func,
+            IntervalTrigger(**kwargs),
+            id=job_id,
+            replace_existing=True,
+            **extra,
+        )
         JOB_REGISTRY[job_id] = {
             "id": job_id,
             "name": job_name or job_id

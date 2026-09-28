@@ -5,11 +5,14 @@
 #       No service may import a controller.
 
 from datetime import time
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.schedule_service import hydro_schedule_service
 from app.hydro_system.models.schedule import HydroSchedule
+from app.hydro_system.models.plant_batch import PlantBatch
+from app.hydro_system.models.growth_stage import GrowthStage
+from app.hydro_system.config import ACTIVE_BATCH_STATUSES
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +28,7 @@ class RecipeEngineService:
     Responsibilities:
     - Delete old plant-auto schedules for a device zone.
     - Create new schedules derived from a growth stage's recipe list.
+    - Re-apply schedules when recipes / actuators change under a running batch.
 
     No HTTP, no FastAPI dependencies — pure DB logic.
 
@@ -42,8 +46,6 @@ class RecipeEngineService:
         4. Caller commits.
         """
         if batch.zone_id is None:
-            # Without this, device_id=None would skip the device filter in
-            # get_active_actuators_by_type and schedule EVERY device's actuators.
             logger.warning(
                 f"[RecipeEngine] Batch {batch.id} has no zone_id — "
                 f"no schedules applied."
@@ -60,12 +62,61 @@ class RecipeEngineService:
             self._apply_single_recipe(db, batch, recipe)
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Re-apply helpers (recipe / actuator edits under a running batch)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def reapply_for_stage(self, db: Session, stage_id: int) -> None:
+        """
+        Regenerate plant_auto schedules for every ACTIVE batch currently on
+        this stage. Call after a recipe of that stage was created/updated/
+        deleted. Caller commits.
+        """
+        stage = (
+            db.query(GrowthStage)
+            .options(joinedload(GrowthStage.recipes))
+            .filter(GrowthStage.id == stage_id)
+            .first()
+        )
+        if not stage:
+            return
+
+        batches = (
+            db.query(PlantBatch)
+            .filter(
+                PlantBatch.current_stage_id == stage_id,
+                PlantBatch.status.in_(ACTIVE_BATCH_STATUSES),
+            )
+            .all()
+        )
+        for batch in batches:
+            self.apply_stage_recipes(db, batch, stage.recipes)
+
+    def reapply_for_device(self, db: Session, device_id: int) -> None:
+        """
+        Regenerate plant_auto schedules for the active batch on one device.
+        Call after actuators of that device were added/changed, so they pick
+        up the current stage's recipes immediately. Caller commits.
+        """
+        batch = (
+            db.query(PlantBatch)
+            .options(
+                joinedload(PlantBatch.current_stage).joinedload(GrowthStage.recipes)
+            )
+            .filter(
+                PlantBatch.zone_id == device_id,
+                PlantBatch.status.in_(ACTIVE_BATCH_STATUSES),
+            )
+            .first()
+        )
+        if batch and batch.current_stage:
+            self.apply_stage_recipes(db, batch, batch.current_stage.recipes)
+
+    # ──────────────────────────────────────────────────────────────────────────
     # Internal helpers
     # ──────────────────────────────────────────────────────────────────────────
 
     def _apply_single_recipe(self, db: Session, batch, recipe) -> None:
         """Build HydroSchedule rows for one recipe and bulk-insert them."""
-        # Also guarded here: the controller shim exposes this directly.
         if batch.zone_id is None:
             logger.warning(
                 f"[RecipeEngine] Batch {batch.id} has no zone_id — "
