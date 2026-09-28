@@ -1,12 +1,5 @@
 # app/hydro_system/services/recipe_engine_service.py
 #
-# Previously: controllers/recipe_engine_controller.py
-#
-# WHY MOVED: automation_service and plant_batch_service (both services) were
-# importing from a controller, which inverted the dependency direction and
-# created a circular import risk.  Recipe-engine logic has zero HTTP concerns —
-# it only touches DB models — so it belongs in the service layer.
-#
 # RULE: services → models/schemas only.
 #       controllers → services only.
 #       No service may import a controller.
@@ -34,32 +27,37 @@ class RecipeEngineService:
     - Create new schedules derived from a growth stage's recipe list.
 
     No HTTP, no FastAPI dependencies — pure DB logic.
+
+    TRANSACTIONS: this service never commits or rolls back. The caller owns
+    the transaction (delete + inserts land together, or not at all).
     """
 
     def apply_stage_recipes(self, db: Session, batch, recipes: list) -> None:
         """
         Apply all recipes for a growth stage to the batch's zone (device).
 
-        Steps:
-        1. Delete all existing plant_auto schedules for the zone in ONE query.
-        2. Create new schedules from the recipe list (no per-recipe delete).
-        3. Caller is responsible for commit (keeps transaction control outside).
+        1. Guard: a batch with no zone has nowhere to schedule.
+        2. Delete existing plant_auto schedules for the zone in ONE query.
+        3. Create new schedules from the recipe list.
+        4. Caller commits.
         """
-        try:
-            # Step 1 — wipe old auto schedules once for the whole zone
-            hydro_schedule_service.delete_by_device_and_source(
-                db=db,
-                device_id=batch.zone_id,
-                source=SCHEDULE_SOURCE_PLANT_AUTO,
+        if batch.zone_id is None:
+            # Without this, device_id=None would skip the device filter in
+            # get_active_actuators_by_type and schedule EVERY device's actuators.
+            logger.warning(
+                f"[RecipeEngine] Batch {batch.id} has no zone_id — "
+                f"no schedules applied."
             )
+            return
 
-            # Step 2 — create new schedules for each recipe
-            for recipe in recipes:
-                self._apply_single_recipe(db, batch, recipe)
+        hydro_schedule_service.delete_by_device_and_source(
+            db=db,
+            device_id=batch.zone_id,
+            source=SCHEDULE_SOURCE_PLANT_AUTO,
+        )
 
-        except Exception:
-            db.rollback()
-            raise
+        for recipe in recipes:
+            self._apply_single_recipe(db, batch, recipe)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Internal helpers
@@ -67,6 +65,14 @@ class RecipeEngineService:
 
     def _apply_single_recipe(self, db: Session, batch, recipe) -> None:
         """Build HydroSchedule rows for one recipe and bulk-insert them."""
+        # Also guarded here: the controller shim exposes this directly.
+        if batch.zone_id is None:
+            logger.warning(
+                f"[RecipeEngine] Batch {batch.id} has no zone_id — "
+                f"recipe skipped."
+            )
+            return
+
         actuators = hydro_actuator_service.get_active_actuators_by_type(
             db=db,
             actuator_type=recipe.actuator_type,
@@ -143,3 +149,4 @@ class RecipeEngineService:
 
 # Singleton
 recipe_engine_service = RecipeEngineService()
+

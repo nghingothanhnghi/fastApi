@@ -69,17 +69,27 @@ def set_batch_stage(batch_id: int, stage_id: int, db: Session = Depends(get_db))
     batch = plant_batch_service.get_batch(db, batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
-    
+
     stage = growth_stage_service.get_stage(db, stage_id)
     if not stage:
         raise HTTPException(status_code=404, detail="Growth stage not found")
-    
-    # Update batch current stage
-    plant_batch_service.update_batch(db, batch_id, {"current_stage_id": stage_id})
-    
-    # Apply all recipes for this stage
-    recipe_engine_controller.apply_stage_recipes(db, batch, stage.recipes)
-        
+
+    try:
+        # Set directly instead of plant_batch_service.update_batch(), which
+        # commits on its own. That would make the stage change durable before
+        # the schedules are rewritten, so a failure in between would leave the
+        # stage changed but with no (or stale) schedules.
+        batch.current_stage_id = stage_id
+
+        # Deletes old plant_auto schedules and adds the new ones (no commit inside).
+        recipe_engine_controller.apply_stage_recipes(db, batch, stage.recipes)
+
+        # Single commit: stage change + schedule rewrite land together.
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
     return {"message": f"Stage {stage.name} applied to batch {batch_id}"}
 
 # Growth Stage Routes

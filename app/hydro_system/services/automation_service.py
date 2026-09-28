@@ -9,13 +9,13 @@ from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.actuator import HydroActuator
 
 from app.hydro_system.services.plant_batch_service import plant_batch_service
-from app.hydro_system.services.recipe_engine_service import recipe_engine_service
+# from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.services.actuator_log_service import log_actuator_action
 from app.hydro_system.services.flow_reading_service import flow_reading_service
 from app.hydro_system.services.rain_debounce_service import rain_debounce_service
 
-from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES
+from app.hydro_system.config import SUPPORTED_ACTUATOR_TYPES, ACTIVE_BATCH_STATUSES
 from app.hydro_system.rules_engine import check_rules
 
 
@@ -67,26 +67,33 @@ class AutomationService:
 
                 if old_stage_id != batch.current_stage_id:
 
-                    current_stage = next(
-                        (
-                            s for s in stages
-                            if s.id == batch.current_stage_id
-                        ),
-                        None
-                    )
+                    # Recipes were already applied inside update_growth_progress;
+                    # applying them again here duplicated the plant_auto schedules.
+                    logger.info(
+                        f"[GrowthCycle] batch={batch.id} "
+                        f"stage {old_stage_id} → {batch.current_stage_id}"
+                    )    
 
-                    if current_stage and current_stage.recipes:
+                    # current_stage = next(
+                    #     (
+                    #         s for s in stages
+                    #         if s.id == batch.current_stage_id
+                    #     ),
+                    #     None
+                    # )
 
-                        recipe_engine_service.apply_stage_recipes(
-                            db=db,
-                            batch=batch,
-                            recipes=current_stage.recipes,
-                        )
+                    # if current_stage and current_stage.recipes:
 
-                        logger.info(
-                            f"[GrowthCycle] batch={batch.id} "
-                            f"→ stage='{current_stage.name}'"
-                        )
+                        # recipe_engine_service.apply_stage_recipes(
+                        #     db=db,
+                        #     batch=batch,
+                        #     recipes=current_stage.recipes,
+                        # )
+
+                        # logger.info(
+                        #     f"[GrowthCycle] batch={batch.id} "
+                        #     f"→ stage='{current_stage.name}'"
+                        # )
 
             db.commit()
 
@@ -155,7 +162,7 @@ class AutomationService:
                 )
                 .filter(
                     PlantBatch.zone_id == device_id,
-                    PlantBatch.status == "growing",
+                    PlantBatch.status.in_(ACTIVE_BATCH_STATUSES),   # was == "growing"                
                 )
                 .first()
             )

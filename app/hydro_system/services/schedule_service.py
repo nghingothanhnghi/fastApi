@@ -42,31 +42,48 @@ class HydroScheduleService:
         db.commit()
         return True
 
-    # ✅ ADD THIS (for controller bulk insert)
+    # for controller bulk insert
     def bulk_create(self, db: Session, schedules: list[HydroSchedule], commit: bool = True):
         db.add_all(schedules)
         if commit:
             db.commit()
 
-    # 🔥 FIXED VERSION (NO JOIN DELETE)
-    def delete_by_device_and_source(self, db: Session, device_id: int, source: str):
-        # 1️⃣ Get actuator IDs for this device
-        actuator_ids = db.query(HydroActuator.id).filter(
-            HydroActuator.device_id == device_id
-        ).all()
+    def delete_by_device_and_source(
+        self,
+        db: Session,
+        device_id: int,
+        source: str,
+        commit: bool = False,
+    ) -> None:
+        """
+        Delete every schedule of `source` on any actuator of `device_id`.
 
-        actuator_ids = [a[0] for a in actuator_ids]
+        Does NOT commit by default: the caller owns the transaction, so the
+        delete and the replacement schedules are saved (or rolled back)
+        together. Previously this committed internally, which made the
+        delete durable on its own and, with autoflush=False, also flushed
+        unrelated pending rows at an unexpected moment.
+        """
+        # Session has autoflush=False: flush first so any schedules already
+        # pending in this transaction are visible to (and removed by) the
+        # DELETE below instead of surviving it.
+        db.flush()
+
+        actuator_ids = [
+            a[0] for a in db.query(HydroActuator.id).filter(
+                HydroActuator.device_id == device_id
+            ).all()
+        ]
 
         if not actuator_ids:
             return
 
-        # 2️⃣ Delete schedules using IN
         db.query(HydroSchedule).filter(
             HydroSchedule.actuator_id.in_(actuator_ids),
             HydroSchedule.source == source
         ).delete(synchronize_session=False)
 
-        # 3️⃣ Commit here OR let caller handle
-        db.commit()      
+        if commit:
+            db.commit()
 
 hydro_schedule_service = HydroScheduleService()
