@@ -20,10 +20,16 @@ class GrowthPlanUpdate(BaseModel):
     description: Optional[str] = None
     is_default: Optional[bool] = None
 
+class GrowthPlanDuplicate(BaseModel):
+    name: Optional[str] = None
 
 class GrowthPlanOut(GrowthPlanBase):
     id: int
     plant_id: int
+
+    # Not a DB column: filled in by the router from one grouped query, so
+    # the UI can show "Used by N batches" and disable Delete up front.
+    batch_count: int = 0
 
     model_config = {
         "from_attributes": True
@@ -33,8 +39,8 @@ class GrowthPlanOut(GrowthPlanBase):
 # 🔥 With nested stages (and their recipes), for a single-call plan view
 class GrowthPlanWithStages(GrowthPlanOut):
     """ 
-    Growth plan with all stages and their nested recipes. A GrowthPlan belongs to a Plant.
-    GrowthStages belong to this GrowthPlan through plan_id. 
+    Growth plan with all stages and their nested recipes. A GrowthPlan
+    belongs to a Plant; GrowthStages belong to this plan through plan_id.
     """    
     stages: List[GrowthStageOut] = []
 

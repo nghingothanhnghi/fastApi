@@ -11,7 +11,12 @@ from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStage
 from app.hydro_system.schemas.growth_recipe import GrowthRecipeCreate, GrowthRecipeOut, GrowthRecipeUpdate
 from app.hydro_system.services.plant_batch_service import plant_batch_service
 from app.hydro_system.services.plant_service import plant_service
-from app.hydro_system.services.growth_stage_service import growth_stage_service
+
+from app.hydro_system.services.growth_stage_service import (
+    growth_stage_service,
+    StageRangeError,
+    StageInUseError,
+)
 from app.hydro_system.services.growth_recipe_service import growth_recipe_service
 from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.helpers.schedule_helper import get_local_today
@@ -113,9 +118,10 @@ def set_batch_stage(batch_id: int, stage_id: int, db: Session = Depends(get_db))
 def create_stage(stage_in: GrowthStageCreate, db: Session = Depends(get_db)):
     try:
         return growth_stage_service.create_stage(db, stage_in)
-    except ValueError as e:
-        # unknown plan_id
+    except LookupError as e:          # unknown plan_id
         raise HTTPException(status_code=404, detail=str(e))
+    except StageRangeError as e:      # overlap / bad range
+        raise HTTPException(status_code=409, detail=str(e))
 
 @router.get("/stages/plant/{plant_id}", response_model=List[GrowthStageOut], tags=["Growth Stages"])
 def get_stages(plant_id: int, db: Session = Depends(get_db)):
@@ -123,9 +129,17 @@ def get_stages(plant_id: int, db: Session = Depends(get_db)):
 
 @router.put("/stages/{stage_id}", response_model=GrowthStageOut, tags=["Growth Stages"])
 def update_stage(stage_id: int, updates: GrowthStageUpdate, db: Session = Depends(get_db)):
-    stage = growth_stage_service.update_stage(db, stage_id, updates.dict(exclude_unset=True))
+    try:
+        stage = growth_stage_service.update_stage(db, stage_id, updates.dict(exclude_unset=True))
+    except StageRangeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+
+    # Day range may have moved: refresh schedules of batches on this stage
+    recipe_engine_service.reapply_for_stage(db, stage_id)
+    db.commit()
+    db.refresh(stage)
     return stage
 
 @router.put("/stages/{stage_id}/with-recipes", response_model=GrowthStageOut, tags=["Growth Stages"])
@@ -134,9 +148,10 @@ def update_stage_with_recipes(
     payload: GrowthStageWithRecipesUpdate,
     db: Session = Depends(get_db)
 ):
-    stage = growth_stage_service.update_stage_with_recipes(
-        db, stage_id, payload
-    )
+    try:
+        stage = growth_stage_service.update_stage_with_recipes(db, stage_id, payload)
+    except StageRangeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
@@ -145,12 +160,14 @@ def update_stage_with_recipes(
     recipe_engine_service.reapply_for_stage(db, stage_id)
     db.commit()
     db.refresh(stage)
-
     return stage
 
 @router.delete("/stages/{stage_id}", tags=["Growth Stages"])
 def delete_stage(stage_id: int, db: Session = Depends(get_db)):
-    success = growth_stage_service.delete_stage(db, stage_id)
+    try:
+        success = growth_stage_service.delete_stage(db, stage_id)
+    except StageInUseError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if not success:
         raise HTTPException(status_code=404, detail="Stage not found")
     return {"message": "Stage deleted"}

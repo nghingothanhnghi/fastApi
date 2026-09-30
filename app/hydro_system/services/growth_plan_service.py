@@ -1,10 +1,18 @@
 # app/hydro_system/services/growth_plan_service.py
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Dict, List, Optional
+
 from app.hydro_system.models.growth_plan import GrowthPlan
+from app.hydro_system.models.growth_stage import GrowthStage
+from app.hydro_system.models.growth_recipe import GrowthRecipe
 from app.hydro_system.models.plant import Plant
 from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.schemas.growth_plan import GrowthPlanCreate
+
+
+class PlanNameConflictError(Exception):
+    """Another plan of the same plant already uses this name."""
 
 
 class GrowthPlanService:
@@ -24,15 +32,44 @@ class GrowthPlanService:
             q = q.filter(GrowthPlan.id != keep_id)
         q.update({"is_default": False}, synchronize_session=False)
 
+    def _assert_unique_name(
+        self, db: Session, plant_id: int, name: str, exclude_id: Optional[int] = None
+    ) -> None:
+        q = db.query(GrowthPlan.id).filter(
+            GrowthPlan.plant_id == plant_id,
+            func.lower(GrowthPlan.name) == name.strip().lower(),
+        )
+        if exclude_id is not None:
+            q = q.filter(GrowthPlan.id != exclude_id)
+        if q.first():
+            raise PlanNameConflictError(f"A plan named '{name}' already exists for this plant")
+
+    # ── batch counts ────────────────────────────────────────────────────
+
+    def get_batch_counts(self, db: Session, plan_ids: List[int]) -> Dict[int, int]:
+        """{plan_id: number of batches following it}, in ONE grouped query."""
+        if not plan_ids:
+            return {}
+        rows = (
+            db.query(PlantBatch.plan_id, func.count(PlantBatch.id))
+            .filter(PlantBatch.plan_id.in_(plan_ids))
+            .group_by(PlantBatch.plan_id)
+            .all()
+        )
+        return {plan_id: count for plan_id, count in rows}
+
     # ── CRUD ────────────────────────────────────────────────────────────
 
     def create_plan(self, db: Session, plan_in: GrowthPlanCreate) -> GrowthPlan:
         """
-        Raises LookupError if the plant doesn't exist.
-        The first plan created for a plant is always the default.
+        Raises LookupError if the plant doesn't exist, PlanNameConflictError
+        on a duplicate name. The first plan created for a plant is always
+        the default.
         """
         if not db.query(Plant.id).filter(Plant.id == plan_in.plant_id).first():
             raise LookupError(f"Plant {plan_in.plant_id} not found")
+
+        self._assert_unique_name(db, plan_in.plant_id, plan_in.name)
 
         data = plan_in.dict()
         has_plans = (
@@ -84,7 +121,7 @@ class GrowthPlanService:
     def update_plan(self, db: Session, plan_id: int, updates: dict) -> Optional[GrowthPlan]:
         """
         Raises ValueError when asked to un-default the plant's only default
-        plan (mark a different plan as default instead).
+        plan, PlanNameConflictError on a duplicate name.
         """
         plan = self.get_plan(db, plan_id)
         if not plan:
@@ -96,6 +133,9 @@ class GrowthPlanService:
                 "mark another plan as default instead"
             )
 
+        if updates.get("name"):
+            self._assert_unique_name(db, plan.plant_id, updates["name"], exclude_id=plan.id)
+
         try:
             for key, value in updates.items():
                 setattr(plan, key, value)
@@ -105,6 +145,78 @@ class GrowthPlanService:
             db.commit()
             db.refresh(plan)
             return plan
+        except Exception:
+            db.rollback()
+            raise
+
+    def duplicate_plan(
+        self, db: Session, plan_id: int, new_name: Optional[str] = None
+    ) -> Optional[GrowthPlan]:
+        """
+        Deep copy: plan + all its stages + all their recipes, in one
+        transaction. The copy is never the default (keeps the
+        one-default-per-plant invariant) and starts with 0 batches.
+        Returns None if the source plan doesn't exist. If new_name is given
+        and already taken, raises PlanNameConflictError; if omitted, a free
+        "<name> (copy)" / "<name> (copy) 2" ... is generated.
+        """
+        src = self.get_plan(db, plan_id)
+        if not src:
+            return None
+
+        if new_name:
+            self._assert_unique_name(db, src.plant_id, new_name)
+            name = new_name.strip()
+        else:
+            existing = {
+                n.lower() for (n,) in db.query(GrowthPlan.name)
+                .filter(GrowthPlan.plant_id == src.plant_id).all()
+            }
+            base = f"{src.name} (copy)"
+            name, i = base, 2
+            while name.lower() in existing:
+                name, i = f"{base} {i}", i + 1
+
+        try:
+            new_plan = GrowthPlan(
+                plant_id=src.plant_id,
+                name=name,
+                description=src.description,
+                is_default=False,
+            )
+            db.add(new_plan)
+            db.flush()  # need new_plan.id
+
+            src_stages = (
+                db.query(GrowthStage)
+                .filter(GrowthStage.plan_id == src.id)
+                .order_by(GrowthStage.day_start.asc())
+                .all()
+            )
+            for s in src_stages:
+                new_stage = GrowthStage(
+                    plan_id=new_plan.id,
+                    plant_id=s.plant_id,
+                    name=s.name,
+                    day_start=s.day_start,
+                    day_end=s.day_end,
+                )
+                db.add(new_stage)
+                db.flush()  # need new_stage.id for the recipes
+                for r in s.recipes:
+                    db.add(GrowthRecipe(
+                        stage_id=new_stage.id,
+                        actuator_type=r.actuator_type,
+                        action=r.action,
+                        start_time=r.start_time,
+                        end_time=r.end_time,
+                        interval_on_min=r.interval_on_min,
+                        interval_off_min=r.interval_off_min,
+                    ))
+
+            db.commit()
+            db.refresh(new_plan)
+            return new_plan
         except Exception:
             db.rollback()
             raise
