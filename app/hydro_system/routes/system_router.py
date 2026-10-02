@@ -1,6 +1,6 @@
-# app/hydro_system/routes/hydro_system_router.py
+# app/hydro_system/routes/system_router.py
 # Description: This module defines the API endpoints for controlling the hydroponic system.
-from fastapi import APIRouter, Query, Depends, Body, Path
+from fastapi import APIRouter, Query, Depends, Body, Path, HTTPException
 from app.database import get_db
 from app.core.i18n.dependency import get_translator
 from app.core.i18n.translator import Translator
@@ -17,6 +17,10 @@ from app.hydro_system.routes.actuator_logs_router import actuator_log_router
 from app.hydro_system.routes.device_router import device_router
 from app.hydro_system.helpers.actuator_helper import validate_actuator_access
 
+from app.hydro_system.services.device_config_service import device_config_service
+from app.hydro_system.controllers.device_controller import _ensure_device_access
+from app.hydro_system.services.device_service import hydro_device_service
+
 router = APIRouter(prefix="/hydro", tags=["Hydro System"])
 router.include_router(actuator_log_router, prefix="/actuator-logs")
 router.include_router(device_router, prefix="/devices")
@@ -31,6 +35,19 @@ def get_status(
     return system_controller.get_system_status(
         db=db, user_id=current_user.id, device_id=device_id
     )
+
+@router.get("/config", summary="Compact config for ESP32")
+def get_device_config(
+    device_id: str = Query(..., description="External device_id, e.g. esp32-dev-001"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    device = hydro_device_service.get_device_by_external_id(db, device_id)
+    if not device:
+        raise HTTPException(404, "Device not found")
+    _ensure_device_access(device, current_user)
+
+    return device_config_service.get_compact_config(db, device_id)
 
 # --- Emergency Controls ---
 @router.post("/emergency-stop")
