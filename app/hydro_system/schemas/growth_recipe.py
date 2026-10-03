@@ -1,5 +1,5 @@
 # app/hydro_system/schemas/growth_recipe.py
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, field_validator
 from typing import Optional, Literal
 from datetime import time
 
@@ -24,6 +24,14 @@ class GrowthRecipeBase(BaseModel):
                 raise ValueError("interval values required for 'interval'")
         return self
 
+    @field_validator("group_name", mode="before")
+    @classmethod
+    def _blank_group_to_none(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip().lower()   # lower() so "Row_A" and "row_a" match
+        return v or None        
+
 
 class GrowthRecipeInput(GrowthRecipeBase):
     pass
@@ -42,6 +50,14 @@ class GrowthRecipeUpdate(BaseModel):
     end_time: Optional[time] = None
     interval_on_min: Optional[int] = None
     interval_off_min: Optional[int] = None
+
+    @field_validator("group_name", mode="before")
+    @classmethod
+    def _blank_group_to_none(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip().lower()   # lower() so "Row_A" and "row_a" match
+        return v or None    
 
 
 class GrowthRecipeOut(GrowthRecipeBase):

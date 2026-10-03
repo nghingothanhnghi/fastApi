@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -18,6 +18,15 @@ class HydroActuatorBase(BaseModel):
     group_name: Optional[str] = Field(None, max_length=50, json_schema_extra={"example": "row_a"})
     manual_state: Optional[bool] = Field(None, description="Force state: True(ON), False(OFF), None(AUTO)")
 
+    @field_validator("group_name", mode="before")
+    @classmethod
+    def _blank_group_to_none(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip().lower()   # lower() so "Row_A" and "row_a" match
+        return v or None
+
+
 class HydroActuatorCreate(HydroActuatorBase):
     device_id: int = Field(..., json_schema_extra={"example": 1})
 
@@ -35,6 +44,15 @@ class HydroActuatorUpdate(BaseModel):
     )
     group_name: Optional[str] = Field(None, max_length=50)
     manual_state: Optional[bool] = Field(None, description="Update force state")
+
+    @field_validator("group_name", mode="before")
+    @classmethod
+    def _blank_group_to_none(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip().lower()   # lower() so "Row_A" and "row_a" match
+        return v or None
+
 class HydroActuatorOut(HydroActuatorBase):
     id: int
     device_id: int
