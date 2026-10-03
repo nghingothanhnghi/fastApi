@@ -90,6 +90,9 @@ class HydroActuator(Base):
     # ─────────────────────────────────────────────
     sensor_key = Column(String, nullable=True)
 
+    # Label used by recipes to target a subset of same-type actuators
+    group_name = Column(String(50), nullable=True, index=True)
+
     # ─────────────────────────────────────────────
     # Timestamps
     # ─────────────────────────────────────────────

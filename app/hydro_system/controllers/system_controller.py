@@ -107,6 +107,7 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 "id": actuator.id,
                 "name": actuator.name,
                 "type": actuator.type,
+                "group_name": actuator.group_name,
                 "pin": actuator.pin,
                 "port": actuator.port,
                 "is_active": actuator.is_active,

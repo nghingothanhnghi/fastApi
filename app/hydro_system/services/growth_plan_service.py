@@ -207,6 +207,8 @@ class GrowthPlanService:
                     db.add(GrowthRecipe(
                         stage_id=new_stage.id,
                         actuator_type=r.actuator_type,
+                        group_name=r.group_name,
+                        actuator_id=r.actuator_id,
                         action=r.action,
                         start_time=r.start_time,
                         end_time=r.end_time,

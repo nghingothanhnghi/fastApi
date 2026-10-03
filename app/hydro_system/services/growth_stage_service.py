@@ -6,6 +6,7 @@ from app.hydro_system.models.growth_stage import GrowthStage
 from app.hydro_system.models.plant_batch import PlantBatch
 from app.hydro_system.schemas.growth_stage import GrowthStageCreate, GrowthStageWithRecipesUpdate
 from app.hydro_system.services.growth_plan_service import growth_plan_service
+from app.hydro_system.services.growth_recipe_service import growth_recipe_service
 
 class StageRangeError(ValueError):
     """Stage day range is invalid or overlaps another stage in the same plan."""
@@ -156,6 +157,7 @@ class GrowthStageService:
 
             db.query(GrowthRecipe).filter(GrowthRecipe.stage_id == stage_id).delete()
             for r in data.recipes:
+                growth_recipe_service.validate_target(db, r.actuator_type, r.actuator_id)
                 db.add(GrowthRecipe(**r.dict(), stage_id=stage_id))
 
             db.commit()

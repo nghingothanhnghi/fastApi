@@ -17,7 +17,7 @@ from app.hydro_system.services.growth_stage_service import (
     StageRangeError,
     StageInUseError,
 )
-from app.hydro_system.services.growth_recipe_service import growth_recipe_service
+from app.hydro_system.services.growth_recipe_service import growth_recipe_service, RecipeTargetError
 from app.hydro_system.services.recipe_engine_service import recipe_engine_service
 from app.hydro_system.helpers.schedule_helper import get_local_today
 
@@ -152,6 +152,9 @@ def update_stage_with_recipes(
         stage = growth_stage_service.update_stage_with_recipes(db, stage_id, payload)
     except StageRangeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    
+    except RecipeTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
@@ -175,7 +178,10 @@ def delete_stage(stage_id: int, db: Session = Depends(get_db)):
 # Growth Recipe Routes
 @router.post("/recipes", response_model=GrowthRecipeOut, tags=["Growth Recipes"])
 def create_recipe(recipe_in: GrowthRecipeCreate, db: Session = Depends(get_db)):
-    recipe = growth_recipe_service.create_recipe(db, recipe_in)
+    try:
+        recipe = growth_recipe_service.create_recipe(db, recipe_in)
+    except RecipeTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     recipe_engine_service.reapply_for_stage(db, recipe.stage_id)
     db.commit()
     db.refresh(recipe)
@@ -183,14 +189,14 @@ def create_recipe(recipe_in: GrowthRecipeCreate, db: Session = Depends(get_db)):
 
 @router.put("/recipes/{recipe_id}", response_model=GrowthRecipeOut, tags=["Growth Recipes"])
 def update_recipe(recipe_id: int, updates: GrowthRecipeUpdate, db: Session = Depends(get_db)):
-    recipe = growth_recipe_service.update_recipe(
-        db,
-        recipe_id,
-        updates.dict(exclude_unset=True)
-    )
+    try:
+        recipe = growth_recipe_service.update_recipe(
+            db, recipe_id, updates.dict(exclude_unset=True)
+        )
+    except RecipeTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-
     recipe_engine_service.reapply_for_stage(db, recipe.stage_id)
     db.commit()
     db.refresh(recipe)

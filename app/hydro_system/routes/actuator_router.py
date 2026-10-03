@@ -47,8 +47,9 @@ def _update_and_reapply(actuator_id: int, actuator_in: HydroActuatorUpdate, db: 
     actuator = hydro_actuator_service.update_actuator(db, actuator_id, actuator_in)
     if not actuator:
         raise HTTPException(status_code=404, detail="Actuator not found")
-    # Only type / active-state changes affect which recipes match this actuator
-    if "type" in changed or "is_active" in changed:
+    
+    # Type, active state, or group changes can affect recipe matching.
+    if "type" in changed or "is_active" in changed or "group_name" in changed:
         _reapply_schedules(db, [actuator.device_id])
         db.refresh(actuator)
     return actuator

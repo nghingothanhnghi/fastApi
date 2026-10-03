@@ -18,6 +18,22 @@ from app.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def find_recipe_for_actuator(actuator, recipes: list):
+    """Most specific recipe that targets this actuator (id > group > type)."""
+    atype = actuator.type.lower()
+    group = getattr(actuator, "group_name", None)
+    candidates = [
+        r for r in recipes
+        if r.actuator_type == atype
+        and r.actuator_id in (None, actuator.id)
+        and r.group_name in (None, group)
+    ]
+    return max(
+        candidates,
+        key=lambda r: 2 if r.actuator_id else 1 if r.group_name else 0,
+        default=None,
+    )
+
 # =========================
 # SENSOR RULES
 # =========================
@@ -301,10 +317,8 @@ def check_rules(
         )
 
         # recipe
-        recipe = next(
-            (r for r in recipes if r.actuator_type == actuator_type),
-            None
-        )
+        # Find the most specific recipe for this actuator.
+        recipe = find_recipe_for_actuator(actuator, recipes)
 
         # ✅ INTERVAL
         interval_on, interval_status = is_in_interval(actuator, recipe)

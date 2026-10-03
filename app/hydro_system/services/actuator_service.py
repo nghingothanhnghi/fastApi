@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.hydro_system.models.actuator import HydroActuator
 from app.hydro_system.schemas.actuator import HydroActuatorCreate, HydroActuatorUpdate
 from app.hydro_system.helpers.actuator_helper import validate_actuator_access, validate_gpio_pin_available
+from app.hydro_system.models.growth_recipe import GrowthRecipe
 
 class HydroActuatorService:
 
@@ -75,6 +76,8 @@ class HydroActuatorService:
         if not actuator:
             return False
         try:
+            db.query(GrowthRecipe).filter(GrowthRecipe.actuator_id == actuator_id) \
+                .delete(synchronize_session=False)
             db.delete(actuator)
             db.commit()
             return True
