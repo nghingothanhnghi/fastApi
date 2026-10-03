@@ -114,6 +114,9 @@ Represents individual hardware components (pumps, lights, fans, valves, water se
 | `sensor_key` | String (Optional) | Linked sensor type (e.g., "temperature", "humidity") |
 | `created_at` | DateTime | Creation timestamp |
 | `updated_at` | DateTime | Last update timestamp |
+| `group_name` | String(50), optional, indexed | Free-text label (e.g. `"row_a"`, `"north_lights"`) used by recipes to target a subset of actuators of the same type. Set via `POST/PUT /actuators`. |
+
+Also fix the type list: lights must keep `type="light"`. Distinguish them with `name` and `group_name`, **never** by inventing types such as `light_1`. Unknown types are not loaded by `automation_service` (only `SUPPORTED_ACTUATOR_TYPES` are), have no registered rule, and never match recipes.
 
 **Supported Types:**
 - `pump` - General pump control
@@ -233,18 +236,30 @@ Specific phases of growth for a plant (e.g., "Seedling", "Vegetative").
 
 **Table:** `growth_recipes`
 
-Configuration for actuators during a specific growth stage.
-
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | Integer | Primary key |
 | `stage_id` | Integer (FK) | Linked growth stage |
-| `actuator_type` | String | "light", "pump", etc. |
-| `action` | String | "on" (time-based) or "interval" (pump logic) |
-| `start_time` | Time | ON time (for "on" action) |
-| `end_time` | Time | OFF time (for "on" action) |
-| `interval_on_min` | Integer | Duration to stay ON (for "interval" action) |
-| `interval_off_min` | Integer | Duration to stay OFF (for "interval" action) |
+| `actuator_type` | String | Required. `"light"`, `"pump"`, ... |
+| `group_name` | String(50), optional | Narrow the target to actuators of that type with the same `group_name` |
+| `actuator_id` | Integer (FK), optional | Pin the recipe to one specific actuator. Must be of the same type, and is only applied when that actuator belongs to the batch's zone (device) |
+| `action` | String | `"on"` (time window) or `"interval"` (pump cycling) |
+| `start_time` / `end_time` | Time | Window for `on`; optional window for `interval` |
+| `interval_on_min` / `interval_off_min` | Integer | Cycle lengths for `interval` |
+
+### Target resolution (specificity rules)
+
+A recipe selects actuators on the batch's zone (`PlantBatch.zone_id` = `HydroDevice.id`):
+
+| Recipe fields set | Targets |
+|---|---|
+| `actuator_type` only | every active actuator of that type on the zone |
+| `actuator_type` + `group_name` | active actuators of that type whose `group_name` matches |
+| `actuator_id` (+ type) | exactly that actuator, if it is active and on the zone; otherwise skipped with a warning |
+
+If several recipes of a stage hit the same actuator, the **most specific one wins** (id > group > type). Recipes of equal specificity stack, so two `on` windows for one light both produce schedules. Lower-specificity recipes are skipped for any actuator already claimed by a more specific recipe.
+
+Why `group_name` is the primary mechanism: a `GrowthPlan` belongs to a plant and is reused across batches and zones, while an `actuator_id` is bound to one ESP32. Use `actuator_id` only for plans that are intentionally tied to one device.
 
 ## Control Logic & Priority
 
@@ -269,14 +284,9 @@ When multiple rules conflict, the system follows this order of precedence (from 
     *   Temporary, timed runs (e.g., "Run pump for 60 seconds").
     *   Triggered via specialized API endpoints or internal logic.
 
-4.  **Schedules**:
-    *   Fixed time-based windows defined in `hydro_schedules`.
-    *   Example: "Turn lights ON from 06:00 to 18:00 every day."
+4. **Schedules**: windows in `hydro_schedules`, per actuator. Produced by `manual` entries or by recipes with `action="on"` (`source="plant_auto"`).
 
-5.  **Intervals**:
-    *   Cycling behavior defined in `growth_recipes` or `hydro_schedules`.
-    *   Format: `X` minutes ON followed by `Y` minutes OFF.
-    *   Used primarily for irrigation pumps.
+5. **Intervals**: `hydro_schedules` rows with `interval_on_min`/`interval_off_min`, produced by recipes with `action="interval"`. The rules engine reads them from the actuator's schedules; it no longer falls back to a type-wide recipe, so an actuator overridden by a more specific recipe cannot be re-captured by a broader one.
 
 6.  **Sensor Thresholds**:
     *   Dynamic response to environment data.
@@ -792,7 +802,13 @@ WATER_LEVEL_CONFIG = {
 }
 ```
 
-## Service Layer
+## Service layer: RecipeEngineService
+
+Responsibilities:
+- `apply_stage_recipes(db, batch, recipes)`: delete the zone's `plant_auto` schedules, sort recipes by specificity (most specific first), resolve targets, build `HydroSchedule` rows, never commit.
+- `reapply_for_stage(db, stage_id)` / `reapply_for_device(db, device_id)`: regenerate schedules after recipe or actuator edits.
+- Schedules stay per actuator (`HydroSchedule.actuator_id`), so the rules engine and ESP32 are unaffected by how a recipe selected its targets.
+
 
 ### HydroDeviceService
 
@@ -1089,3 +1105,60 @@ Example: `pump_1_1` = pump on device 1, port 1
 - **Scheduler:** `app/hydro_system/scheduler.py`
 - **Configuration:** `app/hydro_system/config.py`
 - **Main App:** `main.py` (register scheduler and routers)
+
+## API changes
+
+### Actuators
+`POST /actuators`, `PUT/PATCH /actuators/{id}` accept and return `group_name`. Changing `type`, `is_active` or `group_name` re-applies the current stage's schedules for that device.
+
+### Recipes (`/batches/recipes`, `/batches/stages/{id}/with-recipes`)
+```json
+{ "stage_id": 3, "actuator_type": "light", "group_name": "row_a",
+  "action": "on", "start_time": "06:00:00", "end_time": "18:00:00" }
+```
+```json
+{ "stage_id": 3, "actuator_type": "pump", "actuator_id": 12,
+  "action": "interval", "interval_on_min": 5, "interval_off_min": 25 }
+```
+Validation: `actuator_id` must exist and its type must equal `actuator_type` (HTTP 400 otherwise).
+
+### System status
+Each item in `actuators` of `GET /hydro/status` now includes `group_name`.
+
+## [ADD] Device lifecycle and command flow (ESP32)
+
+```mermaid
+sequenceDiagram
+    participant U as User / Admin (JWT)
+    participant API as FastAPI
+    participant DB as Database
+    participant ESP as ESP32
+
+    U->>API: POST /hydro/devices {device_id: MAC, location}
+    API->>DB: HydroDevice (mock mode: default actuators)
+    U->>API: POST /actuators/bulk [{device_id, type, name, pin, port, group_name}]
+    API->>DB: HydroActuator rows (pin unique per device)
+    API->>DB: reapply_for_device(): plant_auto schedules from stage recipes
+    loop every cycle
+        ESP->>API: POST /sensor/data {device_id, data}
+        API->>API: run_control_loop(): decide per actuator_id
+        API->>DB: actuator.current_state, logs
+    end
+    ESP->>API: GET /hydro/status?device_id=<db id>
+    API-->>ESP: actuators[{id, type, group_name, pin, port, current_state, pending_command}]
+    ESP->>ESP: set GPIO(pin) = current_state
+```
+
+**Commands are addressed per actuator, never by type or group.**
+- `id` is the stable identity; `pin` is the GPIO the firmware drives; `port` is a logical index.
+- Type and group only exist on the backend: they decide *which actuators a recipe schedules*. The ESP32 only receives the resulting `current_state` of each actuator.
+- Firmware should drive hardware by `pin` (parse as an integer; store plain digits like `"25"`, not `"PIN031"`) and key its state by `id`.
+- `pending_command` (`"stop"`) is delivered once per poll, then cleared.
+
+Known gaps:
+1. `/hydro/status` takes the DB `device.id` and a user JWT. A device-scoped credential and lookup by external `device_id` (as `POST /sensor/data` already does) would be better for firmware.
+2. `sync_device_actuators_from_hardware` is still a stub, so on real hardware actuators must be created manually.
+
+## Migration
+
+Run once: `python migrate_recipe_targets.py`. It is idempotent, backs up the SQLite file, adds `hydro_actuators.group_name`, `growth_recipes.group_name`, `growth_recipes.actuator_id` and indexes. Existing recipes keep working unchanged (both new fields are NULL = type-wide).
