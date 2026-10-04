@@ -3,6 +3,7 @@ from .database import engine, Base
 from .android_system.models.device import Device
 from .hydro_system.models.device import HydroDevice
 from .hydro_system.models.actuator import HydroActuator
+from .hydro_system.models.actuator_log import HydroActuatorLog 
 from .hydro_system.models.sensor_data import SensorData
 from .hydro_system.models.plant import Plant
 from .hydro_system.models.growth_plan import GrowthPlan
@@ -11,7 +12,7 @@ from .hydro_system.models.growth_stage import GrowthStage
 from .hydro_system.models.growth_recipe import GrowthRecipe
 from .hydro_system.models.schedule import HydroSchedule
 from .hydro_system.models.flow_reading import HydroFlowReading
-from .hydro_system.models.rain_debounce import RainSensorDebounceState   # NEW
+from .hydro_system.models.rain_debounce import RainSensorDebounceState 
 from .hydro_system.models.irrigation import (
     IrrigationSession, ZoneBaselineSettings, WaterEfficiencyAlert,
 )
@@ -20,6 +21,7 @@ from .user.models.user import User
 from .user.models.password_reset import PasswordResetCode
 from .user.models.role import Role
 from .user.models.user_role import UserRole
+from .user.models.system_init import SystemInitLock
 from .camera_object_detection.models.detection import DetectionResult, DetectionObject
 from .camera_object_detection.models.hardware_detection import HardwareDetection, LocationHardwareInventory, HardwareDetectionSummary
 from .migration.models.base_data import RawData

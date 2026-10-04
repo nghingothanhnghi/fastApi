@@ -25,6 +25,12 @@ def run_full_pipeline(db: Session, job: AIInferenceJob) -> None:
     image.processing_status = "processing"
 
     try:
+
+        # NEW: follow the hydro batch lifecycle (location backfill, harvested/failed)
+        plant = plant_service.get_plant(db, image.plant_id)
+        if plant:
+            plant_service.sync_from_hydro(db, plant)
+
         predictions = vision_service.run_predictions(db, image)
         by_task = {p.task: p for p in predictions}
 

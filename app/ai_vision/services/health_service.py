@@ -18,25 +18,23 @@ class HealthService:
         possible_issues = raw.get("possible_issues", [])
 
         plant = plant_service.get_plant(db, image.plant_id)
+        # Device is resolved from the plant (batch zone > camera device >
+        # tenant-scoped location), not from a bare location string.
         sensor_snapshot = sensor_fusion_service.get_window(
-            db, location=plant.location if plant else None, timestamp=image.captured_at or datetime.utcnow()
+            db, plant=plant, timestamp=image.captured_at or datetime.utcnow()
         )
 
-        # Simple, explainable scoring: start at 100, subtract per indicator/issue.
-        # This is the seam to swap in a trained regression head later -
-        # `visual_indicators`/`possible_issues`/`sensor_snapshot` stay the same shape.
+        # Simple, explainable scoring - seam for a trained regression head later.
         score = 100
         score -= 15 * len(visual_indicators)
         score -= 10 * len(possible_issues)
         score = max(0, min(100, score))
 
-        status = self._score_to_status(score)
-
         record = PlantHealthRecord(
             plant_id=image.plant_id,
             image_id=image.id,
             health_score=score,
-            status=status,
+            status=self._score_to_status(score),
             visual_indicators=visual_indicators,
             possible_issues=possible_issues,
             sensor_snapshot=sensor_snapshot,

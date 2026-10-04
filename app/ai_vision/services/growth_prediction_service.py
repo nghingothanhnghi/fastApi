@@ -135,13 +135,20 @@ class GrowthPredictionService:
             return info
 
         timeline = hydro_batch_client.get_batch_growth_timeline(db, plant.hydro_batch_id)
-        if not timeline or not timeline.get("start_date") or timeline.get("current_stage_day_end") is None:
+        if (
+            not timeline
+            or not timeline.get("is_active")                       # harvested/failed/completed batches
+            or timeline.get("scheduled_transition_day") is None
+            or not timeline.get("start_date")
+        ):
             reasons.append("No active batch stage window found; stage-transition projection skipped")
             return info
 
         start_date = timeline["start_date"]
         start_dt = datetime.combine(start_date, time.min) if not isinstance(start_date, datetime) else start_date
-        scheduled_transition = start_dt + timedelta(days=timeline["current_stage_day_end"])
+        # Matches hydro: transition happens ON next_stage.day_start (or day_end + 1 for the last stage)
+        scheduled_transition = start_dt + timedelta(days=timeline["scheduled_transition_day"])
+        days_until = timeline.get("days_until_scheduled_transition") or 0
 
         info["current_stage_id"] = timeline["current_stage_id"]
         info["current_stage_name"] = timeline["current_stage_name"]
@@ -158,13 +165,12 @@ class GrowthPredictionService:
             info["stage_transition_delta_days"] = 0.0
             return info
 
-        pace_ratio = max(growth_rate / baseline_rate, 0.1) if baseline_rate != 0 else 1.0
-        remaining_scheduled_days = max((scheduled_transition - datetime.utcnow()).days, 0)
-        adjusted_remaining_days = round(remaining_scheduled_days / pace_ratio, 1)
-        projected_transition = datetime.utcnow() + timedelta(days=adjusted_remaining_days)
-        delta_days = round((projected_transition - scheduled_transition).total_seconds() / 86400, 1)
+        # clamp so one noisy reading can't project "transition today" or "in a year"
+        pace_ratio = min(max(growth_rate / baseline_rate, 0.1), 5.0)
+        adjusted_days = round(days_until / pace_ratio, 1)
+        delta_days = round(adjusted_days - days_until, 1)
 
-        info["projected_stage_transition_date"] = projected_transition
+        info["projected_stage_transition_date"] = datetime.utcnow() + timedelta(days=adjusted_days)
         info["stage_transition_delta_days"] = delta_days
 
         if delta_days > 1:

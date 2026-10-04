@@ -61,13 +61,12 @@ class FlowReadingService:
         )
         return {r.actuator_id: r.flow_rate for r in rows}
 
-    def get_latest_for_device(self, db: Session, device_id: int) -> List[HydroFlowReading]:
-        """Latest reading per actuator, for every pump/actuator on this device."""
+    def get_latest_for_device(self, db: Session, device_id: int) -> Dict[int, float]:
+        """{actuator_id: latest flow_rate} for every actuator on this device."""
         actuator_ids = [
-            a.id for a in db.query(HydroActuator.id).filter(HydroActuator.device_id == device_id).all()
+            row[0] for row in db.query(HydroActuator.id).filter(HydroActuator.device_id == device_id).all()
         ]
-        flow_map = self.get_latest_map_for_actuators(db, [a for (a,) in actuator_ids] if actuator_ids and isinstance(actuator_ids[0], tuple) else actuator_ids)
-        return flow_map
+        return self.get_latest_map_for_actuators(db, actuator_ids)
 
     def get_latest_for_location(self, db: Session, location: str) -> Dict[int, float]:
         """Latest reading per actuator, across every device at a location."""

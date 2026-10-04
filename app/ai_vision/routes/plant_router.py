@@ -6,7 +6,9 @@ from app.database import get_db
 from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from app.ai_vision.services.plant_service import plant_service
-from app.ai_vision.helpers.access_helper import ensure_plant_access, ensure_camera_access
+from app.ai_vision.helpers.access_helper import (
+    ensure_plant_access, ensure_links_access,
+)
 from app.ai_vision.schemas.plant_schema import PlantCreate, PlantUpdate, PlantOut, CameraCreate, CameraOut
 
 router = APIRouter(prefix="/api/v1/plants", tags=["AI Vision - Plants"])
@@ -14,10 +16,13 @@ router = APIRouter(prefix="/api/v1/plants", tags=["AI Vision - Plants"])
 
 @router.post("", response_model=PlantOut)
 def create_plant(
-    data: PlantCreate, 
+    data: PlantCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ensure_links_access(
+        db, current_user, camera_id=data.camera_id, hydro_batch_id=data.hydro_batch_id
+    )
     return plant_service.create_plant(db, **data.model_dump(), client_id=current_user.client_id)
 
 
@@ -31,31 +36,6 @@ def list_plants(
         return plant_service.get_all_plants(db, status)
     return plant_service.get_all_plants_by_client(db, current_user.client_id, status)
 
-
-@router.get("/{plant_id}", response_model=PlantOut)
-def get_plant(
-    plant_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    plant = plant_service.get_plant(db, plant_id)
-    if not plant:
-        raise HTTPException(404, "Plant not found")
-    ensure_plant_access(plant, current_user)
-    return plant
-
-@router.patch("/{plant_id}", response_model=PlantOut)
-def update_plant(
-    plant_id: int,
-    data: PlantUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    plant = plant_service.get_plant(db, plant_id)
-    if not plant:
-        raise HTTPException(404, "Plant not found")
-    ensure_plant_access(plant, current_user)
-    return plant_service.update_plant(db, plant_id, data.model_dump(exclude_unset=True))
 
 @router.get("/by-hydro-batch/{hydro_batch_id}", response_model=PlantOut)
 def get_by_hydro_batch(
@@ -77,10 +57,40 @@ def link_batch(
     current_user: User = Depends(get_current_user),
 ):
     """Idempotent: returns the existing linked VisionPlant, or creates one
-    scoped to the caller's client_id."""
+    (with the zone's location) scoped to the caller's client_id. The caller
+    must own the batch's zone."""
+    ensure_links_access(db, current_user, hydro_batch_id=hydro_batch_id)
     plant = plant_service.link_or_create_from_hydro_batch(db, hydro_batch_id, current_user.client_id)
     ensure_plant_access(plant, current_user)
     return plant
+
+
+@router.get("/{plant_id}", response_model=PlantOut)
+def get_plant(
+    plant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plant = plant_service.get_plant(db, plant_id)
+    if not plant:
+        raise HTTPException(404, "Plant not found")
+    ensure_plant_access(plant, current_user)
+    return plant
+
+
+@router.patch("/{plant_id}", response_model=PlantOut)
+def update_plant(
+    plant_id: int,
+    data: PlantUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plant = plant_service.get_plant(db, plant_id)
+    if not plant:
+        raise HTTPException(404, "Plant not found")
+    ensure_plant_access(plant, current_user)
+    ensure_links_access(db, current_user, camera_id=data.camera_id)
+    return plant_service.update_plant(db, plant_id, data.model_dump(exclude_unset=True))
 
 
 # Camera routes
@@ -93,6 +103,7 @@ def create_camera(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    ensure_links_access(db, current_user, hydro_device_id=data.hydro_device_id)
     return plant_service.create_camera(db, **data.model_dump(), client_id=current_user.client_id)
 
 
