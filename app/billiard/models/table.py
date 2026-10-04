@@ -1,11 +1,12 @@
 # app/billiard/models/table.py
+import enum
+from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Enum, Numeric, String
+
+from sqlalchemy import DateTime, Enum, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-
-import enum
 
 
 class TableStatus(str, enum.Enum):
@@ -18,28 +19,16 @@ class BilliardTable(Base):
     __tablename__ = "billiard_tables"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
 
-    name: Mapped[str] = mapped_column(
-        String(50),
-        unique=True,
-        index=True,
-        nullable=False,
-    )
+    # Same tenant convention as HydroDevice / VisionPlant
+    client_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     status: Mapped[TableStatus] = mapped_column(
-        Enum(TableStatus),
-        default=TableStatus.AVAILABLE,
-        nullable=False,
-        index=True,
+        Enum(TableStatus, values_callable=lambda e: [m.value for m in e]),
+        default=TableStatus.AVAILABLE, nullable=False, index=True,
     )
+    hourly_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    hourly_rate: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2),
-        nullable=False,
-    )
-
-    sessions = relationship(
-        "TableSession",
-        back_populates="table",
-        lazy="selectin",
-    )
+    sessions = relationship("TableSession", back_populates="table", lazy="select")
