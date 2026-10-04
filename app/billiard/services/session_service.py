@@ -17,7 +17,7 @@ from app.billiard.models.table import (
     TableStatus,
 )
 
-from app.product.models import Product
+from app.product.models.product import Product
 
 
 class SessionService:

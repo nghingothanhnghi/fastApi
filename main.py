@@ -12,7 +12,6 @@ from app.user.routes import (user_router, roles_router, auth_router, password_re
 from app.auth_provider.routes import oauth_router
 
 from app.camera_object_detection.routes import ( object_detection_router, hardware_detection_router, ws_router)
-# from app.camera_object_detection.websocket import router as hardware_ws_router
 
 from app.hydro_system.routes import ( system_router, sensor_router, actuator_router, schedule_router, batch_router, flow_reading_router, irrigation_router, flow_sensor_router, growth_plan_router )
 
@@ -36,6 +35,8 @@ from app.ai_vision.routes import recommendation_router as ai_recommendation_rout
 from app.ai_vision.routes import prediction_router as ai_prediction_router  # ⚠️ V5
 from app.ai_vision import config as ai_vision_config
 from app.ai_vision.jobs.inference_job import process_queued_inference_jobs
+
+from app.billiard.routes import billiard_router
 
 from app.middleware.error_handler import catch_exceptions_middleware
 from app.core.logging_config import configure_logging
@@ -142,6 +143,9 @@ app.include_router(ai_inference_router.router)
 app.include_router(ai_health_router.router)
 app.include_router(ai_recommendation_router.router)
 app.include_router(ai_prediction_router.router)
+
+
+app.include_router(billiard_router)   # /tables, /sessions, /reports
 # -----------------------------------------
 # Static File Mounts (profile images, products, etc.)
 # -----------------------------------------
