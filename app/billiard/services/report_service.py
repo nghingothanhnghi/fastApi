@@ -1,5 +1,5 @@
 # app/billiard/services/report_service.py
-from datetime import datetime
+from datetime import datetime, timedelta, time
 from decimal import Decimal
 from typing import Optional
 
@@ -23,12 +23,22 @@ class ReportService:
         db: Session, user: User,
         start_date: Optional[datetime] = None, end_date: Optional[datetime] = None,
     ) -> TableUsageReport:
+
+        end_exclusive = None
+
+        if end_date:
+            # frontend sends a date at 00:00:00 -> include the entire day
+            if end_date.time() == time(0, 0):
+                end_exclusive = end_date + timedelta(days=1)
+            else:
+                end_exclusive = end_date + timedelta(microseconds=1)        
+        
         # Date filters live in the JOIN condition so tables with zero sessions still appear.
         cond = [TableSession.table_id == BilliardTable.id, TableSession.status == SessionStatus.COMPLETED]
         if start_date:
             cond.append(TableSession.end_time >= start_date)
         if end_date:
-            cond.append(TableSession.end_time <= end_date)
+            cond.append(TableSession.end_time <= end_exclusive)
 
         paid = TableSession.payment_state == PaymentState.PAID
 
