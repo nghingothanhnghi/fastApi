@@ -141,7 +141,6 @@ There must NOT be one ESP32 per table.
 
 ```text
 app/
-└── modules/
     └── billiard/
         ├── models/
         │   ├── __init__.py
