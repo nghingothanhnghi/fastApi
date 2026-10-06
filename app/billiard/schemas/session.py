@@ -21,7 +21,7 @@ class AddSessionItemRequest(BaseModel):
 
 class SessionItemResponse(BaseModel):
     id: int
-    product_id: int
+    product_id: Optional[int] = None
     variant_id: Optional[int] = None
     product_name: str
     quantity: int
