@@ -48,3 +48,6 @@ uploads/ai_vision/1c0db5ad466048dcbb46786bc0d5901b.jpg
 # Ignore mocks folder
 mocks/
 
+# Ignore homebridge folder
+homebridge/
+
