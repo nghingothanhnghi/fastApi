@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from app.billiard import config
 from app.billiard.config import BillingPolicy
 from app.billiard.models import (
-    BilliardTable, TableSession, SessionItem, SessionStatus, TableStatus,
+    BilliardTable, TableSession, SessionItem, SessionStatus,
 )
 from app.billiard.schemas.session import BillResponse, SessionItemResponse
+from app.billiard.services.table_lifecycle import mark_available
 from app.billiard.utils.billing import CENT, billable_minutes, calculate_table_fee
 from app.product.models.product import Product, ProductVariant
 from app.user.models.user import User
@@ -90,7 +91,8 @@ class SessionService:
 
         # Business rule: the bill is generated at STOP, so the table is freed now,
         # not after payment. Payment settles an already-completed session.
-        table.status = TableStatus.AVAILABLE
+        # Single owner of table.status transitions (see table_lifecycle).
+        mark_available(table)
         db.flush()
         return session
 

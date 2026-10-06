@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session, contains_eager
 
 from app.billiard import config
 from app.billiard.config import BillingPolicy
-from app.billiard.models import BilliardTable, TableSession, TableStatus, SessionStatus
+from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate
+from app.billiard.services.table_lifecycle import mark_playing
 from app.billiard.utils.billing import as_utc, billable_minutes, calculate_table_fee
 from app.user.models.user import User
 
@@ -34,7 +35,12 @@ class TableService:
             raise HTTPException(409, f"Table '{data.name}' already exists")
         table = BilliardTable(name=data.name, hourly_rate=data.hourly_rate, client_id=user.client_id)
         db.add(table)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # uq_billiard_table_name_per_client: lost a race with a concurrent create
+            db.rollback()
+            raise HTTPException(409, f"Table '{data.name}' already exists")
         return table
 
     @staticmethod
@@ -52,8 +58,13 @@ class TableService:
         table = db.execute(stmt).scalar_one_or_none()
         if not table:
             raise HTTPException(404, "Billiard table not found")
-        if table.status != TableStatus.AVAILABLE:
-            raise HTTPException(409, f"Table is {table.status.value}")
+
+        # Single owner of table.status transitions (see table_lifecycle).
+        # Raises ValueError if the table is inactive or not AVAILABLE.
+        try:
+            mark_playing(table)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
 
         session = TableSession(
             table_id=table.id,
@@ -63,12 +74,11 @@ class TableService:
             billing_policy=config.BILLING_POLICY.value,    # snapshot
             opened_by_id=user.id,
         )
-        table.status = TableStatus.PLAYING
         db.add(session)
         try:
             db.flush()
         except IntegrityError:
-            db.rollback()
+            db.rollback()   # also discards the PLAYING status set above
             raise HTTPException(409, "Table already has an active session")
         return session
 

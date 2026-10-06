@@ -37,7 +37,10 @@ from .ai_vision.models import (
     VisionPlant, VisionCamera, PlantImage, AIInferenceJob,
     VisionPrediction, PlantGrowthRecord, PlantHealthRecord, PlantAnomaly, AnomalyTracker, AIRecommendation, PlantGrowthPrediction,
 )
-from .billiard.models import BilliardTable, TableSession, SessionItem
+from .billiard.models import (
+       BilliardTable, TableSession, SessionItem, TableGame, PricingRule,
+       BilliardPackage, BilliardPackageItem, BilliardDevice, DeviceEvent, DeviceLocalIdMap,
+   )
 
 def init_db():
     # Imports above register every model before SQLAlchemy creates missing
