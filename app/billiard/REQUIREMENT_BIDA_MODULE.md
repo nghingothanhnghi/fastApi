@@ -207,11 +207,13 @@ billiard_tables
 ----------------
 id
 name
-status
+status (Missing status enum: cancelled, discount)
 hourly_rate
-is_active
+is_active (Missing)
 created_at
-updated_at
+updated_at (Missing)
+
+maintenance (Missing)
 ```
 
 Statuses:
@@ -247,22 +249,21 @@ table_sessions
 id
 table_id
 
-started_at
-ended_at
+start_time
+end_time
 duration_minutes
 
 status
 
-hourly_rate_snapshot
-table_fee
+hourly_rate
+total_table_fee
 total_product_fee
 discount
 grand_total
 
-created_by
-started_by
-stopped_by
-paid_by
+opened_by_id
+stopped_by_id
+paid_by_id
 
 created_at
 updated_at
@@ -325,8 +326,8 @@ table_games
 id
 session_id
 game_number
-started_at
-ended_at
+start_time
+end_time
 
 player_a_score
 player_b_score
@@ -482,7 +483,7 @@ TableState(
     game_number=3,
     player_a_score=8,
     player_b_score=6,
-    started_at=...,
+    start_time=...,
     ends_at=...,
 )
 ```
@@ -1005,14 +1006,14 @@ Do not store a decrementing timer in the database.
 Store:
 
 ```text
-started_at
+start_time
 ends_at
 ```
 
 Example:
 
 ```text
-started_at = 10:00
+start_time = 10:00
 ends_at    = 12:00
 ```
 
@@ -1127,7 +1128,7 @@ Do not put billing calculations inside routes or ESP32 firmware.
 When a session starts, save:
 
 ```text
-hourly_rate_snapshot
+hourly_rate
 ```
 
 If the price changes later:
@@ -1265,7 +1266,7 @@ Billiard should provide:
 ```text
 session_id
 table_id
-table_fee
+total_table_fee
 product_fee
 discount
 grand_total
@@ -1341,10 +1342,10 @@ GET    /billiard/controller/status
 ## Reports
 
 ```text
-GET /billiard/reports/tables/usage
-GET /billiard/reports/sessions
-GET /billiard/reports/games
-GET /billiard/reports/revenue
+GET /reports/tables/usage
+GET /reports/sessions
+GET /reports/games
+GET /reports/revenue
 ```
 
 ---
@@ -1547,7 +1548,7 @@ Never trust these values from ESP32:
 
 ```text
 grand_total
-table_fee
+total_table_fee
 product_fee
 duration
 hourly_rate
@@ -1608,34 +1609,7 @@ Minimum test cases:
 
 ---
 
-# 41. Alembic
-
-Create migrations for:
-
-```text
-billiard_tables
-table_sessions
-session_items
-table_games
-billiard_pricing_rules
-billiard_packages
-billiard_package_items
-billiard_devices
-device_events
-```
-
-Ensure:
-
-- Foreign keys
-- Indexes
-- Unique constraints
-- Partial unique index for active sessions
-- Proper decimal precision
-- Timezone-aware timestamps
-
----
-
-# 42. Implementation Order
+# 43. Implementation Order
 
 Implement in this order:
 
@@ -1702,7 +1676,7 @@ Test online, offline, reconnect, reboot, duplicate events, and concurrent table 
 
 ---
 
-# 43. Critical Business Rules
+# 44. Critical Business Rules
 
 These rules must remain consistent throughout the codebase.
 
@@ -1780,7 +1754,7 @@ Authentication/authorization is handled by the existing User/Auth module.
 
 ---
 
-# 44. Example Complete Flow — Online
+# 45. Example Complete Flow — Online
 
 ```text
 Customer arrives
@@ -1840,7 +1814,7 @@ Table 01 AVAILABLE
 
 ---
 
-# 45. Example Complete Flow — Offline
+# 46. Example Complete Flow — Offline
 
 ```text
 Wi-Fi disconnects
@@ -1904,14 +1878,12 @@ SYNCED
 
 ---
 
-# 46. Development Standards
+# 47. Development Standards
 
 Use:
 
 - Python type hints
-- Pydantic v2
 - SQLAlchemy 2.x typed mappings
-- Async database access where the existing project uses async
 - Service layer for business logic
 - Controllers for orchestration
 - Routes for HTTP concerns
@@ -1939,12 +1911,12 @@ Avoid:
 
 ---
 
-# 47. Definition of Done
+# 48. Definition of Done
 
 The Bida module is complete when:
 
-- [ ] 10 tables can operate independently
-- [ ] One central ESP32 controls all 10 tables
+- [ ] N+ tables can operate independently
+- [ ] One central ESP32 controls all N+ tables
 - [ ] Each table has its own display/input node
 - [ ] RS485 communication works
 - [ ] Tables can start/stop sessions
@@ -1974,7 +1946,7 @@ The Bida module is complete when:
 
 ---
 
-# 48. Final Design Principle
+# 49. Final Design Principle
 
 The system should behave as:
 
