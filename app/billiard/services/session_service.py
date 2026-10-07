@@ -14,6 +14,7 @@ from app.billiard.models import (
 )
 from app.billiard.schemas.session import BillResponse, SessionItemResponse
 from app.billiard.services.table_lifecycle import mark_available
+from app.billiard.services.game_lifecycle import close_active_game
 from app.billiard.utils.billing import CENT, billable_minutes, calculate_table_fee
 from app.product.models.product import Product, ProductVariant
 from app.user.models.user import User
@@ -88,6 +89,8 @@ class SessionService:
         session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
         session.grand_total = fee + session.total_product_fee
         session.stopped_by_id = user.id
+
+        close_active_game(db, session, end)
 
         # Business rule: the bill is generated at STOP, so the table is freed now,
         # not after payment. Payment settles an already-completed session.
