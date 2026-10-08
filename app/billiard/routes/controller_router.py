@@ -53,8 +53,3 @@ def get_status(
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
 ):
     return device_service.list_devices(db, current_user)
-
-
-# Register in app/billiard/routes/__init__.py:
-#   from app.billiard.routes.controller_router import router as controller_router
-#   billiard_router.include_router(controller_router)

@@ -59,19 +59,3 @@ def finish_game(game_id: int, db: Session = Depends(get_db), current_user: User 
     db.refresh(game)
     return game
 
-
-# ──────────────────────────────────────────────────────────────────────────
-# TWO EDITS TO EXISTING FILES
-#
-# 1) app/billiard/routes/__init__.py
-#      from app.billiard.routes.game_router import router as game_router
-#      billiard_router.include_router(game_router)
-#
-# 2) app/billiard/services/session_service.py  -> stop_session()
-#      from app.billiard.services.game_lifecycle import close_active_game
-#      ...
-#      session.stopped_by_id = user.id
-#      close_active_game(db, session, end)      # <- add: a stopped session
-#                                               #    must not leave a game running
-#      mark_available(table)
-# ──────────────────────────────────────────────────────────────────────────
