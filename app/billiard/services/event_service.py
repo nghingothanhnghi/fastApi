@@ -11,10 +11,16 @@
 # Each event is acknowledged independently, so a poison event can never roll
 # back events already acknowledged earlier in the same batch.
 #
-# Implemented handlers: heartbeat, score_change, score_reset, game_end.
-# Not yet (next step): session_start, session_stop, game_start, new_game
-# (these also need the LOCAL-id mapping). Such events are stored as REJECTED
-# with a clear message, never silently dropped.
+#   SESSIONS/GAMES: the device's session/game MAPS TO the server's. If the server
+#   already has an active session (or game) for that table (e.g. the POS started
+#   it), the device's LOCAL-S/LOCAL-G id is mapped to it instead of creating a
+#   duplicate. Official start/end times are the device's (clamped: never in the
+#   future, never before the start); the SERVER still computes the fee.
+#
+# Implemented handlers: heartbeat, score_change, score_reset, game_end,
+# session_start, session_stop, game_start, new_game.
+# Other types (e.g. time_extend) are stored as REJECTED with a clear message,
+# never silently dropped.
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -28,7 +34,7 @@ from app.billiard.models import (
     DeviceLocalIdMap, DeviceStatus, GameStatus, SessionStatus, TableGame, TableSession,
 )
 from app.billiard.schemas.event import DeviceEventIn, EventBatchResult, EventRef
-from app.billiard.services import game_lifecycle
+from app.billiard.services import game_lifecycle, session_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +113,11 @@ def _apply_scores(db: Session, game: TableGame, a: int, b: int) -> Optional[dict
 
 # ── handlers: (db, device_pk, client_id, ev) -> optional audit note ──────
 def _h_heartbeat(db, device_pk, client_id, ev):
-    return None   # device.last_seen is already updated by authentication
+    # last_seen/status are already updated by authentication
+    version = ev.data.get("firmware_version")
+    if version:
+        db.get(BilliardDevice, device_pk).firmware_version = str(version)[:30]
+    return None
 
 
 def _h_score_change(db, device_pk, client_id, ev):
@@ -138,11 +148,176 @@ def _h_game_end(db, device_pk, client_id, ev):
     return note                                # already COMPLETED: idempotent no-op
 
 
+# ── LOCAL id mapping (LOCAL-S-… / LOCAL-G-… -> server ids) ───────────────
+def _mapped(db: Session, device_pk: int, kind: str, local_id: Optional[str]) -> Optional[int]:
+    if not local_id:
+        return None
+    col = DeviceLocalIdMap.session_id if kind == "session" else DeviceLocalIdMap.game_id
+    return db.execute(
+        select(col).where(
+            DeviceLocalIdMap.device_pk == device_pk,
+            DeviceLocalIdMap.kind == kind,
+            DeviceLocalIdMap.local_id == local_id,
+        )
+    ).scalar_one_or_none()
+
+
+def _map_local(db: Session, device_pk: int, kind: str, local_id: Optional[str], target_id: int) -> None:
+    if not local_id or _mapped(db, device_pk, kind, local_id) is not None:
+        return
+    db.add(DeviceLocalIdMap(
+        device_pk=device_pk, kind=kind, local_id=local_id,
+        session_id=target_id if kind == "session" else None,
+        game_id=target_id if kind == "game" else None,
+    ))
+    db.flush()
+
+
+def _resolve_session(db: Session, device_pk: int, client_id: str, ev: DeviceEventIn) -> TableSession:
+    """server session_id > LOCAL session id mapping > table's active session; then lock it."""
+    session_id: Optional[int] = None
+    try:
+        if ev.data.get("session_id") is not None:
+            session_id = int(ev.data["session_id"])
+        elif ev.local_session_id:
+            session_id = _mapped(db, device_pk, "session", ev.local_session_id)
+        elif ev.table_id is not None:
+            session_id = db.execute(
+                select(TableSession.id).where(
+                    TableSession.table_id == ev.table_id, TableSession.status == SessionStatus.ACTIVE
+                )
+            ).scalar_one_or_none()
+    except (TypeError, ValueError):
+        raise EventRejected("Invalid session reference")
+
+    session = None
+    if session_id is not None:
+        session = db.execute(
+            select(TableSession).where(TableSession.id == session_id).with_for_update()
+        ).scalar_one_or_none()
+    if session is None or session.table.client_id != client_id:
+        raise EventRejected("Session not found")
+    return session
+
+
+def _lock_table(db: Session, client_id: str, table_id: Optional[int]) -> BilliardTable:
+    if table_id is None:
+        raise EventRejected("table_id is required")
+    table = db.execute(
+        select(BilliardTable).where(BilliardTable.id == table_id).with_for_update()
+    ).scalar_one_or_none()
+    if table is None or table.client_id != client_id:
+        raise EventRejected("Table not found")
+    return table
+
+
+def _apply_final_scores_if_present(db: Session, session: TableSession, data: dict) -> Optional[dict]:
+    if "score_a" not in data and "score_b" not in data:
+        return None
+    a, b = _scores(data)
+    game = game_lifecycle.get_active_game(db, session.id)
+    return _apply_scores(db, game, a, b) if game else None
+
+
+# ── session / game lifecycle handlers ────────────────────────────────────
+def _h_session_start(db, device_pk, client_id, ev):
+    table = _lock_table(db, client_id, ev.table_id)
+    already = _mapped(db, device_pk, "session", ev.local_session_id)
+    if already is not None:
+        return {"already_mapped_session_id": already}
+
+    active = db.execute(
+        select(TableSession).where(
+            TableSession.table_id == table.id, TableSession.status == SessionStatus.ACTIVE
+        ).with_for_update()
+    ).scalar_one_or_none()
+    if active is not None:                       # device's session MAPS TO the server's
+        _map_local(db, device_pk, "session", ev.local_session_id, active.id)
+        return {"adopted_session_id": active.id}
+
+    try:
+        session = session_lifecycle.open_session(db, table, None, _event_time(ev))
+    except ValueError as e:                      # maintenance / inactive / reserved table
+        raise EventConflict(str(e))
+    _map_local(db, device_pk, "session", ev.local_session_id, session.id)
+    return None
+
+
+def _h_session_stop(db, device_pk, client_id, ev):
+    session = _resolve_session(db, device_pk, client_id, ev)
+    if session.status == SessionStatus.CANCELLED:
+        raise EventConflict("Session was cancelled on the server")
+    if session.status == SessionStatus.COMPLETED:
+        return {"already_completed_session_id": session.id}   # server billing stays as is
+
+    table = db.execute(
+        select(BilliardTable).where(BilliardTable.id == session.table_id).with_for_update()
+    ).scalar_one()
+    note = _apply_final_scores_if_present(db, session, ev.data)   # device wins on scores
+    session_lifecycle.finalize_stop(db, session, table, None, _event_time(ev))
+    return note
+
+
+def _h_game_start(db, device_pk, client_id, ev):
+    session = _resolve_session(db, device_pk, client_id, ev)
+    if session.status != SessionStatus.ACTIVE:
+        raise EventConflict("Session is not active on the server")
+    already = _mapped(db, device_pk, "game", ev.local_game_id)
+    if already is not None:
+        return {"already_mapped_game_id": already}
+
+    active = game_lifecycle.get_active_game(db, session.id)
+    if active is not None:                       # device's game MAPS TO the server's
+        _map_local(db, device_pk, "game", ev.local_game_id, active.id)
+        return {"adopted_game_id": active.id}
+
+    game = game_lifecycle.open_game(db, session, _event_time(ev))
+    _map_local(db, device_pk, "game", ev.local_game_id, game.id)
+    return None
+
+
+def _h_new_game(db, device_pk, client_id, ev):
+    """ev.local_game_id / game_id = the game being finished;
+    data.new_local_game_id = the id the device gave the next game."""
+    game = _resolve_game(db, device_pk, client_id, ev)
+    session = db.get(TableSession, game.session_id)
+    if game.status == GameStatus.CANCELLED:
+        raise EventConflict("Game was cancelled on the server")
+    if session.status != SessionStatus.ACTIVE:
+        raise EventConflict("Session is not active on the server")
+
+    note = None
+    if "score_a" in ev.data or "score_b" in ev.data:
+        a, b = _scores(ev.data)                  # final score of the finished game
+        note = _apply_scores(db, game, a, b)
+
+    at = _event_time(ev)
+    if game.status == GameStatus.ACTIVE:
+        game_lifecycle.close_game(db, game, at)
+
+    new_local = ev.data.get("new_local_game_id")
+    if _mapped(db, device_pk, "game", new_local) is not None:
+        return note
+
+    nxt = game_lifecycle.get_active_game(db, session.id)
+    adopted = nxt is not None
+    if nxt is None:
+        nxt = game_lifecycle.open_game(db, session, at)
+    _map_local(db, device_pk, "game", new_local, nxt.id)
+    if adopted:
+        note = {**(note or {}), "adopted_game_id": nxt.id}
+    return note
+
+
 HANDLERS: dict[DeviceEventType, Callable] = {
     DeviceEventType.HEARTBEAT: _h_heartbeat,
     DeviceEventType.SCORE_CHANGE: _h_score_change,
     DeviceEventType.SCORE_RESET: _h_score_reset,
     DeviceEventType.GAME_END: _h_game_end,
+    DeviceEventType.SESSION_START: _h_session_start,
+    DeviceEventType.SESSION_STOP: _h_session_stop,
+    DeviceEventType.GAME_START: _h_game_start,
+    DeviceEventType.NEW_GAME: _h_new_game,
 }
 
 
@@ -204,7 +379,7 @@ def _process_one(db: Session, device_pk: int, client_id: str, ev: DeviceEventIn)
     except EventConflict as e:
         db.rollback()
         failure_status, error = DeviceEventStatus.CONFLICT, str(e)
-    except EventRejected as e:
+    except (EventRejected, ValueError) as e:
         db.rollback()
         error = str(e)
     except Exception as e:                      # one bad event must not block the queue
