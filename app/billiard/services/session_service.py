@@ -13,9 +13,8 @@ from app.billiard.models import (
     BilliardTable, TableSession, SessionItem, SessionStatus,
 )
 from app.billiard.schemas.session import BillResponse, SessionItemResponse
-from app.billiard.services.table_lifecycle import mark_available
-from app.billiard.services.game_lifecycle import close_active_game
-from app.billiard.utils.billing import CENT, billable_minutes, calculate_table_fee
+from app.billiard.services import session_lifecycle
+from app.billiard.utils.billing import CENT
 from app.product.models.product import Product, ProductVariant
 from app.user.models.user import User
 
@@ -73,30 +72,10 @@ class SessionService:
         session = SessionService.get_locked_session(db, session_id, user)
         if session.status != SessionStatus.ACTIVE:
             raise HTTPException(409, "Session is already completed")
-
         table = db.execute(
             select(BilliardTable).where(BilliardTable.id == session.table_id).with_for_update()
         ).scalar_one()
-
-        end = datetime.now(timezone.utc)
-        minutes = billable_minutes(session.start_time, end)
-        fee = calculate_table_fee(session.hourly_rate, minutes, BillingPolicy(session.billing_policy))
-
-        session.end_time = end
-        session.status = SessionStatus.COMPLETED
-        session.duration_minutes = minutes
-        session.total_table_fee = fee
-        session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
-        session.grand_total = fee + session.total_product_fee
-        session.stopped_by_id = user.id
-
-        close_active_game(db, session, end)
-
-        # Business rule: the bill is generated at STOP, so the table is freed now,
-        # not after payment. Payment settles an already-completed session.
-        # Single owner of table.status transitions (see table_lifecycle).
-        mark_available(table)
-        db.flush()
+        session_lifecycle.finalize_stop(db, session, table, user.id)
         return session
 
     @staticmethod

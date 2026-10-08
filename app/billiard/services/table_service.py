@@ -10,7 +10,7 @@ from app.billiard import config
 from app.billiard.config import BillingPolicy
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate
-from app.billiard.services.table_lifecycle import mark_playing
+from app.billiard.services.session_lifecycle import open_session
 from app.billiard.utils.billing import as_utc, billable_minutes, calculate_table_fee
 from app.user.models.user import User
 
@@ -62,23 +62,11 @@ class TableService:
         # Single owner of table.status transitions (see table_lifecycle).
         # Raises ValueError if the table is inactive or not AVAILABLE.
         try:
-            mark_playing(table)
-        except ValueError as e:
+            session = open_session(db, table, user.id)   # mark_playing + rate/policy snapshot
+        except ValueError as e:                          # inactive / not AVAILABLE
             raise HTTPException(409, str(e))
-
-        session = TableSession(
-            table_id=table.id,
-            start_time=datetime.now(timezone.utc),
-            status=SessionStatus.ACTIVE,
-            hourly_rate=table.hourly_rate,                 # snapshot
-            billing_policy=config.BILLING_POLICY.value,    # snapshot
-            opened_by_id=user.id,
-        )
-        db.add(session)
-        try:
-            db.flush()
         except IntegrityError:
-            db.rollback()   # also discards the PLAYING status set above
+            db.rollback()
             raise HTTPException(409, "Table already has an active session")
         return session
 
