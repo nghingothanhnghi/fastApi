@@ -82,3 +82,13 @@ def close_active_game(
     if game is None:
         return None
     return close_game(db, game, at)
+
+
+def set_scores(db: Session, game: TableGame, a: int, b: int) -> tuple[int, int]:
+    """Force both scores (device-wins reconciliation). Returns the previous (a, b)."""
+    if a < 0 or b < 0:
+        raise ValueError("Scores cannot be negative")
+    previous = (game.player_a_score, game.player_b_score)
+    game.player_a_score, game.player_b_score = a, b
+    db.flush()
+    return previous
