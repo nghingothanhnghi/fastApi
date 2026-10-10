@@ -3,7 +3,8 @@
 # finalizes one (fee, totals, table freed). Used by the POS path
 # (table_service.start_session / session_service.stop_session) AND the device
 # path (event_service), so billing can never differ between the two.
-# No imports from other services (same rule as table_lifecycle / game_lifecycle).
+# No imports from other services (same rule as table_lifecycle / game_lifecycle),
+# except billing_service, which is read-only and imports no lifecycle module.
 # Never commits or locks; the caller holds the row locks.
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -11,12 +12,11 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.billiard import config
-from app.billiard.config import BillingPolicy
 from app.billiard.models import BilliardTable, SessionStatus, TableSession
+from app.billiard.services.billing_service import billing_service
 from app.billiard.services.game_lifecycle import close_active_game
 from app.billiard.services.table_lifecycle import mark_available, mark_playing
-from app.billiard.utils.billing import as_utc, billable_minutes, calculate_table_fee
+from app.billiard.utils.billing import as_utc, billable_minutes
 
 
 def resolve_time(at: Optional[datetime], floor: Optional[datetime] = None) -> tuple[datetime, str]:
@@ -40,13 +40,18 @@ def open_session(
     May raise IntegrityError from the flush (uq_one_active_session_per_table)."""
     mark_playing(table)
     start, source = resolve_time(at)
+    # The rule is chosen once, by the start time, and frozen into the session
+    # (rate + rule type + params). With no matching rule this is exactly the old
+    # behaviour: table rate + configured default policy.
+    quote = billing_service.quote_for_table(db, table, start)
     session = TableSession(
         table_id=table.id,
         start_time=start,
         start_time_source=source,
         status=SessionStatus.ACTIVE,
-        hourly_rate=table.hourly_rate,                 # snapshot
-        billing_policy=config.BILLING_POLICY.value,    # snapshot
+        hourly_rate=quote.hourly_rate,                 # snapshot
+        billing_policy=quote.rule_type,                # snapshot
+        pricing_snapshot=quote.snapshot(start),        # snapshot (rule id/name/params)
         opened_by_id=opened_by_id,
     )
     db.add(session)
@@ -62,7 +67,7 @@ def finalize_stop(
     game, free the table. Caller must have checked status == ACTIVE."""
     end, source = resolve_time(at, floor=session.start_time)
     minutes = billable_minutes(session.start_time, end)
-    fee = calculate_table_fee(session.hourly_rate, minutes, BillingPolicy(session.billing_policy))
+    fee = billing_service.table_fee(session, minutes)   # from the session's own snapshot
 
     session.end_time = end
     session.end_time_source = source

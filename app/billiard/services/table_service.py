@@ -7,11 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, contains_eager
 
 from app.billiard import config
-from app.billiard.config import BillingPolicy
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate
+from app.billiard.services.billing_service import billing_service
 from app.billiard.services.session_lifecycle import open_session
-from app.billiard.utils.billing import as_utc, billable_minutes, calculate_table_fee
+from app.billiard.utils.billing import as_utc, billable_minutes
 from app.user.models.user import User
 
 
@@ -85,7 +85,7 @@ class TableService:
         out = []
         for s in sessions:
             minutes = billable_minutes(as_utc(s.start_time), now)
-            table_fee = calculate_table_fee(s.hourly_rate, minutes, BillingPolicy(s.billing_policy))
+            table_fee = billing_service.table_fee(s, minutes)   # same function as the final bill
             product_fee = s.total_product_fee
             out.append({
                 "id": s.table.id,
