@@ -22,7 +22,7 @@
 # Other types (e.g. time_extend) are stored as REJECTED with a clear message,
 # never silently dropped.
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Callable, Optional
 
 from sqlalchemy import select
@@ -35,6 +35,9 @@ from app.billiard.models import (
 )
 from app.billiard.schemas.event import DeviceEventIn, EventBatchResult, EventRef
 from app.billiard.services import game_lifecycle, session_lifecycle
+
+from app.billiard import config
+from app.billiard.utils.billing import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +54,23 @@ class EventConflict(Exception):
 def _event_time(ev: DeviceEventIn) -> Optional[datetime]:
     """Device timestamp only when its clock was valid; otherwise let the
     lifecycle helpers use server time."""
-    return ev.timestamp if ev.clock_synced is not False else None
+    if ev.timestamp is None or ev.clock_synced is False:
+       return None
+    return _check_device_time(ev.timestamp)
 
+def _check_device_time(ts: datetime) -> datetime:
+    now = datetime.now(timezone.utc)
+    ts = as_utc(ts)
+    ahead = (ts - now).total_seconds()
+    if ahead > config.MAX_CLOCK_AHEAD_SECONDS:
+        raise EventRejected(
+            f"Device clock is {int(ahead)}s ahead of server time "
+            f"(limit {config.MAX_CLOCK_AHEAD_SECONDS}s); resync the device clock")
+    if ts < now - timedelta(hours=config.MAX_OFFLINE_HOURS):
+        raise EventRejected(
+            f"Device timestamp is older than {config.MAX_OFFLINE_HOURS}h; "
+            "too old to bill from the device clock")
+    return ts
 
 def _scores(data: dict) -> tuple[int, int]:
     try:

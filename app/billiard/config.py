@@ -18,6 +18,9 @@ MIN_BILLABLE_MINUTES = int(os.getenv("BILLIARD_MIN_BILLABLE_MINUTES", "1"))
 FEE_ROUNDING_UNIT = Decimal(os.getenv("BILLIARD_FEE_ROUNDING_UNIT", "1"))
 CURRENCY = os.getenv("BILLIARD_CURRENCY", "VND")
 
+MAX_CLOCK_AHEAD_SECONDS = int(os.getenv("BILLIARD_MAX_CLOCK_AHEAD_SECONDS", "120"))
+MAX_OFFLINE_HOURS = int(os.getenv("BILLIARD_MAX_OFFLINE_HOURS", "48"))
+
 # Timezone the club operates in. Report date ranges are interpreted in this
 # timezone, then converted to UTC for querying (end_time is stored in UTC).
 TIMEZONE = os.getenv("BILLIARD_TIMEZONE", "Asia/Ho_Chi_Minh")
