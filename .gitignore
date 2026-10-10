@@ -31,7 +31,9 @@ data/
 *.dll
 
 # Ignore test scripts
-tests/
+#tests/
+
+
 frontend/
 farmApp/
 

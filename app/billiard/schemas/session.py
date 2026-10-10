@@ -41,6 +41,10 @@ class BillResponse(BaseModel):
     duration_minutes: Optional[int] = None
     hourly_rate: Decimal
     billing_policy: str
+    # From the session's pricing snapshot. None / {} for sessions that matched no
+    # rule and for sessions created before pricing rules existed.
+    pricing_rule_name: Optional[str] = None
+    pricing_params: dict[str, Any] = Field(default_factory=dict)
 
     total_table_fee: Decimal
     total_product_fee: Decimal

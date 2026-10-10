@@ -88,6 +88,7 @@ class SessionService:
     @staticmethod
     def build_bill(session: TableSession) -> dict:
         """Built purely from session snapshots; safe for old receipts."""
+        snap = session.pricing_snapshot or {}
         return BillResponse(
             session_id=session.id,
             table_id=session.table_id,
@@ -98,6 +99,8 @@ class SessionService:
             duration_minutes=session.duration_minutes,
             hourly_rate=session.hourly_rate,
             billing_policy=session.billing_policy,
+            pricing_rule_name=snap.get("rule_name"),
+            pricing_params=snap.get("params") or {},
             total_table_fee=session.total_table_fee,
             total_product_fee=session.total_product_fee,
             grand_total=session.grand_total,
