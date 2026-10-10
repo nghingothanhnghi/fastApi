@@ -270,3 +270,33 @@ def test_live_total_uses_happy_hour_snapshot_rate(db):
     assert live[0]["hourly_rate"] == Decimal("60000")
     # 30 min at 60000/h = 30000 (31000 if the clock ticked into the next billable minute)
     assert live[0]["current_table_fee"] in (Decimal("30000"), Decimal("31000"))
+
+
+# ------------------------------------------------------------ bill / receipt
+
+def test_bill_shows_the_pricing_rule_name_and_params(db):
+    from app.billiard.services.session_service import session_service
+    table = _table(db)
+    _rule(db, PricingRuleType.BLOCK, params={"block_minutes": 30}, name="30 min blocks")
+    s = _play(db, table, _local(10), 45)
+
+    bill = session_service.build_bill(s)
+
+    assert bill["pricing_rule_name"] == "30 min blocks"
+    assert bill["pricing_params"] == {"block_minutes": 30}
+    assert bill["billing_policy"] == "block"
+    assert bill["total_table_fee"] == Decimal("100000")
+
+
+def test_bill_without_rule_or_snapshot_has_no_rule_name(db):
+    from app.billiard.services.session_service import session_service
+    table = _table(db)
+
+    no_rule = _play(db, table, _local(10), 60)
+    legacy = _play(db, table, _local(12), 60)
+    legacy.pricing_snapshot = None
+
+    for s in (no_rule, legacy):
+        bill = session_service.build_bill(s)
+        assert bill["pricing_rule_name"] is None
+        assert bill["pricing_params"] == {}
