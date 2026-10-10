@@ -88,9 +88,9 @@ class UserRoleWithDetails(UserRoleOut):
 
 # Bulk operations
 class BulkRoleAssignment(BaseModel):
-    user_ids: List[int] = Field(..., min_items=1, description="List of user IDs")
-    role_ids: List[int] = Field(..., min_items=1, description="List of role IDs to assign")
+    user_ids: List[int] = Field(..., min_length=1, description="List of user IDs")
+    role_ids: List[int] = Field(..., min_length=1, description="List of role IDs to assign")
 
 class BulkRoleRemoval(BaseModel):
-    user_ids: List[int] = Field(..., min_items=1, description="List of user IDs")
-    role_ids: List[int] = Field(..., min_items=1, description="List of role IDs to remove")
+    user_ids: List[int] = Field(..., min_length=1, description="List of user IDs")
+    role_ids: List[int] = Field(..., min_length=1, description="List of role IDs to remove")
