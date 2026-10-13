@@ -85,6 +85,18 @@ def test_duplicate_event_is_not_applied_twice(db, env):
     assert scores(db, env.game) == (3, 2)
 
 
+def test_rejected_event_is_not_acknowledged_as_a_duplicate(db, env):
+    """A retry of an unprocessed event must stay actionable for the device."""
+    bad = E(1, "score_change", {"game_id": 9999, "score_a": 1, "score_b": 1})
+    event_service.ingest(db, env.device, [bad])
+
+    result = event_service.ingest(db, env.device, [bad])
+
+    assert [item.event_id for item in result.rejected] == ["e1"]
+    assert not result.duplicates
+    assert result.server_state_version == 0
+
+
 def test_ordered_by_seq_not_arrival_or_timestamp(db, env):
     ref = {"game_id": env.game.id}
     now = datetime.now(timezone.utc)
@@ -162,7 +174,7 @@ def test_game_resolved_from_table_when_no_id_given(db, env):
 
 
 def test_unimplemented_event_type_rejected_not_dropped(db, env):
-    res = event_service.ingest(db, env.device, [E(1, "session_start", table_id=env.table.id)])
+    res = event_service.ingest(db, env.device, [E(1, "time_extend", table_id=env.table.id)])
     assert len(res.rejected) == 1
     assert db.execute(select(DeviceEvent).where(DeviceEvent.event_id == "e1")).scalar_one()
 
@@ -175,6 +187,15 @@ def test_server_state_version_is_contiguous_prefix(db, env):
         E(3, "score_change", ref),                                             # applied, but after a gap
     ])
     assert res.server_state_version == 1
+
+
+def test_cursor_catches_up_after_an_out_of_order_sync(db, env):
+    ref = {"game_id": env.game.id, "score_a": 1, "score_b": 1}
+    later = event_service.ingest(db, env.device, [E(2, "score_change", ref)])
+    assert later.server_state_version == 0
+
+    earlier = event_service.ingest(db, env.device, [E(1, "score_change", ref)])
+    assert earlier.server_state_version == 2
 
 
 def test_heartbeat_updates_last_seen(db, env):

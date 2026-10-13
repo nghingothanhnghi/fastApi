@@ -54,22 +54,33 @@ app/billiard/
 ├── models/            # Database tables (SQLAlchemy)
 │   ├── table.py       #   BilliardTable, TableStatus
 │   ├── session.py     #   TableSession, SessionStatus, PaymentState
-│   └── session_item.py#   SessionItem
+│   ├── game.py        #   TableGame, GameStatus
+│   ├── pricing_rule.py#   PricingRule
+│   └── device.py      #   Controller, event inbox, local ID map
 ├── schemas/           # Request/response shapes (Pydantic)
 │   ├── table.py
 │   ├── session.py
-│   └── report.py
+│   ├── game.py
+│   ├── pricing.py
+│   └── event.py
 ├── services/          # Business rules (the "brain")
 │   ├── table_service.py     # create/list tables, start session, active tables
 │   ├── session_service.py   # add item, stop, get bill
 │   ├── payment_service.py   # pay + confirm (bridge to Payments module)
-│   └── report_service.py    # usage/revenue report
+│   ├── report_service.py    # usage/revenue report
+│   ├── game_service.py      # games and score changes
+│   ├── pricing_rule_service.py # club/table time-based price rules
+│   └── event_service.py     # idempotent ESP32 event ingestion/sync
 ├── routes/            # HTTP endpoints only (no business logic)
 │   ├── table_router.py
 │   ├── session_router.py
-│   └── report_router.py
-└── utils/
-    └── billing.py     # Pure functions: billable_minutes, calculate_table_fee
+│   ├── report_router.py
+│   ├── game_router.py
+│   ├── pricing_router.py
+│   └── controller_router.py
+├── utils/
+│   └── billing.py     # Pure functions: billable_minutes, calculate_table_fee
+└── README.md
 ```
 
 ### Layer rules (please follow these)
@@ -297,6 +308,20 @@ All endpoints require a logged-in user (JWT). Roles are noted where required.
 | `POST` | `/sessions/{id}/pay` | Start payment (see section 7) |
 | `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway payment |
 
+### Games, pricing, and controller
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/sessions/{id}/games` | List the session's games in order |
+| `POST` | `/sessions/{id}/games` | Start a game; billing keeps running |
+| `POST` | `/games/{id}/score` | Apply a validated score delta |
+| `POST` | `/games/{id}/reset`, `/new`, `/finish` | Reset, continue with a new game, or finish it |
+| `GET` | `/billiard/pricing-rules/quote` | Preview a price for a table, start time, and duration |
+| `GET/POST/PUT/DELETE` | `/billiard/pricing-rules` | Manage price rules (manager/admin writes) |
+| `GET` | `/billiard/controller/state` | Authenticated controller snapshot after reconnect/reboot |
+| `POST` | `/billiard/controller/events` | Ingest one authenticated controller event |
+| `POST` | `/billiard/controller/sync` | Replay an offline controller queue idempotently |
+
 ### Reports
 
 | Method | Path | Role | Description |
@@ -359,20 +384,19 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 
 ## 10. Roadmap (not implemented yet)
 
-🗺️ The items below are the **target design**. None of them exist in the code today, so don't look for these tables or endpoints.
+🗺️ The items below are the **remaining target design**. The module already
+implements games/scores, pricing rules, controller device authentication,
+idempotent event ingestion, local-to-server ID mapping, and controller state
+snapshots. See the API routers and tests for those current capabilities.
 
 | Feature | Idea |
 |---------|------|
-| **Games and scores** | Several games inside one session (`table_games`): Player A/B scores, "New game" does **not** restart billing |
-| **Electronic scoreboard** | Display with score, elapsed time, start/end time, offline indicator |
-| **Central ESP32** | One ESP32 controls all tables over RS485 (never one per table) |
-| **Offline mode** | ESP32 keeps a persistent event queue and syncs when Wi-Fi returns |
-| **Event idempotency** | Each device event has a unique `event_id` so duplicates never double-count a score |
-| **Packages** | Play-time packages that include products |
-| **Pricing rules** | Different rates by time of day or day of week |
+| **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling |
+| **RS485 firmware** | Controller firmware and the physical display/button protocol |
+| **Packages** | Finish package CRUD, package selection at session start, included-item consumption, and billing |
+| **Reservations** | Endpoint to set a table to `reserved` |
 | **Discounts** | A `discount` field on the session |
 | **Cancelled sessions** | A `cancelled` status |
-| **Reservations** | Endpoint to set a table to `reserved` |
 | **Real-time updates** | WebSocket push to the POS |
 
 ### Principle to keep when building the ESP32 part

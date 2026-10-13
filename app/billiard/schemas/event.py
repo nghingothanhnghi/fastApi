@@ -32,10 +32,13 @@ class EventRef(BaseModel):
 
 
 class EventBatchResult(BaseModel):
-    accepted: list[str] = []
-    duplicates: list[str] = []
-    rejected: list[EventRef] = []
-    conflicts: list[EventRef] = []
+    # Each response must own its lists.  ``default_factory`` also makes this
+    # explicit to readers and remains safe if this schema is ever used outside
+    # of Pydantic's normal model-copying path.
+    accepted: list[str] = Field(default_factory=list)
+    duplicates: list[str] = Field(default_factory=list)
+    rejected: list[EventRef] = Field(default_factory=list)
+    conflicts: list[EventRef] = Field(default_factory=list)
     # Highest contiguous device_seq the server has applied. The device may
     # discard events up to here and must resend anything above it.
     server_state_version: int = 0

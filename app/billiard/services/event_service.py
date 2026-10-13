@@ -364,7 +364,15 @@ def _process_one(db: Session, device_pk: int, client_id: str, ev: DeviceEventIn)
     if existing is not None:
         if existing.device_pk != device_pk:
             return "rejected", "event_id already used"
-        return "duplicate", None
+        # Only a *processed* event is safe to acknowledge as a duplicate.  A
+        # rejected/conflicting event must remain visible to the controller and
+        # must not advance its contiguous acknowledgement cursor; otherwise a
+        # retry could cause the device to discard an event the server never
+        # applied.
+        if existing.status == DeviceEventStatus.PROCESSED:
+            return "duplicate", None
+        outcome = "conflict" if existing.status == DeviceEventStatus.CONFLICT else "rejected"
+        return outcome, existing.error or "Event was not applied"
 
     seq_taken = db.execute(
         select(DeviceEvent.id).where(DeviceEvent.device_pk == device_pk, DeviceEvent.device_seq == ev.device_seq)
@@ -391,8 +399,15 @@ def _process_one(db: Session, device_pk: int, client_id: str, ev: DeviceEventIn)
         return "accepted", None
     except IntegrityError as e:
         db.rollback()
-        if db.execute(select(DeviceEvent.id).where(DeviceEvent.event_id == ev.event_id)).first():
-            return "duplicate", None            # lost a race with a concurrent retry
+        existing = db.execute(
+            select(DeviceEvent.status, DeviceEvent.error).where(DeviceEvent.event_id == ev.event_id)
+        ).one_or_none()
+        if existing is not None:
+            status, existing_error = existing
+            if status == DeviceEventStatus.PROCESSED:
+                return "duplicate", None        # lost a race with a concurrent retry
+            outcome = "conflict" if status == DeviceEventStatus.CONFLICT else "rejected"
+            return outcome, existing_error or "Event was not applied"
         error = f"Database constraint: {e.orig}"
     except EventConflict as e:
         db.rollback()
@@ -413,10 +428,31 @@ def _process_one(db: Session, device_pk: int, client_id: str, ev: DeviceEventIn)
 class EventService:
 
     @staticmethod
+    def _advance_contiguous_cursor(db: Session, device_pk: int, current: int) -> int:
+        """Return the highest consecutive *processed* sequence number.
+
+        Events can arrive in separate, out-of-order sync batches.  Rechecking
+        persisted state after a batch means an earlier gap being filled later
+        immediately acknowledges already-processed following events, without
+        ever stepping over a rejected or missing event.
+        """
+        cursor = current
+        while True:
+            status = db.execute(
+                select(DeviceEvent.status).where(
+                    DeviceEvent.device_pk == device_pk,
+                    DeviceEvent.device_seq == cursor + 1,
+                )
+            ).scalar_one_or_none()
+            if status != DeviceEventStatus.PROCESSED:
+                return cursor
+            cursor += 1
+
+    @staticmethod
     def ingest(db: Session, device: BilliardDevice, events: list[DeviceEventIn]) -> EventBatchResult:
         device_pk, client_id = device.id, device.client_id
         result = EventBatchResult()
-        applied_seq = device.last_applied_seq
+        initial_cursor = device.last_applied_seq
 
         for ev in sorted(events, key=lambda e: e.device_seq):   # order by seq, NEVER timestamp
             outcome, error = _process_one(db, device_pk, client_id, ev)
@@ -429,12 +465,14 @@ class EventService:
             else:
                 result.rejected.append(EventRef(event_id=ev.event_id, error=error or ""))
 
-            # Advance only over a contiguous run of APPLIED events, so the device
-            # never discards something the server did not actually apply.
-            if outcome in ("accepted", "duplicate") and ev.device_seq == applied_seq + 1:
-                applied_seq = ev.device_seq
-
+        # Advance only over a contiguous run of PROCESSED rows, so the device
+        # never discards an event the server rejected or has not received yet.
+        # Re-read after the per-event commits.  ``max`` below makes the cursor
+        # monotonic even if two sync requests finish in a different order.
         device = db.get(BilliardDevice, device_pk)
+        applied_seq = EventService._advance_contiguous_cursor(
+            db, device_pk, max(initial_cursor, device.last_applied_seq)
+        )
         device.last_applied_seq = max(device.last_applied_seq, applied_seq)
         device.last_seen = datetime.now(timezone.utc)
         device.status = DeviceStatus.ONLINE

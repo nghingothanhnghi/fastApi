@@ -115,5 +115,5 @@ class PricingQuoteOut(BaseModel):
     rule_name: Optional[str] = None
     rule_type: str
     hourly_rate: Decimal
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = Field(default_factory=dict)
     fee: Decimal
