@@ -1,4 +1,4 @@
-# AIoT Plant Vision Module — Current Architecture (V1, implemented)
+# AIoT Plant Vision Module — Current Architecture and Delivery Status
 
 > **Note on this document's history**: this file originally described the *pre-implementation plan* for `app/ai_vision`, including code blocks with `Plant`/`Camera` model names and a simple poll-based job queue. That draft is no longer accurate — the module has since been implemented and hardened. This revision describes what's actually in the codebase today. See `app/ai_vision/README.md` for the maintained, per-layer developer guide; this file stays focused on module-level status, decisions, and what's deferred.
 
@@ -23,13 +23,14 @@ Reused pieces this module does **not** duplicate:
 
 | Phase | Scope | Status |
 |---|---|---|
-| V1 | Plant/camera CRUD, image ingestion + storage abstraction, mock detector, growth tracking, health scoring, sensor fusion, background inference job, REST API, auth + tenant scoping, image serving | **Implemented** |
+| V1 | Plant/camera CRUD, image ingestion + local storage, growth tracking, health scoring, sensor fusion, background inference job, REST API, auth + tenant scoping, image serving | **Implemented** |
 | V1.1 | Debounced anomaly detection with persisted state | **Implemented** (originally scoped as V2 — done ahead of schedule, see §5) |
 | V1.2 | Atomic job claiming + lease-based recovery | **Implemented** (not in the original plan at all — added because the naive poll-and-process draft had a double-processing race) |
-| V2 | Real leaf-health model, real detector | Not started — interfaces (`PlantVisionModel`, `InferenceManager.MODEL_REGISTRY`) are ready to receive them |
-| V3 | Disease/pest classifier | Slot exists: implement another `PlantVisionModel` subclass, register it |
-| V4 | Deeper sensor+vision fusion | `SensorFusionService.get_window()` is the extension point |
-| V5–V7 | Growth prediction, AI-assisted irrigation/nutrient optimization | Out of scope; see safety boundary below |
+| V2 | General-purpose YOLO plant detection and HSV leaf-health analysis | **Implemented**; enabled by default with mock fallback. Neither model is trained on the project dataset. |
+| V3 | Classical-CV disease/pest proxy and debounced anomaly signal | **Implemented**; detects leaf-edge damage and dark-spot proxies, not named diseases or pests. |
+| V4 | Sensor + vision fusion | **Partially implemented**; health records retain a sensor window, but no calibrated multimodal model exists. |
+| V5 | Growth projection and stage-transition forecast | **Implemented** as a read-only, low-confidence heuristic. |
+| V6–V7 | AI-assisted irrigation/nutrient optimization | Not started; intentionally outside the safety boundary below. |
 
 ## 2. Safety boundary (unchanged from original plan, still correctly enforced)
 
@@ -62,8 +63,9 @@ app/ai_vision/
 ├── ai/
 │ ├── base/vision_model.py PlantVisionModel (ABC)
 │ └── inference/
-│ ├── detector.py MockYOLOPlantDetector
-│ ├── classifier.py MockLeafHealthClassifier
+│ ├── detector.py YOLOPlantDetector + MockYOLOPlantDetector fallback
+│ ├── classifier.py HSVLeafHealthClassifier + MockLeafHealthClassifier fallback
+│ ├── disease_classifier.py LeafDiseasePestClassicalCV + mock fallback
 │ └── inference_manager.py InferenceManager (model registry + versioning)
 ├── integrations/
 │ ├── storage_client.py ImageStorageService (ABC) + LocalImageStorage
@@ -78,7 +80,8 @@ app/ai_vision/
 │ ├── growth_service.py + zero-baseline fallback (GROWTH_ANOMALY_ABS_PCT_PER_DAY)
 │ ├── health_service.py
 │ ├── anomaly_service.py ⚠️ now debounced via AnomalyTracker
-│ └── recommendation_service.py
+│ ├── recommendation_service.py
+│ └── growth_prediction_service.py read-only canopy/stage projection
 ├── helpers/
 │ └── access_helper.py ⚠️ new — ensure_plant_access / ensure_camera_access
 ├── controllers/
@@ -91,6 +94,7 @@ app/ai_vision/
 ├── inference_router.py — requires get_current_user + ensure_plant_access
 ├── health_router.py — requires get_current_user + ensure_plant_access
 └── recommendation_router.py — requires get_current_user + ensure_plant_access
+└── prediction_router.py — authenticated growth-prediction history
 ```
 
 Wired into `app/init_db.py` as:
@@ -102,7 +106,7 @@ from .ai_vision.models import (
 )
 ```
 
-Wired into `main.py`: all five routers are included, and `AI_VISION_IMAGE_DIR` is mounted at `AI_VISION_IMAGE_URL` via `StaticFiles` (this mount was missing for a period after the routes were added — confirm it's present if you're diffing against an older checkout; uploaded images 404 without it).
+Wired into `main.py`: the plant/camera, image, inference, health, recommendation, and growth-prediction routers are included, and `AI_VISION_IMAGE_DIR` is mounted at `AI_VISION_IMAGE_URL` via `StaticFiles`.
 
 ## 4. What changed from the original plan, and why
 
@@ -127,13 +131,17 @@ The original plan explicitly deferred debouncing: *"current `AnomalyService` fir
 ### 4.7 Hydro batch linkage
 Not in the original plan at all. `app/ai_vision/integrations/hydro_batch_client.py` gives `VisionPlant` a one-way, read-only path to look up `PlantBatch`/`Plant` info from `hydro_system`, used by `plant_service.link_or_create_from_hydro_batch()` (idempotent — returns the existing linked `VisionPlant` if one already exists for that batch). `hydro_system` never imports anything from `ai_vision`, preserving the existing one-directional dependency convention.
 
-## 5. What's still genuinely deferred (not silently dropped, just not built)
+## 5. What is complete, and what remains deferred
 
-- **Real models**: `MockYOLOPlantDetector` / `MockLeafHealthClassifier` are placeholders with the exact I/O contract (`predict(image) -> dict` with a `confidence` key) a real model needs to satisfy. Swapping them is a `MODEL_REGISTRY` change in `inference_manager.py`, nothing downstream should need to change.
+The module is **feature-complete for an image-analysis MVP**: authenticated tenant-scoped CRUD, upload validation and local storage, asynchronous job processing with recovery, prediction persistence, annotated output, growth/health/anomaly/recommendation records, sensor snapshots, and read-only growth forecasts are all wired into the application.
+
+It is **not production-complete for autonomous crop diagnosis or control**. The current vision algorithms are useful explainable heuristics, but they have not been calibrated or validated against this project's crops, cameras, or labels. They must not be presented as a trained disease diagnosis system.
+
+- **Trained crop-specific models**: V2/V3 use a COCO-pretrained YOLO detector plus HSV/classical-CV heuristics. A fine-tuned detector and labeled health/disease classifier remain the main ML gap. The mock implementations are retained for development and automatic fallback.
 - **Object storage backends (S3/MinIO)**: `ImageStorageService` ABC exists; only `LocalImageStorage` is implemented. `config.AI_VISION_STORAGE_BACKEND` is read but unused beyond documenting intent.
 - **Automation policy / actuator wiring**: still deliberately not built — see §2.
 - **Live camera pull**: `camera_client.fetch_image_from_camera()` still raises `NotImplementedError`; upload is the only ingestion path.
-- **React dashboard, automated tests, TimescaleDB**: not included.
+- **React dashboard, module-level automated tests, TimescaleDB, and calibrated alert policies**: not included.
 - **`postorocessing/` directory typo**: preserved intentionally until a dedicated rename PR, so as not to churn imports alongside unrelated changes.
 
 ## 6. `.env` reference
@@ -141,9 +149,11 @@ Not in the original plan at all. `app/ai_vision/integrations/hydro_batch_client.
 ```env
 AI_ENABLED=true
 AI_MODEL_NAME=plant-detector
-AI_MODEL_VERSION=v1-mock
+AI_MODEL_VERSION=v1
 AI_CONFIDENCE_THRESHOLD=0.60
 AI_JOB_LEASE_SECONDS=600
+AI_USE_REAL_MODELS=true
+AI_DETECTOR_WEIGHTS=yolov8n.pt
 
 PLANT_HEALTH_WARNING_THRESHOLD=70
 PLANT_HEALTH_CRITICAL_THRESHOLD=50

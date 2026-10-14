@@ -33,6 +33,7 @@ def save_annotated_image(image, predictions_by_task: dict) -> str | None:
 
     filename = f"{uuid4().hex}_annotated.jpg"
     file_path = os.path.join(config.AI_VISION_IMAGE_DIR, filename)
-    cv2.imwrite(file_path, annotated)
+    if not cv2.imwrite(file_path, annotated):
+        raise OSError(f"Could not write annotated AI vision image to {file_path}")
 
     return f"{config.AI_VISION_IMAGE_URL.rstrip('/')}/{filename}"

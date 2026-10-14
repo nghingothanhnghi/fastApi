@@ -28,6 +28,8 @@ class ImageService:
             image_hash=stored["image_hash"],
             content_type=file.content_type,
             file_size_bytes=stored["file_size_bytes"],
+            width=stored["width"],
+            height=stored["height"],
             processing_status="uploaded",
         )
         db.add(image)

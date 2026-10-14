@@ -6,11 +6,11 @@
 
 1. receives an uploaded plant image;
 2. queues and safely claims an inference job;
-3. runs detection and health-classification adapters;
-4. records predictions, growth, health, anomalies, and recommendations;
+3. runs plant detection, leaf-health, and disease/pest-proxy adapters;
+4. records predictions, growth, health, anomalies, recommendations, and a read-only growth forecast;
 5. exposes the result through REST endpoints.
 
-The current inference models are mock adapters. Real YOLO or classifier models should replace adapter implementations only; routes and business services should not need to change.
+By default, inference uses a COCO-pretrained YOLO detector, HSV color analysis, and classical-CV disease/pest proxies. They are explainable heuristics, not crop-specific trained diagnostic models. If model loading fails or `AI_USE_REAL_MODELS=false`, the module falls back to mock adapters.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Schemas are the API contract. Add or change request validation and response fiel
 Controllers orchestrate multi-step workflows. `vision_controller.py` is the owner of the complete analysis transaction:
 
 ```text
-predictions → growth → health → anomalies → recommendation → final job status
+predictions → growth → growth forecast → health → anomalies → recommendation → final job status
 ```
 
 Services called by this controller may use `db.flush()` to receive database IDs, but they must not commit. The controller commits a complete pipeline or rolls it back and marks the job failed.
@@ -80,6 +80,7 @@ Services implement one business capability each:
 - `health_service.py` — health score and sensor-context calculation.
 - `anomaly_service.py` — anomaly rules and persisted evidence.
 - `recommendation_service.py` — explainable recommendations with `pending_review` status.
+- `growth_prediction_service.py` — read-only canopy and batch-stage forecasts.
 - `plant_service.py` — plant and camera operations.
 
 Create a new service when a new capability has its own rules and data. Do not make one large "vision service" for unrelated concerns.
@@ -96,10 +97,12 @@ This is the model-facing layer:
 
 - `base/vision_model.py` defines the common model interface.
 - `inference/inference_manager.py` selects and runs registered models.
-- `inference/detector.py` and `inference/classifier.py` contain current mock adapters.
+- `inference/detector.py` — YOLO detector with mock fallback.
+- `inference/classifier.py` — HSV health analysis with mock fallback.
+- `inference/disease_classifier.py` — leaf-edge/dark-spot proxy with mock fallback.
 - `preprocessing/` and `postorocessing/` are reserved for image input/output transformations.
 
-When adding a real model, implement the existing model interface and register it in `InferenceManager.MODEL_REGISTRY`. Return the established result shape (`task`, model name/version, confidence, raw output) so downstream services stay unchanged.
+When adding a trained model, implement the existing model interface and register it in `InferenceManager.MODEL_REGISTRY`. Return the established result shape (`task`, model name/version, confidence, raw output) so downstream services stay unchanged.
 
 > Note: `postorocessing/` is currently misspelled in the directory name. Preserve it until imports are migrated together, then rename it in one dedicated change.
 
@@ -152,3 +155,16 @@ python -m app.init_db
 ```
 
 Start the application normally. The scheduler polls inference jobs every 15 seconds. For an image, either wait for the queue or call the manual analysis endpoint immediately; do not manually re-analyze a completed image unless an additional historical analysis record is intended.
+
+## Configuration and current limits
+
+```env
+AI_ENABLED=true
+AI_USE_REAL_MODELS=true
+AI_DETECTOR_WEIGHTS=yolov8n.pt
+AI_JOB_LEASE_SECONDS=600
+AI_VISION_IMAGE_DIR=uploads/ai_vision
+AI_VISION_IMAGE_URL=/static/ai_vision
+```
+
+Uploads are restricted to JPEG, PNG, or WebP, validated from the actual image bytes, and limited by `IMAGE_MAX_SIZE_MB` (10 by default). Local storage is the only implemented backend. Camera pull and automatic irrigation/nutrient control are not implemented; recommendations remain `pending_review`.

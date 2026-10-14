@@ -1,6 +1,6 @@
 # FastAPI IoT Automation System
 
-A comprehensive Python FastAPI server for IoT automation, featuring hydroponic system control, Android device management, computer vision object detection, and data processing pipelines.
+A comprehensive Python FastAPI server for IoT automation, featuring hydroponic system control, Android device management, computer vision object detection, AI-assisted plant-image analysis, and data processing pipelines.
 
 ## 🏗️ System Architecture
 
@@ -24,6 +24,7 @@ graph TB
         HYDRO[Hydro System Control]
         ANDROID[Android Device Management]
         VISION[Object Detection]
+        AI_VISION[AI Plant Vision]
         DATA[Data Processing]
     end
 
@@ -57,6 +58,7 @@ graph TB
     ROUTERS --> HYDRO
     ROUTERS --> ANDROID
     ROUTERS --> VISION
+    ROUTERS --> AI_VISION
     ROUTERS --> DATA
     
     MAIN --> SCHEDULER
@@ -68,12 +70,14 @@ graph TB
     HYDRO --> DB
     ANDROID --> DB
     VISION --> DB
+    AI_VISION --> DB
     DATA --> DB
     
     HYDRO --> SENSORS
     ANDROID --> ADB
     VISION --> CAMERAS
     VISION --> MODELS
+    AI_VISION --> MODELS
     USER --> EMAIL
     
     SENSOR_JOB --> SENSORS
@@ -108,6 +112,13 @@ graph TB
 - **Custom model training** support
 - **Image annotation** and dataset management
 - **Performance monitoring** and analytics
+
+### 🌿 AI Plant Vision
+- **Tenant-scoped plant/camera, image, and inference-job APIs**
+- **Queued image analysis** with lease recovery and annotated output images
+- **YOLO plant detection, HSV health signals, and classical-CV disease/pest proxies**
+- **Growth, health, sensor-context, anomaly, recommendation, and read-only forecast records**
+- Current models are heuristics/general-purpose models, not trained crop-diagnosis models; recommendations never control actuators automatically.
 
 ### 📊 Data Processing Pipeline
 - **Data ingestion** from multiple sources
@@ -203,6 +214,13 @@ python main.py
 - `GET /object-detection/models` - List available models
 - `POST /object-detection/train` - Start model training
 
+### AI Plant Vision
+- `POST /api/v1/plants` and `POST /api/v1/cameras` - Create AI-vision entities
+- `POST /api/v1/vision/images?plant_id={plant_id}` - Upload an image and queue analysis
+- `POST /api/v1/vision/analyze/{image_id}` - Run a manually requested analysis
+- `GET /api/v1/ai/inference/{job_id}` - Retrieve inference-job status and image URLs
+- `GET /api/v1/plants/{plant_id}/growth-predictions` - Retrieve growth forecasts
+
 ### System Health
 - `GET /health` - Application health check
 - `GET /scheduler/health` - Scheduler status
@@ -233,6 +251,14 @@ SMTP_PASSWORD=your-app-password
 SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# AI plant vision
+AI_ENABLED=true
+AI_USE_REAL_MODELS=true
+AI_DETECTOR_WEIGHTS=yolov8n.pt
+AI_JOB_LEASE_SECONDS=600
+AI_VISION_IMAGE_DIR=uploads/ai_vision
+AI_VISION_IMAGE_URL=/static/ai_vision
 ```
 
 ### Scheduler Jobs
@@ -273,6 +299,7 @@ fastApi/
 │   ├── data/          # Database
 │   ├── android_system/         # Android device management
 │   ├── camera_object_detection/# Computer vision module
+│   ├── ai_vision/              # Plant-image analysis module
 │   ├── core/                   # Core configuration
 │   ├── hydro_system/          # Hydroponic system control
 │   ├── middleware/            # Custom middleware
