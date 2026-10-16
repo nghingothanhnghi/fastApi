@@ -88,8 +88,8 @@ class DeviceService:
 
     # ── NEW ──────────────────────────────────────────────────────────────
     @staticmethod
-    def effective_status(d: BilliardDevice) -> DeviceStatus:
-        """Stored status goes stale (nothing flips it to OFFLINE), so derive it from last_seen."""
+    def effective_status(d: BilliardDevice):
+        from app.billiard.models import DeviceStatus
         if d.last_seen is None or datetime.now(timezone.utc) - as_utc(d.last_seen) > OFFLINE_AFTER:
             return DeviceStatus.OFFLINE
         return d.status
@@ -97,8 +97,7 @@ class DeviceService:
     @staticmethod
     def _can_see_hydro(hd: HydroDevice, user: User) -> bool:
         return user.is_super_admin() or hd.user_id == user.id or (
-            hd.client_id is not None and hd.client_id == user.client_id
-        )
+            hd.client_id is not None and hd.client_id == user.client_id)
 
     @staticmethod
     def hydro_candidates(db: Session, user: User) -> list[dict]:
@@ -106,8 +105,7 @@ class DeviceService:
         rows = db.query(HydroDevice).filter(HydroDevice.is_active.is_(True)).all()
         return [
             {"hydro_device_id": h.id, "device_id": h.device_id, "name": h.name, "location": h.location}
-            for h in rows
-            if DeviceService._can_see_hydro(h, user) and h.device_id not in taken
+            for h in rows if DeviceService._can_see_hydro(h, user) and h.device_id not in taken
         ]
 
     @staticmethod
@@ -118,15 +116,11 @@ class DeviceService:
             if not hd or not DeviceService._can_see_hydro(hd, user):
                 raise HTTPException(404, "Hydro device not found")
             device_id, name = device_id or hd.device_id, name or hd.name
-
         if db.execute(select(BilliardDevice.id).where(BilliardDevice.device_id == device_id)).first():
             raise HTTPException(409, f"Device '{device_id}' is already registered")
-
-        key = secrets.token_urlsafe(32)          # returned once; only the hash is stored
-        dev = BilliardDevice(
-            client_id=user.client_id, device_id=device_id,
-            name=name or device_id, api_key_hash=hash_api_key(key),
-        )
+        key = secrets.token_urlsafe(32)
+        dev = BilliardDevice(client_id=user.client_id, device_id=device_id,
+                         name=name or device_id, api_key_hash=hash_api_key(key))
         db.add(dev)
         db.flush()
         return dev, key
