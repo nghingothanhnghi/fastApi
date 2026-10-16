@@ -9,7 +9,7 @@ from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.billiard.models import BilliardDevice
-from app.billiard.schemas.device import ControllerState, DeviceStatusOut
+from app.billiard.schemas.device import ControllerState, DeviceStatusOut, DeviceRegisterIn, DeviceRegisterOut, HydroCandidateOut
 from app.billiard.schemas.event import DeviceEventIn, EventBatchIn, EventBatchResult
 from app.billiard.services.device_auth import authenticate_device
 from app.billiard.services.device_service import device_service
@@ -17,6 +17,7 @@ from app.billiard.services.event_service import event_service
 
 router = APIRouter(prefix="/billiard/controller", tags=["Billiard Controller"])
 
+_manager = require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)
 
 def get_device(
     x_device_id: str = Header(...),
@@ -50,6 +51,22 @@ def get_state(db: Session = Depends(get_db), device: BilliardDevice = Depends(ge
 @router.get("/status", response_model=list[DeviceStatusOut])
 def get_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+    current_user: User = Depends(_manager),
 ):
-    return device_service.list_devices(db, current_user)
+    out = []
+    for d in device_service.list_devices(db, current_user):
+        item = DeviceStatusOut.model_validate(d)
+        item.status = device_service.effective_status(d)   # offline after 90s of silence
+        out.append(item)
+    return out
+
+@router.get("/hydro-candidates", response_model=list[HydroCandidateOut])
+def hydro_candidates(db: Session = Depends(get_db), current_user: User = Depends(_manager)):
+    return device_service.hydro_candidates(db, current_user)
+
+@router.post("/register", response_model=DeviceRegisterOut, status_code=201)
+def register(data: DeviceRegisterIn, db: Session = Depends(get_db), current_user: User = Depends(_manager)):
+    dev, key = device_service.register(db, data, current_user)
+    db.commit()
+    db.refresh(dev)
+    return DeviceRegisterOut(**DeviceStatusOut.model_validate(dev).model_dump(), api_key=key)
