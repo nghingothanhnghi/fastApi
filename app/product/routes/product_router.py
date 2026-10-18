@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.core import config
-from app.product.schemas.product import ProductOut, ProductCreate, ProductUpdate, ProductVariantCreate
+from app.product.schemas.product import ProductOut, ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantResponse
 from app.product.controllers.product_controller import ProductController
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -134,14 +134,14 @@ def get_variant_skus(db: Session = Depends(get_db)):
     return ProductController.get_all_variant_skus(db)
 
 
-@router.post("/{product_id}/variants", response_model=dict)
+@router.post("/{product_id}/variants", response_model=ProductVariantResponse)
 def create_variant(product_id: int, data: ProductVariantCreate, db: Session = Depends(get_db)):
     """
     Create a new variant for a product.
     """
     return ProductController.create_variant(product_id, data, db)
 
-@router.put("/variants/{variant_id}", response_model=dict)
+@router.put("/variants/{variant_id}", response_model=ProductVariantResponse)
 def update_variant(variant_id: int, data: ProductVariantCreate, db: Session = Depends(get_db)):
     """
     Update an existing variant.
@@ -155,7 +155,7 @@ def delete_variant(variant_id: int, db: Session = Depends(get_db)):
     """
     return ProductController.delete_variant(variant_id, db)
 
-@router.post("/variants/{variant_id}/upload-image")
+@router.post("/variants/{variant_id}/upload-image", response_model=ProductVariantResponse)
 def upload_variant_image(variant_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     Upload and save a variant image.
