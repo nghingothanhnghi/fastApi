@@ -81,6 +81,10 @@ class TableSession(Base):
         "SessionItem", back_populates="session", cascade="all, delete-orphan",
         lazy="selectin", order_by="SessionItem.id",
     )
+    payments = relationship(
+        "SessionPayment", back_populates="session", cascade="all, delete-orphan",
+        lazy="selectin", order_by="SessionPayment.id",
+    )
     games = relationship(
         "TableGame", back_populates="session", cascade="all, delete-orphan",
         lazy="select", order_by="TableGame.game_number",

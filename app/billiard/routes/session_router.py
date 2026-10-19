@@ -6,7 +6,8 @@ from app.database import get_db
 from app.user.models.user import User
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
-    AddSessionItemRequest, BillResponse, PayResponse, PaySessionRequest, SessionItemResponse,
+    AddSessionItemRequest, BillResponse, CancelPaymentLineRequest, ConfirmTransferRequest,
+    PaymentEventResponse, PayResponse, PaySessionRequest, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
@@ -49,7 +50,7 @@ def pay_session(
     session_id: int, request: PaySessionRequest,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    session, gateway = billiard_payment_service.pay_session(db, session_id, request.payment_method, current_user)
+    session, gateway = billiard_payment_service.pay_session(db, session_id, request, current_user)
     return {**session_service.build_bill(session), "gateway": gateway}
 
 
@@ -58,3 +59,33 @@ def confirm_payment(session_id: int, db: Session = Depends(get_db), current_user
     """Settle a gateway (Stripe) payment after the customer completes it."""
     session = billiard_payment_service.confirm_payment(db, session_id, current_user)
     return session_service.build_bill(session)
+
+
+@router.post("/{session_id}/pay/lines/{line_id}/confirm", response_model=BillResponse)
+def confirm_transfer_line(
+    session_id: int, line_id: int, request: ConfirmTransferRequest | None = None,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Cashier confirms a bank transfer line was received."""
+    session = billiard_payment_service.confirm_transfer(
+        db, session_id, line_id, current_user, request.note if request else None
+    )
+    return session_service.build_bill(session)
+
+
+@router.post("/{session_id}/pay/lines/{line_id}/cancel", response_model=BillResponse)
+def cancel_payment_line(
+    session_id: int, line_id: int, request: CancelPaymentLineRequest | None = None,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Void a pending line (e.g. the transfer never came); the balance can then be paid another way."""
+    session = billiard_payment_service.cancel_line(
+        db, session_id, line_id, current_user, request.reason if request else None
+    )
+    return session_service.build_bill(session)
+
+
+@router.get("/{session_id}/pay/events", response_model=list[PaymentEventResponse])
+def payment_events(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Audit trail of every payment action on this bill."""
+    return billiard_payment_service.list_events(db, session_id, current_user)
