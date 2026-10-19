@@ -135,10 +135,29 @@ erDiagram
 | `total_product_fee` | Sum of items, updated whenever an item is added |
 | `grand_total` | `total_table_fee + total_product_fee` |
 | `payment_state` | `unpaid` → `pending` → `paid` |
-| `payment_method` | `cash`, `bank_transfer`, `stripe` |
-| `payment_id`, `payment_reference` | Link to the Payments module |
+| `payment_method` | `cash`, `bank_transfer`, `stripe`, or `split` (several methods) |
+| `payment_id`, `payment_reference` | Link to the Payments module (first completed line) |
 | `paid_at` | When it was paid |
 | `opened_by_id`, `stopped_by_id`, `paid_by_id` | Who did each action (audit) |
+
+### `session_payments` (one row per payment line)
+
+A bill can be paid by several lines, e.g. 200,000 cash + 110,000 transfer.
+
+| Column | Notes |
+|--------|-------|
+| `session_id`, `method`, `amount` | `cash` or `bank_transfer`, and the part of the bill this line covers |
+| `status` | `pending` (transfer waiting for the cashier), `completed`, `cancelled`, `failed` |
+| `cash_tendered`, `change_given` | Cash only: money handed over and change returned |
+| `transfer_memo`, `expires_at` | Transfer only: content to match in the bank feed (e.g. `BIDA42L7`) and QR expiry |
+| `payment_id`, `payment_reference` | The backing `PaymentTransaction` in the Payments module |
+| `created_by_id`, `confirmed_by_id`, `confirmed_at` | Who recorded / confirmed it |
+
+### `session_payment_events` (audit trail)
+
+Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
+
+These two tables are new, so `init_db` creates them on startup; no migration script is needed.
 
 ### `session_items`
 
@@ -233,6 +252,14 @@ Grand total:     310,000
 | `BILLIARD_MIN_BILLABLE_MINUTES` | `1` | Minimum minutes to charge |
 | `BILLIARD_FEE_ROUNDING_UNIT` | `1` | Round the table fee to this unit (`1` = no rounding) |
 | `BILLIARD_CURRENCY` | `VND` | Currency label on bills and payments |
+| `BILLIARD_BANK_TRANSFER_REQUIRES_CONFIRMATION` | `true` | A transfer waits for the cashier's "received" tick. `false` = paid immediately (old behaviour) |
+| `BILLIARD_TRANSFER_EXPIRE_MINUTES` | `15` | How long a transfer QR is shown as valid |
+| `BILLIARD_BANK_BIN` | empty | NAPAS bank BIN of the receiving account (e.g. `970436`) |
+| `BILLIARD_BANK_ACCOUNT_NO` | empty | Receiving account number |
+| `BILLIARD_BANK_ACCOUNT_NAME` | empty | Account holder name (shown to the customer) |
+| `BILLIARD_BANK_CODE` | empty | Short bank code (e.g. `VCB`), only for the hosted QR image URL |
+
+Without `BANK_BIN` + `BANK_ACCOUNT_NO` no QR is generated; a transfer line still works and the cashier confirms it by hand.
 
 Changing these only affects **new** sessions because each session snapshots its own policy.
 
@@ -246,9 +273,36 @@ Payment reuses the existing **Payments** module through `payment_provider_regist
 
 | API `payment_method` | Provider | Result |
 |----------------------|----------|--------|
-| `cash` | `manual` | Marked paid immediately |
-| `bank_transfer` | `manual` | Marked paid immediately |
+| `cash` | `manual` | Paid immediately. Optional `cash_tendered` records the money handed over and the change |
+| `bank_transfer` | `manual` | `pending` with a VietQR until the cashier confirms (see below) |
 | `stripe` | `stripe` | Stays `pending` until `/pay/confirm` |
+
+### Request styles for `POST /sessions/{id}/pay`
+
+Send **exactly one** of `payment_method` or `payments`:
+
+```json
+{"payment_method": "cash", "cash_tendered": 500000}
+```
+
+```json
+{"payments": [
+  {"method": "cash", "amount": 200000, "cash_tendered": 200000},
+  {"method": "bank_transfer", "amount": 110000}
+]}
+```
+
+- The bill total is never taken from the client. For a split, the line amounts must add up **exactly** to the amount due (`422` otherwise).
+- `cash_tendered` must be at least the cash amount; `change_given` is calculated by the server.
+- Up to 6 lines. Stripe cannot be mixed with cash/transfer lines.
+- The bill (`GET /sessions/{id}`) shows `amount_paid`, `balance_due` and every line with its status.
+
+### Bank transfer (VietQR)
+
+1. `POST /pay` creates a `pending` transfer line with a memo like `BIDA42L7`. The response (and any later `GET /sessions/{id}`) has `payments[].transfer` with `qr_payload` (draw it as a QR code), `qr_image_url`, the memo, the amount, and `expires_at`.
+2. The customer scans and pays.
+3. The cashier presses "received": `POST /sessions/{id}/pay/lines/{line_id}/confirm`. The line becomes `completed`.
+4. If the money never comes: `POST /sessions/{id}/pay/lines/{line_id}/cancel`. The line is voided and the remaining balance can be paid another way with a new `POST /pay`.
 
 ### Payment states
 
@@ -256,8 +310,9 @@ Payment reuses the existing **Payments** module through `payment_provider_regist
 stateDiagram-v2
     [*] --> unpaid
     unpaid --> pending: POST /pay (claim)
-    pending --> paid: manual provider, or Stripe confirmed
-    pending --> unpaid: provider error, or Stripe failed/refunded
+    pending --> paid: completed lines cover grand_total, or Stripe confirmed
+    pending --> pending: part paid / transfer waiting / pay the balance
+    pending --> unpaid: nothing collected (provider error, all lines cancelled, Stripe failed)
     paid --> [*]
 ```
 
@@ -265,14 +320,14 @@ stateDiagram-v2
 
 The Payments providers call `db.commit()` themselves, so we cannot wrap everything in one transaction. Instead:
 
-1. Lock the session and switch `unpaid → pending`, then **commit** (this is the *claim*).
-2. Call the provider. Any second `/pay` call now gets `409 A payment for this session is already in progress`.
-3. On success: mark `paid` (cash/bank) or leave `pending` (Stripe).
-4. On error: **release the claim** (`pending → unpaid`) so the cashier can retry.
+1. Lock the session, insert the payment lines, switch `unpaid → pending`, then **commit** (this is the *claim*).
+2. Call the provider once per line. Any second `/pay` call while a line is waiting gets `409 A payment for this session is already in progress`.
+3. Settle: `paid` when completed lines cover `grand_total`; `pending` while a transfer is waiting or a balance remains; back to `unpaid` if nothing was collected.
+4. If recording a line fails, the failed and not-yet-processed lines are marked `failed`, the API returns `500`, and the bill shows exactly what was recorded. Cash that was already recorded stays; pay the remaining balance with a new `POST /pay`.
 
-Pre-conditions for `/pay`: the session must be `completed`, not already `paid`/`pending`, and `grand_total > 0`.
+Pre-conditions for `/pay`: the session must be `completed`, not already `paid`, and `grand_total > 0`.
 
-> If the payment is created but saving the session fails, an error is logged. The payment's metadata contains `billiard_session_id` so it can be reconciled by hand.
+> If a payment is created but saving the session fails, an error is logged. The payment's metadata contains `billiard_session_id` (and `line_id`) so it can be reconciled by hand.
 
 ### Stripe example
 
@@ -305,8 +360,11 @@ All endpoints require a logged-in user (JWT). Roles are noted where required.
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
 | `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
 | `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed |
-| `POST` | `/sessions/{id}/pay` | Start payment (see section 7) |
-| `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway payment |
+| `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7) |
+| `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway (Stripe) payment |
+| `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | Cashier confirms a bank transfer line was received |
+| `POST` | `/sessions/{id}/pay/lines/{line_id}/cancel` | Void a pending line; the balance can be paid another way |
+| `GET` | `/sessions/{id}/pay/events` | Audit trail of payment actions |
 
 ### Games, pricing, and controller
 
@@ -354,10 +412,18 @@ curl -X POST http://localhost:8000/sessions/1/items \
 # 4. Stop and get the bill
 curl -X POST http://localhost:8000/sessions/1/stop -H "Authorization: Bearer <token>"
 
-# 5. Pay with cash
+# 5. Pay with cash (customer hands over 500,000, change is calculated)
 curl -X POST http://localhost:8000/sessions/1/pay \
   -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"payment_method": "cash"}'
+  -d '{"payment_method": "cash", "cash_tendered": 500000}'
+
+# 5b. Or split: part cash, part bank transfer (the transfer line returns a VietQR)
+curl -X POST http://localhost:8000/sessions/1/pay \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"payments": [{"method": "cash", "amount": 200000}, {"method": "bank_transfer", "amount": 110000}]}'
+
+# 5c. Cashier confirms the transfer arrived
+curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorization: Bearer <token>"
 ```
 
 ### Common error codes
@@ -367,6 +433,7 @@ curl -X POST http://localhost:8000/sessions/1/pay \
 | `400` | Product inactive, or variant doesn't belong to the product |
 | `404` | Table/session/product not found, or belongs to another tenant |
 | `409` | Wrong state: table busy, session already stopped, already paid, payment in progress, nothing to pay |
+| `422` | Split lines don't add up to the amount due, or cash tendered is less than the cash amount |
 
 ---
 

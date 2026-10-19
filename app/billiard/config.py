@@ -26,6 +26,24 @@ MAX_OFFLINE_HOURS = int(os.getenv("BILLIARD_MAX_OFFLINE_HOURS", "48"))
 TIMEZONE = os.getenv("BILLIARD_TIMEZONE", "Asia/Ho_Chi_Minh")
 LOCAL_TZ = ZoneInfo(TIMEZONE)
 
+# --- Bank transfer (VietQR) -------------------------------------------------
+# A transfer line stays "pending" until the cashier confirms the money arrived.
+# Set BILLIARD_BANK_TRANSFER_REQUIRES_CONFIRMATION=false to keep the old behaviour
+# (bank_transfer is treated as paid immediately, like cash).
+BANK_TRANSFER_REQUIRES_CONFIRMATION = os.getenv(
+    "BILLIARD_BANK_TRANSFER_REQUIRES_CONFIRMATION", "true"
+).strip().lower() in ("1", "true", "yes")
+TRANSFER_EXPIRE_MINUTES = int(os.getenv("BILLIARD_TRANSFER_EXPIRE_MINUTES", "15"))
+# Receiving account. Without BIN + account number no QR is generated (the transfer
+# line still works, the cashier just confirms it manually).
+BANK_BIN = os.getenv("BILLIARD_BANK_BIN", "")                # NAPAS bank BIN, e.g. 970436 (Vietcombank)
+BANK_CODE = os.getenv("BILLIARD_BANK_CODE", "")              # short code for the QR image URL, e.g. VCB
+BANK_ACCOUNT_NO = os.getenv("BILLIARD_BANK_ACCOUNT_NO", "")
+BANK_ACCOUNT_NAME = os.getenv("BILLIARD_BANK_ACCOUNT_NAME", "")
+
+# Max number of lines when splitting one bill across several payments.
+MAX_PAYMENT_LINES = 6
+
 # API payment method -> provider key in payment_provider_registry
 PAYMENT_METHODS = {
     "cash": "manual",

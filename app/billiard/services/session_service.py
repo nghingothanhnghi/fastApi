@@ -12,9 +12,11 @@ from app.billiard.config import BillingPolicy
 from app.billiard.models import (
     BilliardTable, TableSession, SessionItem, SessionStatus,
 )
-from app.billiard.schemas.session import BillResponse, SessionItemResponse
+from app.billiard.models.session_payment import SessionPaymentStatus
+from app.billiard.schemas.session import BillResponse, PaymentLineResponse, SessionItemResponse
 from app.billiard.services import session_lifecycle
 from app.billiard.utils.billing import CENT
+from app.billiard.utils.vietqr import build_transfer_instruction
 from app.product.models.product import Product, ProductVariant
 from app.user.models.user import User
 
@@ -86,9 +88,27 @@ class SessionService:
         return session
 
     @staticmethod
+    def _payment_line(session: TableSession, p) -> PaymentLineResponse:
+        transfer = None
+        if p.method == "bank_transfer" and p.status == SessionPaymentStatus.PENDING and p.transfer_memo:
+            transfer = build_transfer_instruction(p.amount, p.transfer_memo, p.expires_at)
+        return PaymentLineResponse(
+            id=p.id, method=p.method, amount=p.amount, status=p.status.value,
+            cash_tendered=p.cash_tendered, change_given=p.change_given,
+            payment_reference=p.payment_reference, note=p.note,
+            confirmed_at=p.confirmed_at, transfer=transfer,
+        )
+
+    @staticmethod
     def build_bill(session: TableSession) -> dict:
         """Built purely from session snapshots; safe for old receipts."""
         snap = session.pricing_snapshot or {}
+        amount_paid = sum(
+            (p.amount for p in session.payments if p.status == SessionPaymentStatus.COMPLETED), Decimal("0")
+        )
+        # Legacy sessions (paid before payment lines existed) have no lines.
+        if not session.payments and session.payment_state.value == "paid":
+            amount_paid = session.grand_total
         return BillResponse(
             session_id=session.id,
             table_id=session.table_id,
@@ -115,6 +135,9 @@ class SessionService:
             payment_method=session.payment_method,
             payment_reference=session.payment_reference,
             paid_at=session.paid_at,
+            amount_paid=amount_paid,
+            balance_due=max(session.grand_total - amount_paid, Decimal("0")),
+            payments=[SessionService._payment_line(session, p) for p in session.payments],
             opened_by=session.opened_by.username if session.opened_by else None,
             stopped_by=session.stopped_by.username if session.stopped_by else None,
             paid_by=session.paid_by.username if session.paid_by else None,
