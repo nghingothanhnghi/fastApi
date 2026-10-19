@@ -8,6 +8,7 @@ from app.billiard.routes.report_router import router as report_router
 from app.billiard.routes.controller_router import router as controller_router
 from app.billiard.routes.pricing_router import router as pricing_router
 from app.billiard.routes.shift_router import router as shift_router
+from app.billiard.routes.bank_feed_router import router as bank_feed_router
 
 billiard_router = APIRouter()
 billiard_router.include_router(table_router)
@@ -17,3 +18,4 @@ billiard_router.include_router(report_router)
 billiard_router.include_router(controller_router)
 billiard_router.include_router(pricing_router)
 billiard_router.include_router(shift_router)
+billiard_router.include_router(bank_feed_router)

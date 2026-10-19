@@ -44,6 +44,15 @@ BANK_ACCOUNT_NAME = os.getenv("BILLIARD_BANK_ACCOUNT_NAME", "")
 # When true, /pay is refused until a cashier has opened a shift (cash drawer).
 REQUIRE_OPEN_SHIFT = os.getenv("BILLIARD_REQUIRE_OPEN_SHIFT", "false").strip().lower() in ("1", "true", "yes")
 
+# --- SePay bank feed ---------------------------------------------------------
+# https://developer.sepay.vn/en/sepay-webhooks : SePay posts every incoming transfer to
+# POST /bank-feed/sepay. Set ONE of these; the endpoint is disabled (503) when neither is set.
+#   SECRET  -> HMAC-SHA256 (X-SePay-Signature / X-SePay-Timestamp), preferred
+#   API_KEY -> "Authorization: Apikey <key>"
+SEPAY_WEBHOOK_SECRET = os.getenv("SEPAY_WEBHOOK_SECRET", "")
+SEPAY_API_KEY = os.getenv("SEPAY_API_KEY", "")
+SEPAY_TIMESTAMP_TOLERANCE_SECONDS = int(os.getenv("SEPAY_TIMESTAMP_TOLERANCE_SECONDS", "300"))
+
 # Max number of lines when splitting one bill across several payments.
 MAX_PAYMENT_LINES = 6
 
