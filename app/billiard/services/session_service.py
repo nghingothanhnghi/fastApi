@@ -96,7 +96,8 @@ class SessionService:
             id=p.id, method=p.method, amount=p.amount, status=p.status.value,
             cash_tendered=p.cash_tendered, change_given=p.change_given,
             payment_reference=p.payment_reference, note=p.note,
-            confirmed_at=p.confirmed_at, transfer=transfer,
+            confirmed_at=p.confirmed_at, voided_at=p.voided_at, void_reason=p.void_reason,
+            transfer=transfer,
         )
 
     @staticmethod

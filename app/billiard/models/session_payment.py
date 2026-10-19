@@ -15,6 +15,7 @@ from ._common import enum_col
 class SessionPaymentStatus(str, enum.Enum):
     PENDING = "pending"        # e.g. bank transfer waiting for the cashier to confirm
     COMPLETED = "completed"    # money received
+    VOIDED = "voided"          # was received, then reversed by a manager
     CANCELLED = "cancelled"    # voided before the money arrived
     FAILED = "failed"          # could not be recorded
 
@@ -50,6 +51,11 @@ class SessionPayment(Base):
     confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Manager void of a completed line (money handed back / transfer returned)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     session = relationship("TableSession", back_populates="payments")
 

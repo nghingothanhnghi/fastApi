@@ -3,11 +3,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
+from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
     AddSessionItemRequest, BillResponse, CancelPaymentLineRequest, ConfirmTransferRequest,
-    PaymentEventResponse, PayResponse, PaySessionRequest, SessionItemResponse,
+    PaymentEventResponse, PayResponse, PaySessionRequest, SessionItemResponse, VoidPaymentLineRequest,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
@@ -82,6 +84,17 @@ def cancel_payment_line(
     session = billiard_payment_service.cancel_line(
         db, session_id, line_id, current_user, request.reason if request else None
     )
+    return session_service.build_bill(session)
+
+
+@router.post("/{session_id}/pay/lines/{line_id}/void", response_model=BillResponse)
+def void_payment_line(
+    session_id: int, line_id: int, request: VoidPaymentLineRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    """Manager only. Reverse a completed payment line; a reason is required and audited."""
+    session = billiard_payment_service.void_line(db, session_id, line_id, current_user, request.reason)
     return session_service.build_bill(session)
 
 
