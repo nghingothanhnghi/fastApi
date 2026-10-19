@@ -4,7 +4,7 @@
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.payments.models.payment import PaymentTransaction, PaymentStatus
-from app.payments.providers.stripe_provider import stripe_provider
+from app.payments.providers.stripe_provider import stripe_provider, normalize_currency
 from app.payments.schemas.payment import StripePaymentResponse, PaymentOut
 
 class StripeService:
@@ -20,9 +20,10 @@ class StripeService:
         extra_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Creates a Stripe PaymentIntent and logs it to DB."""
+        currency = normalize_currency(currency)
         intent = stripe_provider.create_payment_intent(amount, currency, extra_metadata)
 
-        # Save to DB
+        # Save to DB (currency stored lowercase, same as sent to Stripe)
         payment = PaymentTransaction(
             user_id=user_id,
             client_id=client_id,
@@ -43,7 +44,7 @@ class StripeService:
             "stripe": intent,
         }
 
-    def confirm_payment(self, db: Session, reference_id: str) -> Optional[PaymentTransaction]:
+    def confirm_payment(self, db: Session, reference_id: str) -> Optional[PaymentOut]:
         """Retrieves Stripe PaymentIntent and updates status in DB."""
         payment = db.query(PaymentTransaction).filter(PaymentTransaction.reference_id == reference_id).first()
         if not payment:
@@ -61,13 +62,14 @@ class StripeService:
         db.refresh(payment)
         return PaymentOut.model_validate(payment)
 
-    def refund_payment(self, db: Session, reference_id: str, amount: float = None) -> Optional[PaymentTransaction]:
+    def refund_payment(self, db: Session, reference_id: str, amount: float = None) -> Optional[PaymentOut]:
         """Refunds Stripe payment and updates status in DB."""
         payment = db.query(PaymentTransaction).filter(PaymentTransaction.reference_id == reference_id).first()
         if not payment:
             return None
 
-        stripe_provider.refund_payment(reference_id, amount)
+        # Use the stored payment currency so partial refunds convert correctly (e.g. VND is zero-decimal)
+        stripe_provider.refund_payment(reference_id, amount, payment.currency)
         payment.status = PaymentStatus.REFUNDED
         db.commit()
         db.refresh(payment)
