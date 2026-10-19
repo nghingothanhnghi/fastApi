@@ -41,6 +41,9 @@ BANK_CODE = os.getenv("BILLIARD_BANK_CODE", "")              # short code for th
 BANK_ACCOUNT_NO = os.getenv("BILLIARD_BANK_ACCOUNT_NO", "")
 BANK_ACCOUNT_NAME = os.getenv("BILLIARD_BANK_ACCOUNT_NAME", "")
 
+# When true, /pay is refused until a cashier has opened a shift (cash drawer).
+REQUIRE_OPEN_SHIFT = os.getenv("BILLIARD_REQUIRE_OPEN_SHIFT", "false").strip().lower() in ("1", "true", "yes")
+
 # Max number of lines when splitting one bill across several payments.
 MAX_PAYMENT_LINES = 6
 

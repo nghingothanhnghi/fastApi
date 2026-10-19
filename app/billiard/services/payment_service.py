@@ -30,6 +30,7 @@ from app.billiard.models import (
 )
 from app.billiard.schemas.session import PaySessionRequest
 from app.billiard.services.session_service import session_service
+from app.billiard.services.shift_service import is_manager, shift_service
 from app.billiard.utils.billing import CENT
 from app.billiard.utils.vietqr import make_memo
 from app.payments.schemas.payment import PaymentStatus, PaymentUpdate
@@ -112,12 +113,17 @@ def _settle(db: Session, session: TableSession, user: User) -> None:
         session.payment_id = completed[0].payment_id
         session.payment_reference = completed[0].payment_reference
 
+    was_paid = session.payment_state == PaymentState.PAID
     if not open_lines and _balance_due(session) <= 0:
-        if session.payment_state != PaymentState.PAID:
+        if not was_paid:
             _mark_paid(session, user)
             _log(db, session.id, "session_paid", user.id,
                  data={"amount": str(session.grand_total), "method": session.payment_method})
-    elif not open_lines and not completed:
+        return
+    if was_paid:                       # a void took money back: the bill is no longer settled
+        session.paid_at = None
+        session.paid_by_id = None
+    if not open_lines and not completed:
         # Nothing collected and nothing waiting: let the cashier start over.
         session.payment_state = PaymentState.UNPAID
         session.payment_method = None
@@ -167,6 +173,8 @@ class BilliardPaymentService:
             raise HTTPException(409, "Session is already paid")
         if session.grand_total <= 0:
             raise HTTPException(409, "Nothing to pay")
+        if config.REQUIRE_OPEN_SHIFT:
+            shift_service.require_open_shift(db, user)
 
         if request.payment_method == "stripe":
             return BilliardPaymentService._pay_gateway(db, session, user)
@@ -409,6 +417,42 @@ class BilliardPaymentService:
         if reason:
             line.note = reason
         _log(db, session_id, "line_cancelled", user.id, line_id, {"reason": reason})
+        _settle(db, session, user)
+        db.commit()
+        db.refresh(session)
+        return session
+
+    @staticmethod
+    def void_line(db: Session, session_id: int, line_id: int, user: User, reason: str):
+        """Manager-only: reverse a completed line (cash handed back / transfer returned).
+
+        The bill goes back to part-paid or unpaid so it can be paid again. In the cash drawer
+        a cash void counts as money out in the shift in which it happens.
+        """
+        if not is_manager(user):
+            raise HTTPException(403, "Only a manager can void a payment")
+        reason = (reason or "").strip()
+        if len(reason) < 3:
+            raise HTTPException(422, "A reason is required to void a payment")
+
+        session = session_service.get_locked_session(db, session_id, user)
+        line = _find_line(session, line_id)
+        if line.status != LineStatus.COMPLETED:
+            raise HTTPException(409, "Only a completed payment line can be voided (cancel a pending one instead)")
+
+        reference = line.payment_reference
+        if reference:
+            manual = payment_provider_registry.get_provider("manual")
+            manual.refund_payment(db, reference)            # marks the PaymentTransaction refunded; commits
+
+        session = session_service.get_locked_session(db, session_id, user)
+        line = _find_line(session, line_id)
+        line.status = LineStatus.VOIDED
+        line.voided_at = _now()
+        line.voided_by_id = user.id
+        line.void_reason = reason
+        _log(db, session_id, "line_voided", user.id, line_id,
+             {"method": line.method, "amount": str(line.amount), "reason": reason})
         _settle(db, session, user)
         db.commit()
         db.refresh(session)

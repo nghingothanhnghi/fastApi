@@ -86,6 +86,8 @@ class PaymentLineResponse(BaseModel):
     payment_reference: Optional[str] = None
     note: Optional[str] = None
     confirmed_at: Optional[datetime] = None
+    voided_at: Optional[datetime] = None
+    void_reason: Optional[str] = None
     transfer: Optional[TransferInstruction] = None   # only for a pending bank_transfer line
 
 
@@ -127,6 +129,10 @@ class ConfirmTransferRequest(BaseModel):
 
 class CancelPaymentLineRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=255)
+
+
+class VoidPaymentLineRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=255)
 
 
 class PaymentEventResponse(BaseModel):

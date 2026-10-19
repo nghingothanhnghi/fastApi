@@ -147,7 +147,8 @@ A bill can be paid by several lines, e.g. 200,000 cash + 110,000 transfer.
 | Column | Notes |
 |--------|-------|
 | `session_id`, `method`, `amount` | `cash` or `bank_transfer`, and the part of the bill this line covers |
-| `status` | `pending` (transfer waiting for the cashier), `completed`, `cancelled`, `failed` |
+| `status` | `pending` (transfer waiting for the cashier), `completed`, `voided` (reversed by a manager), `cancelled` (never received), `failed` |
+| `voided_at`, `voided_by_id`, `void_reason` | Set when a manager voids a completed line |
 | `cash_tendered`, `change_given` | Cash only: money handed over and change returned |
 | `transfer_memo`, `expires_at` | Transfer only: content to match in the bank feed (e.g. `BIDA42L7`) and QR expiry |
 | `payment_id`, `payment_reference` | The backing `PaymentTransaction` in the Payments module |
@@ -155,9 +156,20 @@ A bill can be paid by several lines, e.g. 200,000 cash + 110,000 transfer.
 
 ### `session_payment_events` (audit trail)
 
-Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
+Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `line_voided`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
 
-These two tables are new, so `init_db` creates them on startup; no migration script is needed.
+### `cash_shifts` and `cash_movements` (cash drawer)
+
+One drawer per club (`client_id`): at most one shift is open at a time.
+
+| Column | Notes |
+|--------|-------|
+| `cash_shifts.status` | `open` or `closed` |
+| `opened_at`, `closed_at`, `opening_float` | The shift window and the cash already in the drawer |
+| `expected_cash`, `counted_cash`, `variance` | Frozen at close. `variance = counted - expected` (negative = cash missing) |
+| `cash_movements` | Pay-ins and pay-outs inside a shift, each with a reason and who did it |
+
+**Upgrading an existing database:** run `python migrate_billiard_shifts.py` once. It creates the two new tables, adds the `voided_*` columns to `session_payments`, and on PostgreSQL adds the `voided` enum value. It is idempotent and backs up SQLite first. (A fresh database gets everything from `init_db`.)
 
 ### `session_items`
 
@@ -257,6 +269,7 @@ Grand total:     310,000
 | `BILLIARD_BANK_BIN` | empty | NAPAS bank BIN of the receiving account (e.g. `970436`) |
 | `BILLIARD_BANK_ACCOUNT_NO` | empty | Receiving account number |
 | `BILLIARD_BANK_ACCOUNT_NAME` | empty | Account holder name (shown to the customer) |
+| `BILLIARD_REQUIRE_OPEN_SHIFT` | `false` | `true` = `/pay` is refused (`409`) until a shift is open |
 | `BILLIARD_BANK_CODE` | empty | Short bank code (e.g. `VCB`), only for the hosted QR image URL |
 
 Without `BANK_BIN` + `BANK_ACCOUNT_NO` no QR is generated; a transfer line still works and the cashier confirms it by hand.
@@ -303,6 +316,40 @@ Send **exactly one** of `payment_method` or `payments`:
 2. The customer scans and pays.
 3. The cashier presses "received": `POST /sessions/{id}/pay/lines/{line_id}/confirm`. The line becomes `completed`.
 4. If the money never comes: `POST /sessions/{id}/pay/lines/{line_id}/cancel`. The line is voided and the remaining balance can be paid another way with a new `POST /pay`.
+
+### Voiding a payment (managers only)
+
+`POST /sessions/{id}/pay/lines/{line_id}/void` with a required `reason`. Only `manager`, `admin` and `super_admin` may call it (`403` for anyone else; the check is in both the route and the service).
+
+- Only a `completed` line can be voided. A line still `pending` is cancelled instead.
+- The line becomes `voided`, the backing payment is marked `refunded`, and `line_voided` is written to the audit trail with the manager and reason.
+- The bill goes back to `pending` (part paid) or `unpaid`, `paid_at` / `paid_by` are cleared, and the cashier can take payment again.
+- Stripe payments are not voided here (they have no payment lines); refund those through the Stripe refund endpoint.
+
+### Shifts and the cash drawer
+
+```text
+POST /shifts/open        {"opening_float": 1000000}          start the shift (409 if one is open)
+GET  /shifts/current                                          live totals, or null
+POST /shifts/{id}/movements  {"type": "pay_out", "amount": 20000, "reason": "bought ice"}
+POST /shifts/{id}/close  {"counted_cash": 1290000}           returns expected, counted, variance
+GET  /shifts, GET /shifts/{id}
+```
+
+Expected cash in the drawer for the shift window:
+
+```text
+opening float
++ cash payments confirmed in the window     (the bill amount, change already netted out)
+- cash payments voided in the window        (even if they were taken in an earlier shift)
++ pay-ins - pay-outs
+```
+
+- The summary also lists totals per method (received / voided / net), so bank transfers show up in the shift report but never in the drawer maths.
+- A pay-out larger than the cash in the drawer is refused. A manager void can take the expected figure below zero (for example a refund the next day); that is shown as it is.
+- Only the cashier who opened the shift, or a manager, can close it.
+- A closed shift never changes: its numbers are frozen, and a later void counts in the shift in which it happens.
+- By default payments are allowed with no shift open (they just don't appear in any shift). Set `BILLIARD_REQUIRE_OPEN_SHIFT=true` to enforce opening a shift first.
 
 ### Payment states
 
@@ -364,7 +411,19 @@ All endpoints require a logged-in user (JWT). Roles are noted where required.
 | `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway (Stripe) payment |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | Cashier confirms a bank transfer line was received |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/cancel` | Void a pending line; the balance can be paid another way |
+| `POST` | `/sessions/{id}/pay/lines/{line_id}/void` | **Manager only.** Reverse a completed line (reason required) |
 | `GET` | `/sessions/{id}/pay/events` | Audit trail of payment actions |
+
+### Shifts (cash drawer)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/shifts/open` | Open a shift with an opening float. `409` if one is open |
+| `GET` | `/shifts/current` | The open shift with live drawer totals, or `null` |
+| `GET` | `/shifts` | Recent shifts (`limit`, `offset`) |
+| `GET` | `/shifts/{id}` | Shift summary: drawer maths, per-method totals, movements |
+| `POST` | `/shifts/{id}/movements` | Pay-in / pay-out with a reason |
+| `POST` | `/shifts/{id}/close` | Close with the counted cash; returns the variance |
 
 ### Games, pricing, and controller
 
@@ -433,6 +492,7 @@ curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorizat
 | `400` | Product inactive, or variant doesn't belong to the product |
 | `404` | Table/session/product not found, or belongs to another tenant |
 | `409` | Wrong state: table busy, session already stopped, already paid, payment in progress, nothing to pay |
+| `403` | Voiding a payment without a manager role, or closing someone else's shift as a cashier |
 | `422` | Split lines don't add up to the amount due, or cash tendered is less than the cash amount |
 
 ---
