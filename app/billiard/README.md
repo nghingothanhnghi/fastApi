@@ -156,7 +156,7 @@ A bill can be paid by several lines, e.g. 200,000 cash + 110,000 transfer.
 
 ### `session_payment_events` (audit trail)
 
-Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `line_voided`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
+Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `line_voided`, `transfer_auto_confirmed`, `transfer_assigned_from_bank`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
 
 ### `cash_shifts` and `cash_movements` (cash drawer)
 
@@ -270,6 +270,9 @@ Grand total:     310,000
 | `BILLIARD_BANK_ACCOUNT_NO` | empty | Receiving account number |
 | `BILLIARD_BANK_ACCOUNT_NAME` | empty | Account holder name (shown to the customer) |
 | `BILLIARD_REQUIRE_OPEN_SHIFT` | `false` | `true` = `/pay` is refused (`409`) until a shift is open |
+| `SEPAY_WEBHOOK_SECRET` | empty | HMAC secret for `POST /bank-feed/sepay` (preferred) |
+| `SEPAY_API_KEY` | empty | API key alternative (`Authorization: Apikey ...`); endpoint is closed if neither is set |
+| `SEPAY_TIMESTAMP_TOLERANCE_SECONDS` | `300` | Allowed clock difference for HMAC requests |
 | `BILLIARD_BANK_CODE` | empty | Short bank code (e.g. `VCB`), only for the hosted QR image URL |
 
 Without `BANK_BIN` + `BANK_ACCOUNT_NO` no QR is generated; a transfer line still works and the cashier confirms it by hand.
@@ -351,6 +354,43 @@ opening float
 - A closed shift never changes: its numbers are frozen, and a later void counts in the shift in which it happens.
 - By default payments are allowed with no shift open (they just don't appear in any shift). Set `BILLIARD_REQUIRE_OPEN_SHIFT=true` to enforce opening a shift first.
 
+### Automatic confirmation of transfers (SePay)
+
+Instead of the cashier pressing "received", the bank feed can confirm a transfer by itself. [SePay](https://developer.sepay.vn/en/sepay-webhooks) watches the club's bank account and calls `POST /bank-feed/sepay` for every incoming transfer.
+
+**Set up**
+
+1. In SePay, add a webhook pointing to `https://<your-api>/bank-feed/sepay` (HTTPS, public domain).
+2. Choose the security method and set the matching variable on the server:
+   - HMAC-SHA256 (preferred): `SEPAY_WEBHOOK_SECRET=<secret>`. Verifies `X-SePay-Signature` over `<X-SePay-Timestamp>.<raw body>` and rejects timestamps more than 5 minutes off.
+   - API key: `SEPAY_API_KEY=<key>`. Verifies `Authorization: Apikey <key>`.
+   - If neither is set the endpoint answers `503` and stays closed. If a secret is set, an API-key-only request is rejected.
+3. Set `BILLIARD_BANK_ACCOUNT_NO` to the account SePay watches. Transfers to any other account are ignored.
+4. Optional: in SePay *Company → General → Payment code structure* use the prefix `BIDA`. Matching does not depend on it, because we search the transfer content for our own code (`BIDA<session>L<line>`, any case, any surrounding text) and also check SePay's `code` field.
+
+**What happens to each transaction**
+
+Every transaction is stored first in `bank_transactions` (unique per SePay `id`, so replays are harmless), then matched:
+
+| Result | When | What happens |
+|--------|------|--------------|
+| `matched` | Code found, line still `pending`, amount **exactly** equal | Line completes, bill settles, audit event `transfer_auto_confirmed` (no user) |
+| `needs_review` | Code found but amount differs, line already paid (possible double transfer), or line cancelled/voided | Nothing is confirmed; a manager decides |
+| `unmatched` | No bill code in the content, or the code matches no line | Kept for a manager |
+| `ignored` | Outgoing transfer, or another account | Kept for audit |
+
+The webhook always answers `{"success": true}` once a valid, authenticated transaction is stored, even when it could not be matched. SePay treats anything else as a failure and retries for up to 5 hours.
+
+**Manager tools** (manager/admin only)
+
+- `GET /bank-feed/transactions?status=needs_review` lists money that needs a decision.
+- `POST /bank-feed/transactions/{id}/assign` `{"line_id": 7}` links a transaction to a pending transfer line and confirms it. The amount must match exactly (`422` otherwise): settle the difference with the customer first.
+- `POST /bank-feed/transactions/{id}/ignore` `{"note": "refunded"}` dismisses it.
+
+Unmatched transactions carry no club (the receiving account is global configuration), so every manager can see them; matched and `needs_review` ones are scoped to the club of their bill.
+
+> **Not covered yet:** SePay only retries for 5 hours, so a webhook can be lost if the server is down longer. Their guidance is a job every 15-30 minutes that fetches recent transactions through the SePay API and feeds any missing ones through the same matcher. The cashier's manual "received" button still works as the fallback.
+
 ### Payment states
 
 ```mermaid
@@ -424,6 +464,15 @@ All endpoints require a logged-in user (JWT). Roles are noted where required.
 | `GET` | `/shifts/{id}` | Shift summary: drawer maths, per-method totals, movements |
 | `POST` | `/shifts/{id}/movements` | Pay-in / pay-out with a reason |
 | `POST` | `/shifts/{id}/close` | Close with the counted cash; returns the variance |
+
+### Bank feed (SePay)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/bank-feed/sepay` | SePay HMAC or API key | Webhook for incoming transfers (see section 7) |
+| `GET` | `/bank-feed/transactions` | manager | List bank transactions; filter with `?status=` |
+| `POST` | `/bank-feed/transactions/{id}/assign` | manager | Link a transaction to a pending transfer line and confirm it |
+| `POST` | `/bank-feed/transactions/{id}/ignore` | manager | Dismiss a transaction |
 
 ### Games, pricing, and controller
 

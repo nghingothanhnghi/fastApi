@@ -21,6 +21,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.billiard import config
@@ -88,10 +89,15 @@ def _method_label(session: TableSession) -> Optional[str]:
     return methods.pop() if len(methods) == 1 else "split"
 
 
-def _mark_paid(session: TableSession, user: User) -> None:
+def _uid(user: Optional[User]) -> Optional[int]:
+    """None = the system (e.g. the bank feed confirmed a transfer automatically)."""
+    return user.id if user else None
+
+
+def _mark_paid(session: TableSession, user: Optional[User]) -> None:
     session.payment_state = PaymentState.PAID
     session.paid_at = _now()
-    session.paid_by_id = user.id
+    session.paid_by_id = _uid(user)
 
 
 def _release_claim(db: Session, session_id: int) -> None:
@@ -103,7 +109,7 @@ def _release_claim(db: Session, session_id: int) -> None:
     db.commit()
 
 
-def _settle(db: Session, session: TableSession, user: User) -> None:
+def _settle(db: Session, session: TableSession, user: Optional[User]) -> None:
     """Derive payment_state from the lines. Caller commits."""
     open_lines = [p for p in session.payments if p.status == LineStatus.PENDING]
     completed = [p for p in session.payments if p.status == LineStatus.COMPLETED]
@@ -117,7 +123,7 @@ def _settle(db: Session, session: TableSession, user: User) -> None:
     if not open_lines and _balance_due(session) <= 0:
         if not was_paid:
             _mark_paid(session, user)
-            _log(db, session.id, "session_paid", user.id,
+            _log(db, session.id, "session_paid", _uid(user),
                  data={"amount": str(session.grand_total), "method": session.payment_method})
         return
     if was_paid:                       # a void took money back: the bill is no longer settled
@@ -391,6 +397,49 @@ class BilliardPaymentService:
         _log(db, session_id, "transfer_confirmed", user.id, line_id,
              {"amount": str(line.amount), "memo": line.transfer_memo, "note": note})
         _settle(db, session, user)
+        db.commit()
+        db.refresh(session)
+        return session
+
+    @staticmethod
+    def confirm_transfer_from_bank(
+        db: Session, session_id: int, line_id: int, bank_tx_id: int,
+        details: dict, actor: Optional[User] = None,
+    ):
+        """Confirm a pending transfer line because the bank reported the money.
+
+        actor=None is the automatic path (SePay webhook); a manager can also assign a
+        bank transaction to a line by hand. No tenant check here: the caller has already
+        matched the line (by memo) or checked the manager's tenant.
+        """
+        session = db.execute(
+            select(TableSession).where(TableSession.id == session_id).with_for_update()
+        ).scalar_one_or_none()
+        if not session:
+            raise HTTPException(404, "Session not found")
+        line = _find_line(session, line_id)
+        if line.method != "bank_transfer":
+            raise HTTPException(409, "Only bank transfer lines can be confirmed by a bank transaction")
+        if line.status != LineStatus.PENDING:
+            raise HTTPException(409, f"Payment line is {line.status.value}")
+
+        reference = line.payment_reference
+        if reference:
+            manual = payment_provider_registry.get_provider("manual")
+            if manual.confirm_payment(db, reference) is None:    # commits internally
+                raise HTTPException(404, "Payment transaction not found")
+
+        session = db.execute(
+            select(TableSession).where(TableSession.id == session_id).with_for_update()
+        ).scalar_one()
+        line = _find_line(session, line_id)
+        line.status = LineStatus.COMPLETED
+        line.confirmed_by_id = _uid(actor)
+        line.confirmed_at = _now()
+        _log(db, session_id, "transfer_auto_confirmed" if actor is None else "transfer_assigned_from_bank",
+             _uid(actor), line_id,
+             {"amount": str(line.amount), "memo": line.transfer_memo, "bank_transaction_id": bank_tx_id, **details})
+        _settle(db, session, actor)
         db.commit()
         db.refresh(session)
         return session
