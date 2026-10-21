@@ -27,6 +27,9 @@ from .camera_object_detection.models.hardware_detection import HardwareDetection
 from .migration.models.base_data import RawData
 from .transform_data.models.template import Template
 from .payments.models.payment import PaymentTransaction
+from .payments.models.order import PaymentOrder, PaymentLine, PaymentEvent
+from .payments.models.shift import CashShift, CashMovement
+from .payments.models.bank_transaction import BankTransaction
 from .jackpot.models.draw import Draw, Ticket, PrizeResult
 from .product.models.product import Product, ProductVariant
 from .cms.models import CmsCategory, CmsTag, CmsMedia, CmsPost, CmsMenu, CmsMenuItem

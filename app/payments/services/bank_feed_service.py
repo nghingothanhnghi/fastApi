@@ -1,4 +1,4 @@
-# app/billiard/services/bank_feed_service.py
+# app/payments/services/bank_feed_service.py
 # Turns bank-feed transactions (SePay webhook) into confirmed transfer lines.
 #
 # Safety rules (SePay's own checklist + common sense about money):
@@ -12,25 +12,31 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.billiard import config
-from app.billiard.models import BankTransaction, BankTxStatus, SessionPayment, SessionPaymentStatus, TableSession
-from app.billiard.services.payment_service import billiard_payment_service
-from app.billiard.services.shift_service import is_manager
-from app.billiard.utils.billing import CENT
+from app.payments import config
+from app.payments.models.bank_transaction import BankTransaction, BankTxStatus
+from app.payments.models.order import PaymentLine, PaymentLineStatus
+from app.payments.services.order_service import payment_order_service
+from app.payments.utils.money import CENT
+from app.payments.utils.permissions import is_manager
 from app.user.models.user import User
 
 logger = logging.getLogger(__name__)
 
 PROVIDER = "sepay"
-# Our memo is BIDA<session>L<line> (see vietqr.make_memo). Banks upper-case it and put other
-# text around it, so search for the pattern instead of comparing the whole content.
-MEMO_RE = re.compile(r"BIDA(\d+)L(\d+)(?!\d)", re.IGNORECASE)
+SEPAY_TZ = ZoneInfo("Asia/Ho_Chi_Minh")     # SePay always reports transactionDate in Vietnam time
+
+
+def _memo_re() -> "re.Pattern[str]":
+    # Our memo is <PREFIX><order>L<line> (see vietqr.make_memo), e.g. PAY12L34. Banks upper-case it
+    # and put other text around it, so search for the pattern instead of comparing the whole content.
+    return re.compile(rf"{re.escape(config.MEMO_PREFIX)}(\d+)L(\d+)(?!\d)", re.IGNORECASE)
 
 
 def _now() -> datetime:
@@ -40,16 +46,17 @@ def _now() -> datetime:
 def _parse_date(value) -> Optional[datetime]:
     """SePay sends 'YYYY-MM-DD HH:MM:SS' in Vietnam time."""
     try:
-        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").replace(tzinfo=config.LOCAL_TZ)
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").replace(tzinfo=SEPAY_TZ)
     except (TypeError, ValueError):
         return None
 
 
 def _memos(*texts: Optional[str]) -> list[str]:
     found: list[str] = []
+    pattern = _memo_re()
     for t in texts:
-        for m in MEMO_RE.finditer(t or ""):
-            memo = f"BIDA{m.group(1)}L{m.group(2)}".upper()
+        for m in pattern.finditer(t or ""):
+            memo = f"{config.MEMO_PREFIX}{m.group(1)}L{m.group(2)}".upper()
             if memo not in found:
                 found.append(memo)
     return found
@@ -106,13 +113,13 @@ class BankFeedService:
 
     @staticmethod
     def _set(db: Session, tx: BankTransaction, status: BankTxStatus, reason: Optional[str],
-             line: Optional[SessionPayment] = None) -> None:
+             line: Optional[PaymentLine] = None) -> None:
         tx.status = status.value
         tx.reason = reason
         if line is not None:
             tx.line_id = line.id
-            tx.session_id = line.session_id
-            tx.client_id = line.session.table.client_id
+            tx.order_id = line.order_id
+            tx.client_id = line.order.client_id
         db.commit()
 
     @staticmethod
@@ -126,22 +133,22 @@ class BankFeedService:
 
         memos = _memos(tx.content, tx.code)
         if not memos:
-            return BankFeedService._set(db, tx, BankTxStatus.UNMATCHED, "No bill code in the transfer content")
+            return BankFeedService._set(db, tx, BankTxStatus.UNMATCHED, "No payment code in the transfer content")
 
         line = (
-            db.query(SessionPayment)
-            .filter(func.upper(SessionPayment.transfer_memo).in_(memos))
-            .order_by(SessionPayment.id)
+            db.query(PaymentLine)
+            .filter(func.upper(PaymentLine.transfer_memo).in_(memos))
+            .order_by(PaymentLine.id)
             .first()
         )
         if line is None:
             return BankFeedService._set(db, tx, BankTxStatus.UNMATCHED, f"No payment line for code {memos[0]}")
 
-        if line.status == SessionPaymentStatus.COMPLETED:
+        if line.status == PaymentLineStatus.COMPLETED:
             return BankFeedService._set(
                 db, tx, BankTxStatus.NEEDS_REVIEW,
-                "This bill line was already paid: possible duplicate transfer (refund the customer?)", line)
-        if line.status != SessionPaymentStatus.PENDING:
+                "This payment line was already paid: possible duplicate transfer (refund the customer?)", line)
+        if line.status != PaymentLineStatus.PENDING:
             return BankFeedService._set(
                 db, tx, BankTxStatus.NEEDS_REVIEW,
                 f"Money received for a line that is {line.status.value}", line)
@@ -157,20 +164,18 @@ class BankFeedService:
             db.rollback()
             tx = db.get(BankTransaction, tx_id)
             BankFeedService._set(db, tx, BankTxStatus.NEEDS_REVIEW, f"Could not confirm the line: {e.detail}",
-                                 db.get(SessionPayment, line.id))
+                                 db.get(PaymentLine, line.id))
 
     @staticmethod
-    def _confirm(db: Session, tx: BankTransaction, line: SessionPayment, actor: Optional[User]) -> None:
+    def _confirm(db: Session, tx: BankTransaction, line: PaymentLine, actor: Optional[User]) -> None:
         details = {"gateway": tx.gateway, "reference_code": tx.reference_code, "bank_amount": str(tx.amount)}
-        billiard_payment_service.confirm_transfer_from_bank(
-            db, line.session_id, line.id, tx.id, details, actor=actor,
-        )
+        payment_order_service.confirm_transfer_from_bank(db, line.id, tx.id, details, actor=actor)
         tx = db.get(BankTransaction, tx.id)
-        line = db.get(SessionPayment, line.id)
+        line = db.get(PaymentLine, line.id)
         tx.status = BankTxStatus.MATCHED.value
         tx.reason = None
-        tx.line_id, tx.session_id = line.id, line.session_id
-        tx.client_id = line.session.table.client_id
+        tx.line_id, tx.order_id = line.id, line.order_id
+        tx.client_id = line.order.client_id
         if actor is not None:
             tx.handled_by_id, tx.handled_at = actor.id, _now()
         db.commit()
@@ -215,11 +220,10 @@ class BankFeedService:
         if tx.transfer_type != "in":
             raise HTTPException(409, "Only incoming transfers can be assigned")
 
-        line = db.get(SessionPayment, line_id)
-        session = db.get(TableSession, line.session_id) if line else None
-        if not line or (not user.is_super_admin() and session.table.client_id != user.client_id):
+        line = db.get(PaymentLine, line_id)
+        if not line or (not user.is_super_admin() and line.order.client_id != user.client_id):
             raise HTTPException(404, "Payment line not found")
-        if line.method != "bank_transfer" or line.status != SessionPaymentStatus.PENDING:
+        if line.method != "bank_transfer" or line.status != PaymentLineStatus.PENDING:
             raise HTTPException(409, "The line must be a pending bank transfer")
         if tx.amount != line.amount:
             raise HTTPException(

@@ -1,4 +1,4 @@
-# app/billiard/routes/shift_router.py  (HTTP only; rules live in shift_service)
+# app/payments/routes/shift_router.py  (HTTP only; rules live in shift_service)
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.user.models.user import User
 from app.user.utils.token import get_current_user
-from app.billiard.schemas.shift import (
+from app.payments.schemas.shift import (
     CashMovementRequest, CloseShiftRequest, OpenShiftRequest, ShiftResponse, ShiftSummary,
 )
-from app.billiard.services.shift_service import shift_service
+from app.payments.services.shift_service import shift_service
 
-router = APIRouter(prefix="/shifts", tags=["Billiard Shifts"])
+router = APIRouter(prefix="/payments/shifts", tags=["Payments - Shifts"])
 
 
 @router.post("/open", response_model=ShiftSummary, status_code=201)

@@ -1,4 +1,4 @@
-# app/billiard/schemas/bank_feed.py
+# app/payments/schemas/bank_feed.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -20,7 +20,7 @@ class BankTransactionResponse(BaseModel):
     transaction_date: Optional[datetime] = None
     status: str
     reason: Optional[str] = None
-    session_id: Optional[int] = None
+    order_id: Optional[int] = None
     line_id: Optional[int] = None
     handled_by_id: Optional[int] = None
     handled_at: Optional[datetime] = None

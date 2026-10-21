@@ -65,6 +65,12 @@ class TableSession(Base):
         enum_col(PaymentState), default=PaymentState.UNPAID, nullable=False, index=True
     )
     payment_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # The bill in the Payments module (lines, transfers, audit). payment_state/method/id/reference/
+    # paid_* above are a mirror of it, written by BilliardSessionPayable.apply_state, so reports
+    # and the bill never have to join the Payments tables to know whether a session is paid.
+    payment_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("payment_orders.id", ondelete="SET NULL"), nullable=True
+    )
     payment_id: Mapped[int | None] = mapped_column(
         ForeignKey("payment_transactions.id", ondelete="SET NULL"), nullable=True
     )
@@ -81,10 +87,7 @@ class TableSession(Base):
         "SessionItem", back_populates="session", cascade="all, delete-orphan",
         lazy="selectin", order_by="SessionItem.id",
     )
-    payments = relationship(
-        "SessionPayment", back_populates="session", cascade="all, delete-orphan",
-        lazy="selectin", order_by="SessionPayment.id",
-    )
+    payment_order = relationship("PaymentOrder", lazy="selectin")
     games = relationship(
         "TableGame", back_populates="session", cascade="all, delete-orphan",
         lazy="select", order_by="TableGame.game_number",

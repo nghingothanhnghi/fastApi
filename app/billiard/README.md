@@ -50,7 +50,7 @@ flowchart LR
 
 ```text
 app/billiard/
-├── config.py          # Billing policy, rounding, currency, payment method mapping
+├── config.py          # Billing policy, rounding, currency
 ├── models/            # Database tables (SQLAlchemy)
 │   ├── table.py       #   BilliardTable, TableStatus
 │   ├── session.py     #   TableSession, SessionStatus, PaymentState
@@ -66,7 +66,8 @@ app/billiard/
 ├── services/          # Business rules (the "brain")
 │   ├── table_service.py     # create/list tables, start session, active tables
 │   ├── session_service.py   # add item, stop, get bill
-│   ├── payment_service.py   # pay + confirm (bridge to Payments module)
+│   ├── payment_adapter.py   # billiard's side of the Payments contract (what to charge, which club)
+│   ├── payment_service.py   # thin entry point: session id -> Payments module
 │   ├── report_service.py    # usage/revenue report
 │   ├── game_service.py      # games and score changes
 │   ├── pricing_rule_service.py # club/table time-based price rules
@@ -94,7 +95,7 @@ routes  →  services  →  models
 - **Services** hold the rules (validation, calculations, locking).
 - **`utils/billing.py`** contains pure math with no database access, so it is easy to test.
 - Services call `db.flush()`; the **route** calls `db.commit()`.
-  - ⚠️ **Exception:** `payment_service.py` commits by itself. See [section 7](#7-payment-flow).
+  - ⚠️ **Exception:** `payment_service.py` commits, because the Payments module does. See [section 7](#7-payments).
 
 ---
 
@@ -134,42 +135,18 @@ erDiagram
 | `total_table_fee` | Filled at Stop |
 | `total_product_fee` | Sum of items, updated whenever an item is added |
 | `grand_total` | `total_table_fee + total_product_fee` |
-| `payment_state` | `unpaid` → `pending` → `paid` |
-| `payment_method` | `cash`, `bank_transfer`, `stripe`, or `split` (several methods) |
-| `payment_id`, `payment_reference` | Link to the Payments module (first completed line) |
-| `paid_at` | When it was paid |
-| `opened_by_id`, `stopped_by_id`, `paid_by_id` | Who did each action (audit) |
+| `payment_order_id` | The bill in the Payments module (lines, transfers, audit live there) |
+| `payment_state` | `unpaid` → `pending` → `paid`. **A mirror** of the order, written by the Payments module, so reports never join its tables |
+| `payment_method` | Mirror: `cash`, `bank_transfer`, `stripe`, or `split` |
+| `payment_id`, `payment_reference` | Mirror: link to the first completed payment |
+| `paid_at`, `paid_by_id` | Mirror: when and by whom (empty `paid_by_id` = confirmed automatically by the bank feed) |
+| `opened_by_id`, `stopped_by_id` | Who did each action (audit) |
 
-### `session_payments` (one row per payment line)
+### Payment tables are not here
 
-A bill can be paid by several lines, e.g. 200,000 cash + 110,000 transfer.
-
-| Column | Notes |
-|--------|-------|
-| `session_id`, `method`, `amount` | `cash` or `bank_transfer`, and the part of the bill this line covers |
-| `status` | `pending` (transfer waiting for the cashier), `completed`, `voided` (reversed by a manager), `cancelled` (never received), `failed` |
-| `voided_at`, `voided_by_id`, `void_reason` | Set when a manager voids a completed line |
-| `cash_tendered`, `change_given` | Cash only: money handed over and change returned |
-| `transfer_memo`, `expires_at` | Transfer only: content to match in the bank feed (e.g. `BIDA42L7`) and QR expiry |
-| `payment_id`, `payment_reference` | The backing `PaymentTransaction` in the Payments module |
-| `created_by_id`, `confirmed_by_id`, `confirmed_at` | Who recorded / confirmed it |
-
-### `session_payment_events` (audit trail)
-
-Append-only log of every payment action: `line_created`, `cash_received`, `transfer_awaiting`, `transfer_confirmed`, `line_cancelled`, `line_failed`, `line_voided`, `transfer_auto_confirmed`, `transfer_assigned_from_bank`, `session_paid`, with the actor and a small JSON payload. Read it with `GET /sessions/{id}/pay/events`.
-
-### `cash_shifts` and `cash_movements` (cash drawer)
-
-One drawer per club (`client_id`): at most one shift is open at a time.
-
-| Column | Notes |
-|--------|-------|
-| `cash_shifts.status` | `open` or `closed` |
-| `opened_at`, `closed_at`, `opening_float` | The shift window and the cash already in the drawer |
-| `expected_cash`, `counted_cash`, `variance` | Frozen at close. `variance = counted - expected` (negative = cash missing) |
-| `cash_movements` | Pay-ins and pay-outs inside a shift, each with a reason and who did it |
-
-**Upgrading an existing database:** run `python migrate_billiard_shifts.py` once. It creates the two new tables, adds the `voided_*` columns to `session_payments`, and on PostgreSQL adds the `voided` enum value. It is idempotent and backs up SQLite first. (A fresh database gets everything from `init_db`.)
+Payment lines, the audit trail, cash shifts and bank transactions belong to the **Payments module**
+(`payment_orders`, `payment_lines`, `payment_events`, `cash_shifts`, `bank_transactions`). See
+[`app/payments/README.md`](../payments/README.md). A session only stores `payment_order_id` and the mirror columns above.
 
 ### `session_items`
 
@@ -264,166 +241,66 @@ Grand total:     310,000
 | `BILLIARD_MIN_BILLABLE_MINUTES` | `1` | Minimum minutes to charge |
 | `BILLIARD_FEE_ROUNDING_UNIT` | `1` | Round the table fee to this unit (`1` = no rounding) |
 | `BILLIARD_CURRENCY` | `VND` | Currency label on bills and payments |
-| `BILLIARD_BANK_TRANSFER_REQUIRES_CONFIRMATION` | `true` | A transfer waits for the cashier's "received" tick. `false` = paid immediately (old behaviour) |
-| `BILLIARD_TRANSFER_EXPIRE_MINUTES` | `15` | How long a transfer QR is shown as valid |
-| `BILLIARD_BANK_BIN` | empty | NAPAS bank BIN of the receiving account (e.g. `970436`) |
-| `BILLIARD_BANK_ACCOUNT_NO` | empty | Receiving account number |
-| `BILLIARD_BANK_ACCOUNT_NAME` | empty | Account holder name (shown to the customer) |
-| `BILLIARD_REQUIRE_OPEN_SHIFT` | `false` | `true` = `/pay` is refused (`409`) until a shift is open |
-| `SEPAY_WEBHOOK_SECRET` | empty | HMAC secret for `POST /bank-feed/sepay` (preferred) |
-| `SEPAY_API_KEY` | empty | API key alternative (`Authorization: Apikey ...`); endpoint is closed if neither is set |
-| `SEPAY_TIMESTAMP_TOLERANCE_SECONDS` | `300` | Allowed clock difference for HMAC requests |
-| `BILLIARD_BANK_CODE` | empty | Short bank code (e.g. `VCB`), only for the hosted QR image URL |
 
-Without `BANK_BIN` + `BANK_ACCOUNT_NO` no QR is generated; a transfer line still works and the cashier confirms it by hand.
+Payment settings (bank account, QR, SePay, shifts) are in the Payments module: see [`app/payments/README.md`](../payments/README.md#8-configuration).
 
 Changing these only affects **new** sessions because each session snapshots its own policy.
 
 ---
 
-## 7. Payment flow
+## 7. Payments
 
-Payment reuses the existing **Payments** module through `payment_provider_registry`. Billiard does not talk to Stripe directly.
+Billiard does **not** implement payment. It is a *payable business* of the Payments module
+(`source_type = "billiard_session"`). Everything about how money is taken (cash and change, split,
+VietQR, SePay bank feed, manager voids, shifts, audit trail, Stripe) lives in
+[`app/payments`](../payments/README.md) and works the same for any business.
 
-### Method mapping (`config.PAYMENT_METHODS`)
+### What billiard contributes (`services/payment_adapter.py`)
 
-| API `payment_method` | Provider | Result |
-|----------------------|----------|--------|
-| `cash` | `manual` | Paid immediately. Optional `cash_tendered` records the money handed over and the change |
-| `bank_transfer` | `manual` | `pending` with a VietQR until the cashier confirms (see below) |
-| `stripe` | `stripe` | Stays `pending` until `/pay/confirm` |
+| Question Payments asks | Billiard's answer |
+|------------------------|-------------------|
+| Find the object | `TableSession` by id, with a row lock and the tenant check (`404` for other clubs) |
+| May it be paid now? | Only when the session is `completed` (stopped) |
+| How much, which currency, which club? | `grand_total`, `BILLIARD_CURRENCY`, the table's `client_id` |
+| What to put in each payment's metadata? | `billiard_session_id` and the table name, for reconciliation |
+| Mirror the result | Writes `payment_order_id`, `payment_state`, `payment_method`, `paid_at`, `paid_by_id` onto the session |
 
-### Request styles for `POST /sessions/{id}/pay`
+The client never sends an amount: it is always `session.grand_total` at the moment of paying.
 
-Send **exactly one** of `payment_method` or `payments`:
+### Two ways to call it (same operation)
+
+| Billiard URL | Generic Payments URL |
+|--------------|----------------------|
+| `POST /sessions/{id}/pay` | `POST /payments/orders/billiard_session/{id}/pay` |
+| `POST /sessions/{id}/pay/confirm` | `POST /payments/orders/billiard_session/{id}/pay/confirm` |
+| `POST /sessions/{id}/pay/lines/{line_id}/confirm` | `.../lines/{line_id}/confirm` |
+| `POST /sessions/{id}/pay/lines/{line_id}/cancel` | `.../lines/{line_id}/cancel` |
+| `POST /sessions/{id}/pay/lines/{line_id}/void` (manager) | `.../lines/{line_id}/void` |
+| `GET /sessions/{id}/pay/events` | `.../events` |
+
+The billiard URLs return the **bill** (`BillResponse`, with `amount_paid`, `balance_due` and the payment
+lines); the Payments URLs return the order view. Request bodies are the same, for example:
 
 ```json
 {"payment_method": "cash", "cash_tendered": 500000}
+{"payments": [{"method": "cash", "amount": 200000}, {"method": "bank_transfer", "amount": 110000}]}
 ```
-
-```json
-{"payments": [
-  {"method": "cash", "amount": 200000, "cash_tendered": 200000},
-  {"method": "bank_transfer", "amount": 110000}
-]}
-```
-
-- The bill total is never taken from the client. For a split, the line amounts must add up **exactly** to the amount due (`422` otherwise).
-- `cash_tendered` must be at least the cash amount; `change_given` is calculated by the server.
-- Up to 6 lines. Stripe cannot be mixed with cash/transfer lines.
-- The bill (`GET /sessions/{id}`) shows `amount_paid`, `balance_due` and every line with its status.
-
-### Bank transfer (VietQR)
-
-1. `POST /pay` creates a `pending` transfer line with a memo like `BIDA42L7`. The response (and any later `GET /sessions/{id}`) has `payments[].transfer` with `qr_payload` (draw it as a QR code), `qr_image_url`, the memo, the amount, and `expires_at`.
-2. The customer scans and pays.
-3. The cashier presses "received": `POST /sessions/{id}/pay/lines/{line_id}/confirm`. The line becomes `completed`.
-4. If the money never comes: `POST /sessions/{id}/pay/lines/{line_id}/cancel`. The line is voided and the remaining balance can be paid another way with a new `POST /pay`.
-
-### Voiding a payment (managers only)
-
-`POST /sessions/{id}/pay/lines/{line_id}/void` with a required `reason`. Only `manager`, `admin` and `super_admin` may call it (`403` for anyone else; the check is in both the route and the service).
-
-- Only a `completed` line can be voided. A line still `pending` is cancelled instead.
-- The line becomes `voided`, the backing payment is marked `refunded`, and `line_voided` is written to the audit trail with the manager and reason.
-- The bill goes back to `pending` (part paid) or `unpaid`, `paid_at` / `paid_by` are cleared, and the cashier can take payment again.
-- Stripe payments are not voided here (they have no payment lines); refund those through the Stripe refund endpoint.
-
-### Shifts and the cash drawer
-
-```text
-POST /shifts/open        {"opening_float": 1000000}          start the shift (409 if one is open)
-GET  /shifts/current                                          live totals, or null
-POST /shifts/{id}/movements  {"type": "pay_out", "amount": 20000, "reason": "bought ice"}
-POST /shifts/{id}/close  {"counted_cash": 1290000}           returns expected, counted, variance
-GET  /shifts, GET /shifts/{id}
-```
-
-Expected cash in the drawer for the shift window:
-
-```text
-opening float
-+ cash payments confirmed in the window     (the bill amount, change already netted out)
-- cash payments voided in the window        (even if they were taken in an earlier shift)
-+ pay-ins - pay-outs
-```
-
-- The summary also lists totals per method (received / voided / net), so bank transfers show up in the shift report but never in the drawer maths.
-- A pay-out larger than the cash in the drawer is refused. A manager void can take the expected figure below zero (for example a refund the next day); that is shown as it is.
-- Only the cashier who opened the shift, or a manager, can close it.
-- A closed shift never changes: its numbers are frozen, and a later void counts in the shift in which it happens.
-- By default payments are allowed with no shift open (they just don't appear in any shift). Set `BILLIARD_REQUIRE_OPEN_SHIFT=true` to enforce opening a shift first.
-
-### Automatic confirmation of transfers (SePay)
-
-Instead of the cashier pressing "received", the bank feed can confirm a transfer by itself. [SePay](https://developer.sepay.vn/en/sepay-webhooks) watches the club's bank account and calls `POST /bank-feed/sepay` for every incoming transfer.
-
-**Set up**
-
-1. In SePay, add a webhook pointing to `https://<your-api>/bank-feed/sepay` (HTTPS, public domain).
-2. Choose the security method and set the matching variable on the server:
-   - HMAC-SHA256 (preferred): `SEPAY_WEBHOOK_SECRET=<secret>`. Verifies `X-SePay-Signature` over `<X-SePay-Timestamp>.<raw body>` and rejects timestamps more than 5 minutes off.
-   - API key: `SEPAY_API_KEY=<key>`. Verifies `Authorization: Apikey <key>`.
-   - If neither is set the endpoint answers `503` and stays closed. If a secret is set, an API-key-only request is rejected.
-3. Set `BILLIARD_BANK_ACCOUNT_NO` to the account SePay watches. Transfers to any other account are ignored.
-4. Optional: in SePay *Company → General → Payment code structure* use the prefix `BIDA`. Matching does not depend on it, because we search the transfer content for our own code (`BIDA<session>L<line>`, any case, any surrounding text) and also check SePay's `code` field.
-
-**What happens to each transaction**
-
-Every transaction is stored first in `bank_transactions` (unique per SePay `id`, so replays are harmless), then matched:
-
-| Result | When | What happens |
-|--------|------|--------------|
-| `matched` | Code found, line still `pending`, amount **exactly** equal | Line completes, bill settles, audit event `transfer_auto_confirmed` (no user) |
-| `needs_review` | Code found but amount differs, line already paid (possible double transfer), or line cancelled/voided | Nothing is confirmed; a manager decides |
-| `unmatched` | No bill code in the content, or the code matches no line | Kept for a manager |
-| `ignored` | Outgoing transfer, or another account | Kept for audit |
-
-The webhook always answers `{"success": true}` once a valid, authenticated transaction is stored, even when it could not be matched. SePay treats anything else as a failure and retries for up to 5 hours.
-
-**Manager tools** (manager/admin only)
-
-- `GET /bank-feed/transactions?status=needs_review` lists money that needs a decision.
-- `POST /bank-feed/transactions/{id}/assign` `{"line_id": 7}` links a transaction to a pending transfer line and confirms it. The amount must match exactly (`422` otherwise): settle the difference with the customer first.
-- `POST /bank-feed/transactions/{id}/ignore` `{"note": "refunded"}` dismisses it.
-
-Unmatched transactions carry no club (the receiving account is global configuration), so every manager can see them; matched and `needs_review` ones are scoped to the club of their bill.
-
-> **Not covered yet:** SePay only retries for 5 hours, so a webhook can be lost if the server is down longer. Their guidance is a job every 15-30 minutes that fetches recent transactions through the SePay API and feeds any missing ones through the same matcher. The cashier's manual "received" button still works as the fallback.
-
-### Payment states
-
-```mermaid
-stateDiagram-v2
-    [*] --> unpaid
-    unpaid --> pending: POST /pay (claim)
-    pending --> paid: completed lines cover grand_total, or Stripe confirmed
-    pending --> pending: part paid / transfer waiting / pay the balance
-    pending --> unpaid: nothing collected (provider error, all lines cancelled, Stripe failed)
-    paid --> [*]
-```
-
-### Why there is a "claim"
-
-The Payments providers call `db.commit()` themselves, so we cannot wrap everything in one transaction. Instead:
-
-1. Lock the session, insert the payment lines, switch `unpaid → pending`, then **commit** (this is the *claim*).
-2. Call the provider once per line. Any second `/pay` call while a line is waiting gets `409 A payment for this session is already in progress`.
-3. Settle: `paid` when completed lines cover `grand_total`; `pending` while a transfer is waiting or a balance remains; back to `unpaid` if nothing was collected.
-4. If recording a line fails, the failed and not-yet-processed lines are marked `failed`, the API returns `500`, and the bill shows exactly what was recorded. Cash that was already recorded stays; pay the remaining balance with a new `POST /pay`.
-
-Pre-conditions for `/pay`: the session must be `completed`, not already `paid`, and `grand_total > 0`.
-
-> If a payment is created but saving the session fails, an error is logged. The payment's metadata contains `billiard_session_id` (and `line_id`) so it can be reconciled by hand.
 
 ### Stripe example
 
 ```text
 1. POST /sessions/42/pay          {"payment_method": "stripe"}
-   → response has gateway.client_secret  (frontend completes the card payment)
+   -> response has gateway.client_secret  (frontend completes the card payment)
 2. POST /sessions/42/pay/confirm
-   → backend asks Stripe; if succeeded, payment_state becomes "paid"
+   -> backend asks Stripe; if succeeded, payment_state becomes "paid"
 ```
+
+### Notes
+
+- A session paid before the Payments module kept the bill has no order. It still shows as `paid`
+  (`amount_paid = grand_total`, no lines) and cannot be paid again.
+- Reports use `payment_state == "paid"` on the session, so they need no join with the Payments tables.
+- The table is freed at Stop, so payment can happen later (see 5.3).
 
 ---
 
@@ -447,32 +324,17 @@ All endpoints require a logged-in user (JWT). Roles are noted where required.
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
 | `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
 | `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed |
-| `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7) |
+| `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7). Delegates to the Payments module |
 | `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway (Stripe) payment |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | Cashier confirms a bank transfer line was received |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/cancel` | Void a pending line; the balance can be paid another way |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/void` | **Manager only.** Reverse a completed line (reason required) |
 | `GET` | `/sessions/{id}/pay/events` | Audit trail of payment actions |
 
-### Shifts (cash drawer)
+### Shifts, bank feed and generic orders
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/shifts/open` | Open a shift with an opening float. `409` if one is open |
-| `GET` | `/shifts/current` | The open shift with live drawer totals, or `null` |
-| `GET` | `/shifts` | Recent shifts (`limit`, `offset`) |
-| `GET` | `/shifts/{id}` | Shift summary: drawer maths, per-method totals, movements |
-| `POST` | `/shifts/{id}/movements` | Pay-in / pay-out with a reason |
-| `POST` | `/shifts/{id}/close` | Close with the counted cash; returns the variance |
-
-### Bank feed (SePay)
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/bank-feed/sepay` | SePay HMAC or API key | Webhook for incoming transfers (see section 7) |
-| `GET` | `/bank-feed/transactions` | manager | List bank transactions; filter with `?status=` |
-| `POST` | `/bank-feed/transactions/{id}/assign` | manager | Link a transaction to a pending transfer line and confirm it |
-| `POST` | `/bank-feed/transactions/{id}/ignore` | manager | Dismiss a transaction |
+Moved to the Payments module: `/payments/shifts/*`, `/payments/bank-feed/*`, `/payments/orders/*`.
+See [`app/payments/README.md`](../payments/README.md#9-api-reference).
 
 ### Games, pricing, and controller
 
@@ -530,7 +392,7 @@ curl -X POST http://localhost:8000/sessions/1/pay \
   -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"payments": [{"method": "cash", "amount": 200000}, {"method": "bank_transfer", "amount": 110000}]}'
 
-# 5c. Cashier confirms the transfer arrived
+# 5c. Cashier confirms the transfer arrived (or the SePay webhook does it automatically)
 curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorization: Bearer <token>"
 ```
 
@@ -541,7 +403,7 @@ curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorizat
 | `400` | Product inactive, or variant doesn't belong to the product |
 | `404` | Table/session/product not found, or belongs to another tenant |
 | `409` | Wrong state: table busy, session already stopped, already paid, payment in progress, nothing to pay |
-| `403` | Voiding a payment without a manager role, or closing someone else's shift as a cashier |
+| `403` | Voiding a payment without a manager role |
 | `422` | Split lines don't add up to the amount due, or cash tendered is less than the cash amount |
 
 ---
@@ -552,9 +414,9 @@ curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorizat
 |--------|----------------------|
 | **User/Auth** | `get_current_user`, `require_roles`, `client_id` for tenant scope, user ids for audit columns |
 | **Product** | `Product` / `ProductVariant` supply the name and price **once**, at the time an item is added |
-| **Payments** | `payment_provider_registry` creates and confirms the payment |
+| **Payments** | Billiard registers a `PayableAdapter`; the Payments module takes the money (cash, split, VietQR, bank feed, void, shifts) and mirrors the state back |
 
-Product and Payments remain the source of truth for their own data. Billiard only stores references and snapshots.
+Product and Payments remain the source of truth for their own data. Billiard only stores references, snapshots and the payment-state mirror.
 
 ---
 

@@ -8,11 +8,14 @@ from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
-    AddSessionItemRequest, BillResponse, CancelPaymentLineRequest, ConfirmTransferRequest,
-    PaymentEventResponse, PayResponse, PaySessionRequest, SessionItemResponse, VoidPaymentLineRequest,
+    AddSessionItemRequest, BillResponse, PayResponse, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
+from app.payments.schemas.order import (
+    CancelPaymentLineRequest, ConfirmTransferRequest, PayOrderRequest, PaymentEventResponse,
+    VoidPaymentLineRequest,
+)
 
 router = APIRouter(prefix="/sessions", tags=["Billiard Sessions"])
 
@@ -49,7 +52,7 @@ def stop_session(session_id: int, db: Session = Depends(get_db), current_user: U
 
 @router.post("/{session_id}/pay", response_model=PayResponse)
 def pay_session(
-    session_id: int, request: PaySessionRequest,
+    session_id: int, request: PayOrderRequest,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     session, gateway = billiard_payment_service.pay_session(db, session_id, request, current_user)
