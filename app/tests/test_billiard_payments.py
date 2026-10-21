@@ -1,9 +1,13 @@
 # app/tests/test_billiard_payments.py
-# Cash (tendered/change), bank transfer (VietQR, manual confirm), split payments and audit trail.
+# Billiard's side of payments only: the PayableAdapter (when a session may be paid, how much, which
+# club), the state mirror on the session/bill, legacy sessions, and the URLs. Cash change, split,
+# VietQR, bank feed, void and shifts are tested once, in the Payments module (test_payments_*.py).
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
 # app.database / app.core.config validate env at import time.
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.gettempdir()}/billiard_test_import.db")
@@ -11,62 +15,30 @@ os.environ.setdefault("OPENAI_API_KEY", "test")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import pytest
-from fastapi import HTTPException
-from pydantic import ValidationError
-from sqlalchemy import create_engine
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.billiard.models  # noqa: F401  (registers billiard tables)
-from app.billiard import config
-from app.billiard.models import BilliardTable, PaymentState, SessionPaymentEvent
-from app.billiard.schemas.session import PaySessionRequest
+from app.billiard.models import BilliardTable, PaymentState, SessionStatus, TableSession
+from app.billiard.routes import billiard_router
 from app.billiard.services.payment_service import billiard_payment_service as svc
 from app.billiard.services.session_lifecycle import finalize_stop, open_session
 from app.billiard.services.session_service import session_service
-from app.billiard.utils import vietqr
-from app.payments.models.payment import PaymentTransaction, PaymentStatus
-from app.product.models.product import Product, ProductVariant  # noqa: F401  (session_items FK)
-from app.user.models.user import User
-from app.user.models.role import Role  # noqa: F401
-from app.user.models.user_role import UserRole  # noqa: F401
-from app.hydro_system.models.device import HydroDevice  # noqa: F401
-from app.hydro_system.models.actuator import HydroActuator  # noqa: F401
-from app.hydro_system.models.actuator_log import HydroActuatorLog  # noqa: F401
-from app.hydro_system.models.schedule import HydroSchedule  # noqa: F401
-
-CLIENT = "c1"
+from app.database import get_db
+from app.payments import config as pay_config
+from app.payments.models.payment import PaymentTransaction
+from app.payments.routes import bank_feed_router, order_router, payment_router, shift_router
+from app.payments.schemas.order import PayOrderRequest
+from app.payments.services.bank_feed_service import bank_feed_service as feed
+from app.payments.services.payable_registry import payable_registry
+from app.tests.payments_testkit import CLIENT, D, cashier, db, engine, make_user, manager  # noqa: F401
+from app.user.utils.token import get_current_user
 
 
-@pytest.fixture()
-def db():
-    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    s = sessionmaker(bind=engine, autoflush=False)()
-    yield s
-    s.close()
-
-
-@pytest.fixture()
-def user(db):
-    u = User(client_id=CLIENT, username="cashier", email="c@x.com", hashed_password="x")
-    db.add(u)
-    db.commit()
-    return u
-
-
-@pytest.fixture()
-def bank(monkeypatch):
-    monkeypatch.setattr(config, "BANK_BIN", "970436")
-    monkeypatch.setattr(config, "BANK_CODE", "VCB")
-    monkeypatch.setattr(config, "BANK_ACCOUNT_NO", "0123456789")
-    monkeypatch.setattr(config, "BANK_ACCOUNT_NAME", "BIDA CLUB")
-
-
-def _bill(db, user, rate="310000"):
-    """A stopped (completed) 1-hour session: grand_total == rate."""
-    table = BilliardTable(name="T1", hourly_rate=Decimal(rate), client_id=CLIENT)
+def _stopped_session(db, user, rate="310000", client=CLIENT):
+    """A completed (stopped) 1-hour session: grand_total == rate."""
+    table = BilliardTable(name=f"T{db.query(BilliardTable).count() + 1}", hourly_rate=D(rate), client_id=client)
     db.add(table)
     db.flush()
     start = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -77,262 +49,270 @@ def _bill(db, user, rate="310000"):
 
 
 def _pay(db, user, session_id, **body):
-    return svc.pay_session(db, session_id, PaySessionRequest(**body), user)
+    return svc.pay_session(db, session_id, PayOrderRequest(**body), user)
 
 
-def _events(db, session_id):
-    return [e.event_type for e in db.query(SessionPaymentEvent)
-            .filter(SessionPaymentEvent.session_id == session_id).order_by(SessionPaymentEvent.id)]
+def _bill(db, user, session_id):
+    return session_service.build_bill(session_service.get_session(db, session_id, user))
 
 
-# ------------------------------------------------------------------ VietQR
-
-def test_crc16_ccitt_known_vector():
-    assert vietqr.crc16_ccitt("123456789") == "29B1"
-
-
-def _parse_tlv(s):
-    out, i = {}, 0
-    while i < len(s):
-        tag, n = s[i:i + 2], int(s[i + 2:i + 4])
-        out[tag] = s[i + 4:i + 4 + n]
-        i += 4 + n
-    return out
+@pytest.fixture(autouse=True)
+def bank(monkeypatch):
+    monkeypatch.setattr(pay_config, "BANK_BIN", "970436")
+    monkeypatch.setattr(pay_config, "BANK_ACCOUNT_NO", "0123456789")
+    monkeypatch.setattr(pay_config, "BANK_CODE", "VCB")
 
 
-def test_vietqr_payload_structure_and_crc():
-    payload = vietqr.build_payload("970436", "0123456789", Decimal("310000"), "BIDA42L7")
+# ------------------------------------------------------------------ registration
 
-    assert payload[-8:-4] == "6304"
-    assert vietqr.crc16_ccitt(payload[:-4]) == payload[-4:]
-    top = _parse_tlv(payload)
-    assert top["01"] == "12" and top["53"] == "704" and top["54"] == "310000" and top["58"] == "VN"
-    assert _parse_tlv(top["62"])["08"] == "BIDA42L7"
-    merchant = _parse_tlv(top["38"])
-    assert merchant["00"] == "A000000727" and merchant["02"] == "QRIBFTTA"
-    assert _parse_tlv(merchant["01"]) == {"00": "970436", "01": "0123456789"}
+def test_billiard_registers_itself_as_a_payable_business():
+    assert payable_registry.get("billiard_session").source_type == "billiard_session"
 
 
-@pytest.mark.parametrize("amount,memo", [(Decimal("0"), "BIDA1L1"), (Decimal("1000"), "bad memo!")])
-def test_vietqr_rejects_bad_input(amount, memo):
-    with pytest.raises(ValueError):
-        vietqr.build_payload("970436", "1", amount, memo)
+# --------------------------------------------------------------- adapter rules
 
-
-# ------------------------------------------------------------ request schema
-
-def test_request_needs_exactly_one_style():
-    with pytest.raises(ValidationError):
-        PaySessionRequest()
-    with pytest.raises(ValidationError):
-        PaySessionRequest(payment_method="cash", payments=[{"method": "cash", "amount": 1}])
-    with pytest.raises(ValidationError):
-        PaySessionRequest(payment_method="bank_transfer", cash_tendered=500000)
-    with pytest.raises(ValidationError):
-        PaySessionRequest(payments=[{"method": "bank_transfer", "amount": 1, "cash_tendered": 5}])
-
-
-# --------------------------------------------------------------------- cash
-
-def test_cash_with_tendered_gives_change_and_marks_paid(db, user):
-    sid = _bill(db, user)
-
-    session, gateway = _pay(db, user, sid, payment_method="cash", cash_tendered=500000)
-    bill = session_service.build_bill(session)
-
-    assert gateway is None
-    assert bill["payment_state"] == "paid" and bill["payment_method"] == "cash"
-    assert bill["amount_paid"] == Decimal("310000") and bill["balance_due"] == 0
-    (line,) = bill["payments"]
-    assert line["cash_tendered"] == Decimal("500000") and line["change_given"] == Decimal("190000")
-    assert line["status"] == "completed" and line["payment_reference"]
-    assert _events(db, sid) == ["line_created", "cash_received", "session_paid"]
-    # the Payments module is still the source of truth
-    tx = db.query(PaymentTransaction).one()
-    assert tx.provider == "manual" and tx.status == PaymentStatus.COMPLETED and tx.amount == 310000
-
-
-def test_cash_without_tendered_is_exact_amount(db, user):
-    sid = _bill(db, user)
-    session, _ = _pay(db, user, sid, payment_method="cash")
-    (line,) = session_service.build_bill(session)["payments"]
-    assert line["cash_tendered"] == Decimal("310000") and line["change_given"] == 0
-
-
-def test_cash_tendered_below_amount_is_rejected_and_nothing_recorded(db, user):
-    sid = _bill(db, user)
-    with pytest.raises(HTTPException) as e:
-        _pay(db, user, sid, payment_method="cash", cash_tendered=100000)
-    assert e.value.status_code == 422
-    bill = session_service.build_bill(session_service.get_session(db, sid, user))
-    assert bill["payment_state"] == "unpaid" and bill["payments"] == []
-
-
-def test_paying_twice_is_rejected(db, user):
-    sid = _bill(db, user)
-    _pay(db, user, sid, payment_method="cash")
-    with pytest.raises(HTTPException) as e:
-        _pay(db, user, sid, payment_method="cash")
-    assert e.value.status_code == 409
-
-
-# ----------------------------------------------------------------- transfer
-
-def test_transfer_stays_pending_with_qr_until_cashier_confirms(db, user, bank):
-    sid = _bill(db, user)
-
-    session, _ = _pay(db, user, sid, payment_method="bank_transfer")
-    bill = session_service.build_bill(session)
-
-    assert bill["payment_state"] == "pending" and bill["amount_paid"] == 0
-    assert bill["balance_due"] == Decimal("310000")
-    (line,) = bill["payments"]
-    assert line["status"] == "pending"
-    t = line["transfer"]
-    assert t["memo"] == f"BIDA{sid}L{line['id']}" and t["amount"] == Decimal("310000")
-    assert t["qr_payload"] and vietqr.crc16_ccitt(t["qr_payload"][:-4]) == t["qr_payload"][-4:]
-    assert "VCB-0123456789" in t["qr_image_url"] and "amount=310000" in t["qr_image_url"]
-    assert t["expires_at"] is not None
-
-    session = svc.confirm_transfer(db, sid, line["id"], user, note="saw it on the app")
-    bill = session_service.build_bill(session)
-    assert bill["payment_state"] == "paid" and bill["payment_method"] == "bank_transfer"
-    assert bill["payments"][0]["transfer"] is None            # no QR once settled
-    assert db.query(PaymentTransaction).one().status == PaymentStatus.COMPLETED
-    assert _events(db, sid) == ["line_created", "transfer_awaiting", "transfer_confirmed", "session_paid"]
-
-
-def test_transfer_without_bank_configured_has_no_qr(db, user, monkeypatch):
-    monkeypatch.setattr(config, "BANK_BIN", "")
-    sid = _bill(db, user)
-    session, _ = _pay(db, user, sid, payment_method="bank_transfer")
-    t = session_service.build_bill(session)["payments"][0]["transfer"]
-    assert t["qr_payload"] is None and t["memo"]
-
-
-def test_transfer_auto_confirm_switch_keeps_old_behaviour(db, user, monkeypatch):
-    monkeypatch.setattr(config, "BANK_TRANSFER_REQUIRES_CONFIRMATION", False)
-    sid = _bill(db, user)
-    session, _ = _pay(db, user, sid, payment_method="bank_transfer")
-    assert session_service.build_bill(session)["payment_state"] == "paid"
-
-
-def test_confirm_transfer_is_idempotent_and_rejects_cash_lines(db, user):
-    sid = _bill(db, user)
-    s, _ = _pay(db, user, sid, payments=[
-        {"method": "cash", "amount": 100000}, {"method": "bank_transfer", "amount": 210000}])
-    cash, transfer = session_service.build_bill(s)["payments"]
+def test_only_a_stopped_session_can_be_paid(db, cashier):
+    table = BilliardTable(name="T1", hourly_rate=D("310000"), client_id=CLIENT)
+    db.add(table)
+    db.flush()
+    active = open_session(db, table, cashier.id)
+    db.commit()
 
     with pytest.raises(HTTPException) as e:
-        svc.confirm_transfer(db, sid, cash["id"], user)
-    assert e.value.status_code == 409
-
-    svc.confirm_transfer(db, sid, transfer["id"], user)
-    svc.confirm_transfer(db, sid, transfer["id"], user)       # second tick is a no-op
-    assert db.query(PaymentTransaction).filter_by(status=PaymentStatus.COMPLETED).count() == 2
-    with pytest.raises(HTTPException) as e:
-        svc.confirm_transfer(db, sid, 9999, user)
-    assert e.value.status_code == 404
-
-
-# -------------------------------------------------------------------- split
-
-def test_split_cash_and_transfer(db, user, bank):
-    sid = _bill(db, user)
-
-    session, _ = _pay(db, user, sid, payments=[
-        {"method": "cash", "amount": 200000, "cash_tendered": 200000},
-        {"method": "bank_transfer", "amount": 110000},
-    ])
-    bill = session_service.build_bill(session)
-
-    assert bill["payment_state"] == "pending" and bill["payment_method"] == "split"
-    assert bill["amount_paid"] == Decimal("200000") and bill["balance_due"] == Decimal("110000")
-    assert [p["status"] for p in bill["payments"]] == ["completed", "pending"]
-    # a second /pay while the transfer is awaiting is blocked
-    with pytest.raises(HTTPException) as e:
-        _pay(db, user, sid, payment_method="cash")
-    assert e.value.status_code == 409
-
-    session = svc.confirm_transfer(db, sid, bill["payments"][1]["id"], user)
-    bill = session_service.build_bill(session)
-    assert bill["payment_state"] == "paid" and bill["amount_paid"] == Decimal("310000")
-    assert bill["paid_at"] is not None
-
-
-def test_split_that_does_not_add_up_is_rejected(db, user):
-    sid = _bill(db, user)
-    with pytest.raises(HTTPException) as e:
-        _pay(db, user, sid, payments=[
-            {"method": "cash", "amount": 100000}, {"method": "bank_transfer", "amount": 100000}])
-    assert e.value.status_code == 422
+        _pay(db, cashier, active.id, payment_method="cash")
+    assert e.value.status_code == 409 and "Stop the session" in e.value.detail
     assert db.query(PaymentTransaction).count() == 0
 
 
-def test_split_between_two_cash_lines_settles_immediately(db, user):
-    sid = _bill(db, user)
-    session, _ = _pay(db, user, sid, payments=[
-        {"method": "cash", "amount": 10000}, {"method": "cash", "amount": 300000, "cash_tendered": 500000}])
+def test_other_clubs_get_404_not_403(db, cashier):
+    sid = _stopped_session(db, cashier)
+    stranger = make_user(db, "stranger", client="other")
+    with pytest.raises(HTTPException) as e:
+        _pay(db, stranger, sid, payment_method="cash")
+    assert e.value.status_code == 404
+    with pytest.raises(HTTPException) as e:
+        svc.list_events(db, sid, stranger)
+    assert e.value.status_code == 404
+
+
+def test_amount_always_comes_from_the_session_total(db, cashier):
+    sid = _stopped_session(db, cashier, rate="250000")
+    _pay(db, cashier, sid, payment_method="cash")
+    tx = db.query(PaymentTransaction).one()
+    assert tx.amount == 250000 and tx.currency == "VND"
+    assert tx.client_id == CLIENT
+
+
+def test_payment_metadata_lets_a_human_reconcile_with_the_session(db, cashier):
+    sid = _stopped_session(db, cashier)
+    _pay(db, cashier, sid, payment_method="cash")
+    meta = db.query(PaymentTransaction).one().extra_metadata
+    assert meta["billiard_session_id"] == sid and meta["table"] and meta["payment_order_id"]
+
+
+# ---------------------------------------------------- the mirror on the session
+
+def test_cash_payment_is_mirrored_onto_the_session_and_the_bill(db, cashier):
+    sid = _stopped_session(db, cashier)
+
+    session, gateway = _pay(db, cashier, sid, payment_method="cash", cash_tendered=500000)
     bill = session_service.build_bill(session)
-    assert bill["payment_state"] == "paid"
-    assert [p["change_given"] for p in bill["payments"]] == [Decimal("0"), Decimal("200000")]
+
+    assert gateway is None
+    assert session.payment_state == PaymentState.PAID and session.payment_method == "cash"
+    assert session.payment_order_id and session.payment_id and session.payment_reference
+    assert session.paid_at is not None and session.paid_by_id == cashier.id
+    assert bill["payment_state"] == "paid" and bill["paid_by"] == "cashier"
+    assert bill["amount_paid"] == D("310000") and bill["balance_due"] == 0
+    (line,) = bill["payments"]
+    assert line["cash_tendered"] == D("500000") and line["change_given"] == D("190000")
+    # reports filter on the mirror without joining the Payments tables
+    assert db.query(TableSession).filter(TableSession.payment_state == PaymentState.PAID).count() == 1
 
 
-def test_cancel_transfer_then_pay_the_balance_with_cash(db, user):
-    sid = _bill(db, user)
-    s, _ = _pay(db, user, sid, payments=[
+def test_transfer_waits_with_a_qr_then_the_cashier_confirms(db, cashier):
+    sid = _stopped_session(db, cashier)
+
+    session, _ = _pay(db, cashier, sid, payment_method="bank_transfer")
+    bill = session_service.build_bill(session)
+
+    assert session.payment_state == PaymentState.PENDING and session.paid_at is None
+    assert bill["balance_due"] == D("310000")
+    line = bill["payments"][0]
+    assert line["transfer"]["memo"].startswith(pay_config.MEMO_PREFIX) and line["transfer"]["qr_payload"]
+
+    session = svc.confirm_transfer(db, sid, line["id"], cashier)
+    assert session.payment_state == PaymentState.PAID and session.payment_method == "bank_transfer"
+
+
+def test_split_payment_shows_both_lines_and_settles_when_complete(db, cashier):
+    sid = _stopped_session(db, cashier)
+    session, _ = _pay(db, cashier, sid, payments=[
         {"method": "cash", "amount": 200000}, {"method": "bank_transfer", "amount": 110000}])
-    transfer = session_service.build_bill(s)["payments"][1]
+    bill = session_service.build_bill(session)
 
-    s = svc.cancel_line(db, sid, transfer["id"], user, reason="customer has no signal")
-    bill = session_service.build_bill(s)
-    assert bill["payment_state"] == "pending" and bill["balance_due"] == Decimal("110000")
-    assert bill["payments"][1]["status"] == "cancelled"
-    failed = db.query(PaymentTransaction).filter_by(status=PaymentStatus.FAILED).one()
-    assert failed.extra_metadata["billiard_session_id"] == sid       # reconciliation info kept
-    assert failed.extra_metadata["cancel_reason"] == "customer has no signal"
+    assert session.payment_state == PaymentState.PENDING and session.payment_method == "split"
+    assert bill["amount_paid"] == D("200000") and bill["balance_due"] == D("110000")
+    assert [p["status"] for p in bill["payments"]] == ["completed", "pending"]
 
-    # only the balance can be paid now
+    session = svc.confirm_transfer(db, sid, bill["payments"][1]["id"], cashier)
+    assert session.payment_state == PaymentState.PAID
+
+
+def test_bank_feed_settles_the_session_without_a_person(db, cashier):
+    sid = _stopped_session(db, cashier)
+    session, _ = _pay(db, cashier, sid, payment_method="bank_transfer")
+    memo = session_service.build_bill(session)["payments"][0]["transfer"]["memo"]
+
+    tx, _ = feed.process_sepay(db, {
+        "id": 555, "transferType": "in", "transferAmount": 310000, "accountNumber": "0123456789",
+        "content": f"thanh toan {memo}", "gateway": "Vietcombank",
+    })
+
+    assert tx.status == "matched"
+    db.expire_all()
+    session = session_service.get_session(db, sid, cashier)
+    assert session.payment_state == PaymentState.PAID and session.paid_by_id is None
+
+
+def test_manager_void_reopens_the_session(db, cashier, manager):
+    sid = _stopped_session(db, cashier)
+    session, _ = _pay(db, cashier, sid, payment_method="cash")
+    line_id = session_service.build_bill(session)["payments"][0]["id"]
+
     with pytest.raises(HTTPException) as e:
-        _pay(db, user, sid, payments=[{"method": "cash", "amount": 310000}])
-    assert e.value.status_code == 422
+        svc.void_line(db, sid, line_id, cashier, "oops")
+    assert e.value.status_code == 403 and session_service.get_session(db, sid, cashier).payment_state == PaymentState.PAID
 
-    s, _ = _pay(db, user, sid, payment_method="cash", cash_tendered=200000)
-    bill = session_service.build_bill(s)
-    assert bill["payment_state"] == "paid" and bill["amount_paid"] == Decimal("310000")
-    assert bill["payments"][2]["change_given"] == Decimal("90000")
-    assert "line_cancelled" in _events(db, sid)
+    session = svc.void_line(db, sid, line_id, manager, "wrong table charged")
+    bill = session_service.build_bill(session)
 
-
-def test_cancelling_the_only_pending_line_releases_the_bill(db, user):
-    sid = _bill(db, user)
-    s, _ = _pay(db, user, sid, payment_method="bank_transfer")
-    line = session_service.build_bill(s)["payments"][0]
-
-    s = svc.cancel_line(db, sid, line["id"], user)
-
-    assert session_service.build_bill(s)["payment_state"] == "unpaid"
-    s, _ = _pay(db, user, sid, payment_method="cash")          # cashier can start over
-    assert session_service.build_bill(s)["payment_state"] == "paid"
+    assert session.payment_state == PaymentState.UNPAID and session.paid_at is None and session.paid_by_id is None
+    assert bill["balance_due"] == D("310000") and bill["payments"][0]["status"] == "voided"
+    _pay(db, cashier, sid, payment_method="cash")                          # can be paid again
+    assert session_service.get_session(db, sid, cashier).payment_state == PaymentState.PAID
 
 
-def test_cannot_cancel_a_completed_line(db, user):
-    sid = _bill(db, user)
-    s, _ = _pay(db, user, sid, payment_method="cash")
-    line = session_service.build_bill(s)["payments"][0]
+def test_failed_transfer_cancel_releases_the_session(db, cashier):
+    sid = _stopped_session(db, cashier)
+    session, _ = _pay(db, cashier, sid, payment_method="bank_transfer")
+    session = svc.cancel_line(db, sid, session_service.build_bill(session)["payments"][0]["id"], cashier, "no signal")
+    assert session.payment_state == PaymentState.UNPAID and session.payment_method is None
+
+
+# --------------------------------------------------------------------- Stripe
+
+def _intent(status):
+    return SimpleNamespace(id="pi_1", client_secret="sec", status=status)
+
+
+def test_stripe_pending_then_confirmed(db, cashier):
+    sid = _stopped_session(db, cashier)
+    with patch("stripe.PaymentIntent.create", return_value=_intent("requires_payment_method")):
+        session, gateway = _pay(db, cashier, sid, payment_method="stripe")
+    assert gateway["client_secret"] == "sec" and session.payment_state == PaymentState.PENDING
+    assert session.payment_method == "stripe"
+
+    with patch("stripe.PaymentIntent.retrieve", return_value=_intent("succeeded")):
+        session = svc.confirm_payment(db, sid, cashier)
+    assert session.payment_state == PaymentState.PAID
+
+
+# ------------------------------------------------------------ sessions before the module
+
+def test_session_paid_before_the_payments_module_stays_paid(db, cashier):
+    """Demo/legacy rows: paid, but never had an order."""
+    sid = _stopped_session(db, cashier)
+    session = session_service.get_session(db, sid, cashier)
+    session.payment_state, session.payment_method, session.paid_at = PaymentState.PAID, "cash", datetime.now(timezone.utc)
+    db.commit()
+
+    bill = _bill(db, cashier, sid)
+    assert bill["payment_state"] == "paid" and bill["amount_paid"] == D("310000") and bill["payments"] == []
     with pytest.raises(HTTPException) as e:
-        svc.cancel_line(db, sid, line["id"], user)
+        _pay(db, cashier, sid, payment_method="cash")
+    assert e.value.status_code == 409
+    assert svc.confirm_payment(db, sid, cashier).payment_state == PaymentState.PAID
+    assert svc.list_events(db, sid, cashier) == []
+
+
+def test_confirm_without_any_gateway_payment_is_a_409(db, cashier):
+    sid = _stopped_session(db, cashier)
+    with pytest.raises(HTTPException) as e:
+        svc.confirm_payment(db, sid, cashier)
     assert e.value.status_code == 409
 
 
-def test_payment_events_are_tenant_scoped(db, user):
-    sid = _bill(db, user)
-    _pay(db, user, sid, payment_method="cash")
-    assert [e.event_type for e in svc.list_events(db, sid, user)][-1] == "session_paid"
+# ------------------------------------------------------------------------ HTTP
 
-    other = User(client_id="other", username="x", email="x@x.com", hashed_password="x")
-    db.add(other)
-    db.commit()
-    with pytest.raises(HTTPException) as e:
-        svc.list_events(db, sid, other)
-    assert e.value.status_code == 404
+@pytest.fixture()
+def http(engine, db, cashier, manager):
+    """The app wired like main.py: legacy payment_router first, then the Payments routers, then billiard."""
+    Session = sessionmaker(bind=engine, autoflush=False)
+    app = FastAPI()
+    app.include_router(payment_router.router)
+    app.include_router(order_router.router)
+    app.include_router(shift_router.router)
+    app.include_router(bank_feed_router.router)
+    app.include_router(billiard_router)
+    app.dependency_overrides[get_db] = lambda: Session()
+    current = {"id": cashier.id}
+    app.dependency_overrides[get_current_user] = lambda: db.get(type(cashier), current["id"])
+    client = TestClient(app)
+    client.as_user = lambda u: current.update(id=u.id)
+    return client
+
+
+def test_billiard_urls_and_payments_urls_are_the_same_operation(http, db, cashier):
+    s1, s2 = _stopped_session(db, cashier), _stopped_session(db, cashier)
+
+    r = http.post(f"/sessions/{s1}/pay", json={"payments": [
+        {"method": "cash", "amount": 200000, "cash_tendered": 250000}, {"method": "bank_transfer", "amount": 110000}]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["payment_state"] == "pending" and body["balance_due"] == "110000.00" and body["gateway"] is None
+    assert [(p["method"], p["status"], p["change_given"]) for p in body["payments"]] == \
+        [("cash", "completed", "50000.00"), ("bank_transfer", "pending", None)]
+
+    # the generic Payments API sees the very same bill...
+    g = http.get(f"/payments/orders/billiard_session/{s1}")
+    assert g.status_code == 200 and g.json()["balance_due"] == "110000.00" and g.json()["state"] == "pending"
+    # ...and can take payment for another session, mirrored back onto it
+    r = http.post(f"/payments/orders/billiard_session/{s2}/pay", json={"payment_method": "cash"})
+    assert r.status_code == 200 and r.json()["state"] == "paid"
+    assert http.get(f"/sessions/{s2}").json()["payment_state"] == "paid"
+
+    line_id = body["payments"][1]["id"]
+    assert http.post(f"/sessions/{s1}/pay/lines/{line_id}/confirm").json()["payment_state"] == "paid"
+    events = [e["event_type"] for e in http.get(f"/sessions/{s1}/pay/events").json()]
+    assert events[-1] == "order_paid" and "transfer_confirmed" in events
+
+
+def test_void_is_manager_only_over_http_on_both_urls(http, db, cashier, manager):
+    sid = _stopped_session(db, cashier)
+    line_id = http.post(f"/sessions/{sid}/pay", json={"payment_method": "cash"}).json()["payments"][0]["id"]
+
+    assert http.post(f"/sessions/{sid}/pay/lines/{line_id}/void", json={"reason": "wrong table"}).status_code == 403
+    assert http.post(f"/payments/orders/billiard_session/{sid}/lines/{line_id}/void",
+                     json={"reason": "wrong table"}).status_code == 403
+
+    http.as_user(manager)
+    r = http.post(f"/sessions/{sid}/pay/lines/{line_id}/void", json={"reason": "wrong table"})
+    assert r.status_code == 200 and r.json()["payment_state"] == "unpaid"
+
+
+def test_routes_do_not_collide_with_the_legacy_payments_router(http, db, cashier):
+    assert http.get("/payments/shifts/current").status_code == 200
+    assert http.get("/payments/shifts").status_code == 200
+    assert http.get("/payments/orders/billiard_session/999999").status_code == 404
+    assert http.get("/payments/orders/unknown_type/1").status_code == 404
+    r = http.post("/payments/shifts/open", json={"opening_float": 500000})
+    assert r.status_code == 201 and r.json()["expected_cash"] == "500000.00"
+
+
+def test_validation_errors_over_http(http, db, cashier):
+    sid = _stopped_session(db, cashier)
+    assert http.post(f"/sessions/{sid}/pay", json={}).status_code == 422
+    assert http.post(f"/sessions/{sid}/pay", json={"payments": [
+        {"method": "cash", "amount": 1}, {"method": "bank_transfer", "amount": 2}]}).status_code == 422
+    assert http.post("/sessions/999999/pay", json={"payment_method": "cash"}).status_code == 404

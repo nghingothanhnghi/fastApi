@@ -1,4 +1,4 @@
-# app/billiard/schemas/shift.py
+# app/payments/schemas/shift.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional

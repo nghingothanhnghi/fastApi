@@ -1,7 +1,7 @@
-# app/billiard/models/shift.py
+# app/payments/models/shift.py
 # A shift is one cashier's turn on the cash drawer. One drawer per club (client_id):
 # at most one shift is open at a time. Cash taken/voided during the open window is
-# derived from session_payments; pay-ins and pay-outs are recorded as movements.
+# derived from payment_lines; pay-ins and pay-outs are recorded as movements.
 import enum
 from datetime import datetime
 from decimal import Decimal

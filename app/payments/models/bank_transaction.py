@@ -1,4 +1,4 @@
-# app/billiard/models/bank_transaction.py
+# app/payments/models/bank_transaction.py
 # Every transfer the bank feed (SePay) reports, stored before it is processed so that
 # replays are harmless (UNIQUE provider + external_id) and nothing is lost for audit.
 import enum
@@ -39,10 +39,10 @@ class BankTransaction(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=BankTxStatus.UNMATCHED.value, index=True)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Set once a bill is identified. Unmatched rows have no tenant (the receiving account is global config).
+    # Set once a payment line is identified. Unmatched rows have no tenant (the receiving account is global config).
     client_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    session_id: Mapped[int | None] = mapped_column(ForeignKey("table_sessions.id", ondelete="SET NULL"), nullable=True)
-    line_id: Mapped[int | None] = mapped_column(ForeignKey("session_payments.id", ondelete="SET NULL"), nullable=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("payment_orders.id", ondelete="SET NULL"), nullable=True)
+    line_id: Mapped[int | None] = mapped_column(ForeignKey("payment_lines.id", ondelete="SET NULL"), nullable=True)
 
     handled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

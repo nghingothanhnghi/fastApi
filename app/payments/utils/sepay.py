@@ -1,4 +1,4 @@
-# app/billiard/utils/sepay.py
+# app/payments/utils/sepay.py
 # Request authentication for SePay webhooks. Pure functions (no framework, no DB).
 # Spec: https://developer.sepay.vn/en/sepay-webhooks/xac-thuc
 #   HMAC-SHA256: X-SePay-Signature = "sha256=" + hex(HMAC(secret, f"{timestamp}.{raw_body}"))

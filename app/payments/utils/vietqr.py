@@ -1,4 +1,4 @@
-# app/billiard/utils/vietqr.py
+# app/payments/utils/vietqr.py
 # VietQR (NAPAS 247, EMVCo merchant-presented QR) payload builder. Pure functions,
 # no network: the frontend renders `payload` as a QR code.
 from decimal import Decimal, ROUND_HALF_UP
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import quote
 
-from app.billiard import config
+from app.payments import config
 
 
 def crc16_ccitt(data: str) -> str:
@@ -25,9 +25,12 @@ def _tlv(tag: str, value: str) -> str:
     return f"{tag}{len(value):02d}{value}"
 
 
-def make_memo(session_id: int, line_id: int) -> str:
-    """Short alphanumeric transfer content the cashier/bank feed can match, e.g. BIDA42L7."""
-    return f"BIDA{session_id}L{line_id}"
+def make_memo(order_id: int, line_id: int) -> str:
+    """Short alphanumeric transfer content the cashier/bank feed can match, e.g. PAY42L7.
+
+    The prefix is config.MEMO_PREFIX; the bank feed searches transfer content for the same pattern.
+    """
+    return f"{config.MEMO_PREFIX}{order_id}L{line_id}"
 
 
 def build_payload(bank_bin: str, account_no: str, amount: Decimal, memo: str) -> str:

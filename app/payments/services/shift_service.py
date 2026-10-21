@@ -1,6 +1,5 @@
-# app/billiard/services/shift_service.py
-# Shifts and the cash drawer. Like the other billiard services this does NOT commit;
-# the router commits.
+# app/payments/services/shift_service.py
+# Shifts and the cash drawer. This service does NOT commit; the router commits.
 #
 # Expected cash in the drawer for a shift window [opened_at, closed_at or now]:
 #   opening_float
@@ -16,17 +15,14 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.billiard.models import (
-    BilliardTable, CashMovement, CashShift, MovementType, SessionPayment, SessionPaymentStatus,
-    ShiftStatus, TableSession,
-)
-from app.billiard.schemas.shift import (
+from app.payments.models.order import PaymentLine, PaymentLineStatus, PaymentOrder
+from app.payments.models.shift import CashMovement, CashShift, MovementType, ShiftStatus
+from app.payments.schemas.shift import (
     CashMovementResponse, MethodTotals, ShiftResponse, ShiftSummary,
 )
-from app.billiard.utils.billing import CENT
+from app.payments.utils.money import CENT, ZERO
+from app.payments.utils.permissions import is_manager
 from app.user.models.user import User
-
-ZERO = Decimal("0")
 
 
 def _now() -> datetime:
@@ -36,11 +32,6 @@ def _now() -> datetime:
 def _aware(dt: datetime) -> datetime:
     """SQLite returns naive datetimes (stored as UTC); PostgreSQL returns aware ones."""
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def is_manager(user: User) -> bool:
-    """Managers, admins and super admins may void payments and close other people's shifts."""
-    return user.is_admin() or user.has_role("manager")
 
 
 def _client_id(user: User) -> str:
@@ -147,18 +138,17 @@ class ShiftService:
         """(received, voided) payment lines of this club inside the shift window."""
         end = until or shift.closed_at or _now()
         base = (
-            select(SessionPayment)
-            .join(TableSession, TableSession.id == SessionPayment.session_id)
-            .join(BilliardTable, BilliardTable.id == TableSession.table_id)
-            .where(BilliardTable.client_id == shift.client_id)
+            select(PaymentLine)
+            .join(PaymentOrder, PaymentOrder.id == PaymentLine.order_id)
+            .where(PaymentOrder.client_id == shift.client_id)
         )
         received = list(db.execute(base.where(
-            SessionPayment.status.in_((SessionPaymentStatus.COMPLETED, SessionPaymentStatus.VOIDED)),
-            SessionPayment.confirmed_at >= shift.opened_at, SessionPayment.confirmed_at <= end,
+            PaymentLine.status.in_((PaymentLineStatus.COMPLETED, PaymentLineStatus.VOIDED)),
+            PaymentLine.confirmed_at >= shift.opened_at, PaymentLine.confirmed_at <= end,
         )).scalars())
         voided = list(db.execute(base.where(
-            SessionPayment.status == SessionPaymentStatus.VOIDED,
-            SessionPayment.voided_at >= shift.opened_at, SessionPayment.voided_at <= end,
+            PaymentLine.status == PaymentLineStatus.VOIDED,
+            PaymentLine.voided_at >= shift.opened_at, PaymentLine.voided_at <= end,
         )).scalars())
         return received, voided
 

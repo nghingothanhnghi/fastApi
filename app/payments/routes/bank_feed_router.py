@@ -1,4 +1,4 @@
-# app/billiard/routes/bank_feed_router.py
+# app/payments/routes/bank_feed_router.py
 import json
 import logging
 from typing import Optional
@@ -6,18 +6,18 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.billiard import config
-from app.billiard.schemas.bank_feed import (
+from app.payments import config
+from app.payments.schemas.bank_feed import (
     AssignBankTransactionRequest, BankTransactionResponse, IgnoreBankTransactionRequest,
 )
-from app.billiard.services.bank_feed_service import bank_feed_service
-from app.billiard.utils.sepay import SepayAuthError, SepayNotConfigured, verify_request
+from app.payments.services.bank_feed_service import bank_feed_service
+from app.payments.utils.sepay import SepayAuthError, SepayNotConfigured, verify_request
 from app.database import get_db
 from app.user.models.user import User
 from app.user.utils.token import get_current_user
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/bank-feed", tags=["Billiard Bank Feed"])
+router = APIRouter(prefix="/payments/bank-feed", tags=["Payments - Bank Feed"])
 
 
 async def _raw_body(request: Request) -> bytes:
@@ -27,7 +27,7 @@ async def _raw_body(request: Request) -> bytes:
 
 @router.post("/sepay")
 def sepay_webhook(request: Request, body: bytes = Depends(_raw_body), db: Session = Depends(get_db)):
-    """SePay webhook: a transfer reached the club's bank account.
+    """SePay webhook: a transfer reached the receiving bank account.
 
     Authenticated by HMAC-SHA256 (SEPAY_WEBHOOK_SECRET) or an API key (SEPAY_API_KEY).
     Always answers {"success": true} once the transaction is stored, even if it could not be
