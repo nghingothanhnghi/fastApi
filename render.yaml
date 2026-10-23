@@ -9,3 +9,16 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      # --- Bank transfer / SePay (set the values in the Render dashboard) ---
+      - key: PAYMENT_BANK_BIN
+        sync: false
+      - key: PAYMENT_BANK_CODE
+        sync: false
+      - key: PAYMENT_BANK_ACCOUNT_NO
+        sync: false
+      - key: PAYMENT_BANK_ACCOUNT_NAME
+        sync: false
+      - key: PAYMENT_MEMO_PREFIX
+        value: PAY
+      - key: SEPAY_WEBHOOK_SECRET
+        sync: false
