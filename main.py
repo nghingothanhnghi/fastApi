@@ -70,6 +70,8 @@ seed_default_super_admin()
 # -----------------------------------------
 # Middleware
 # -----------------------------------------
+app.add_middleware(I18nMiddleware)
+
 allowed_origins = config.CORS_ALLOWED_ORIGINS or (
     [config.FRONTEND_URL] if config.FRONTEND_URL else ["http://localhost:5173"]
 )
@@ -80,9 +82,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-app.add_middleware(I18nMiddleware)
 
 # app.middleware("http")(catch_exceptions_middleware)
 
