@@ -65,12 +65,21 @@ def get_all_payments(
     
 
 @router.post("/", response_model=PaymentOut)
-def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)):
+def create_payment(
+    payload: PaymentCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN)),
+):
     return payment_controller.create_payment(db=db, payload=payload)
 
 
 @router.patch("/{payment_id}", response_model=PaymentOut)
-def update_payment(payment_id: int, payload: PaymentUpdate, db: Session = Depends(get_db)):
+def update_payment(
+    payment_id: int,
+    payload: PaymentUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(RoleEnum.ADMIN, RoleEnum.SUPER_ADMIN)),
+):
     payment = payment_controller.update_payment_status(db=db, payment_id=payment_id, payload=payload)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment transaction not found")
