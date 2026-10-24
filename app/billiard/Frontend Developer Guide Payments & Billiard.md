@@ -1,10 +1,12 @@
 # Frontend Developer Guide: Payments & Billiard
 
-Oct 21, 2026 · @Someone
+Oct 24, 2026 · @Someone
 
 ## Start here
 
-The frontend needs about 20 endpoints to take payment for a billiard bill, run the cash drawer and review bank transfers. Generate types from the backend's OpenAPI file, and use this guide for the screens and rules the schema cannot tell you.
+The frontend needs about 25 endpoints to run a billiard table from start to payment: open a table, add drinks, stop the session, take payment, run the cash drawer and review bank transfers. Generate types from the backend's OpenAPI file, and use this guide for the screens and rules the schema cannot tell you.
+
+New to the project? Read "The whole process, start to finish" first. It follows one session from the first tap to the receipt, then the screen-by-screen sections explain each part in detail.
 
 ### Set up
 
@@ -16,21 +18,245 @@ The frontend needs about 20 endpoints to take payment for a billiard bill, run t
 | Money | Amounts arrive as strings such as `"310000.00"`. The currency is VND, which has no decimals, so convert with `Number()` and format with `Intl.NumberFormat("vi-VN")`. Send amounts in request bodies as plain numbers |
 | Dates | ISO 8601. Some timestamps come without an offset, for example `2026-10-21T00:28:54.654112`. Treat a timestamp with no offset as UTC (append `Z`), then show it in the club's time zone |
 | The amount | Never send the bill total. For a single payment the server uses `grand_total`. In a split you send how the total is divided, and the lines must add up exactly to `balance_due` |
+| Your club | Every call is limited to the logged-in user's club. An id that belongs to another club returns `404`, not `403` |
+| Trailing slash | Use the paths exactly as written here. `/tables`, `/products` and `/payments/shifts` have no trailing slash |
 
 ### Which URLs to call
 
 | Screen | URLs | Response |
 | --- | --- | --- |
+| Table board | `/tables`, `/tables/active`, `/tables/{id}/start` | `Table[]`, `ActiveTable[]`, `StartSessionResponse` |
+| Menu and items | `/products`, `/sessions/{id}/items` | `Product[]`, `SessionItem` |
 | Billiard bill and payment | `/sessions/{id}`, `/sessions/{id}/stop`, `/sessions/{id}/pay...` | `Bill` (includes the payment lines) |
 | Cash drawer | `/payments/shifts...` | `Shift` or `ShiftSummary` |
 | Manager bank inbox | `/payments/bank-feed/transactions...` | `BankTransaction` |
 | Another business later | `/payments/orders/{source_type}/{source_id}/...` | `Order` (same lines as the bill) |
 
-Billiard screens should use the `/sessions/{id}/pay...` URLs because they return the full bill, so one response redraws the whole screen. The `/payments/orders/...` URLs return the payment part only.
+Billiard screens should use the `/sessions/{id}/pay...` URLs because they return the full bill, so one response redraws the whole screen. The `/payments/orders/...` URLs return the payment part only. For billiard they work too, with `source_type` set to `billiard_session` and `source_id` set to the session id, but you do not need them.
+
+Do not build billiard screens on `POST /payments/`, `PATCH /payments/{id}` or `/payments/stripe/*`. Those are back-office routes for administrators (admin or super admin only). A cashier gets a `403` there. `POST /payments/` and `PATCH /payments/{id}` had no login check at all until the fix on branch `fix/payments-require-admin-auth`, so do not rely on them being open. Everything a cashier needs is under `/sessions`, `/tables` and `/payments/shifts`.
+
+## The whole process, start to finish
+
+This follows one cashier's day, in the order the screens appear. Each step names the call, what comes back and where the user goes next. The sample numbers are the same throughout: 135 minutes at 100,000 VND an hour is 225,000, plus 85,000 of drinks and food, so the bill is 310,000 VND.
+
+Two rules hold in every step. The server works out the amount from the session, so the frontend never sends a total. And what you draw comes from the last response, so after any action replace your copy of the bill with the one returned.
+
+### The day at a glance
+
+| # | Step | Call | Who | Next screen |
+| --- | --- | --- | --- | --- |
+| 1 | Log in | `POST /auth/login` | Anyone | Table board |
+| 2 | Open the shift | `POST /payments/shifts/open` | Cashier | Table board. Required only when the club sets `PAYMENT_REQUIRE_OPEN_SHIFT=true` |
+| 3 | See the tables | `GET /tables`, `GET /tables/active` | Cashier | Pick a free table |
+| 4 | Start a session | `POST /tables/{id}/start` | Cashier | Session screen |
+| 5 | Add drinks and food | `GET /products`, `POST /sessions/{id}/items` | Cashier | Repeat while the table is playing |
+| 6 | Stop the session | `POST /sessions/{id}/stop` | Cashier | Pay screen (bill is `unpaid`) |
+| 7 | Take payment | `POST /sessions/{id}/pay` | Cashier | Receipt, or the transfer-waiting screen |
+| 8 | Finish a transfer | `POST /sessions/{id}/pay/lines/{line_id}/confirm`, or the bank feed does it | Cashier or the bank | Receipt |
+| 9 | Close the shift | `POST /payments/shifts/{id}/close` | Cashier | Variance screen |
+| 10 | Fix a mistake | `POST /sessions/{id}/pay/lines/{line_id}/void`, `/payments/bank-feed/...` | Manager | The bill reopens |
+
+The lifecycle of one bill, so you know which step is allowed when:
+
+| Moment | Session | `payment_state` | What you can do |
+| --- | --- | --- | --- |
+| After start | running, `end_time` is `null` | `unpaid` | Add items, stop. Paying is refused with `409 Stop the session before paying` |
+| After stop | finished, `end_time` is set | `unpaid` | Pay. Adding items is refused with `409` |
+| During a payment | finished | `pending` | Confirm or cancel a waiting line, or pay the balance |
+| After payment | finished | `paid` | Show the receipt. Only a manager can void a line |
+
+### Step 1. Log in
+
+`POST /auth/login` takes form data (`username`, `password`), not JSON, and returns `{"access_token": "...", "token_type": "bearer"}`. Send the token as `Authorization: Bearer <token>` from now on. The token expires, and a `401` anywhere means send the user to login and then back to the same screen.
+
+`GET /auth/me` returns the user but not their roles (see the gaps at the end). Keep whatever role information your login flow gets, because it decides whether to show manager buttons.
+
+### Step 2. Open the shift
+
+A shift is the cash drawer for the club: one open shift per club, not per cashier. `GET /payments/shifts/current` returns the open shift, or `null`. If it is `null`, show the opening-float form (screen 5) and call `POST /payments/shifts/open` with `{"opening_float": 1000000}`. A second open call returns `409 A shift is already open`, so load the existing one instead. If the club does not require shifts you can skip this step, but the drawer totals in step 9 are worked out for the time the shift was open, so a drawer count only makes sense when a shift was open.
+
+### Step 3. The table board
+
+`GET /tables` lists every table: `{"id": 1, "name": "T01", "status": "available", "hourly_rate": "100000.00"}`. `status` is `available`, `playing`, `reserved` or `maintenance`. Offer Start only on `available` tables; the server answers `409` for a table that cannot be started.
+
+`GET /tables/active` lists the tables that are playing right now, with live numbers you can show on the tile and refresh every 30 seconds or so:
+
+```json
+[
+  {
+    "id": 1,
+    "name": "T01",
+    "status": "playing",
+    "session_id": 42,
+    "start_time": "2026-10-24T02:00:00",
+    "elapsed_minutes": 135,
+    "hourly_rate": "100000.00",
+    "current_table_fee": "225000.00",
+    "current_product_fee": "85000.00",
+    "current_total": "310000.00"
+  }
+]
+```
+
+Keep `session_id` on the tile. Every later call uses it. `current_total` is a running estimate for display; the real bill comes from the stop call.
+
+### Step 4. Start a session
+
+`POST /tables/{id}/start` has no body. It returns the new session:
+
+```json
+{ "session_id": 42, "table_id": 1, "start_time": "2026-10-24T02:00:00", "opened_by": "cashier1" }
+```
+
+If the table already has an active session the server answers `409 Table already has an active session`. Reload the board and open that session instead.
+
+### Step 5. Add drinks and food
+
+`GET /products` returns the menu. Show products where `is_active` is true. A product with `variants` is sold by variant, so make the cashier pick one and send its `variant_id`. Otherwise use `base_price`. The price shown is for display only; the server prices the item itself.
+
+`POST /sessions/{id}/items` with `{"product_id": 5, "variant_id": null, "quantity": 2}` returns `201` with the new line:
+
+```json
+{
+  "id": 7, "product_id": 5, "variant_id": null, "product_name": "Coca Cola",
+  "quantity": 2, "unit_price": "15000.00", "total_price": "30000.00"
+}
+```
+
+Errors: `404 Product not found`, `400 Product is not available`, `400 Variant does not belong to this product`, and `409 Items can only be added to an active session` once the session is stopped. To show the current list, call `GET /sessions/{id}`: `items` is the full list and `grand_total` is up to date.
+
+### Step 6. Stop the session
+
+`POST /sessions/{id}/stop` ends the clock, frees the table and returns the bill. A second stop returns `409 Session is already completed`, so on that error just load the bill with `GET /sessions/{id}`.
+
+```json
+{
+  "session_id": 42,
+  "table_id": 1,
+  "table_name": "T01",
+  "currency": "VND",
+  "start_time": "2026-10-24T02:00:00",
+  "end_time": "2026-10-24T04:15:00",
+  "duration_minutes": 135,
+  "hourly_rate": "100000.00",
+  "billing_policy": "per_minute",
+  "pricing_rule_name": null,
+  "pricing_params": {},
+  "total_table_fee": "225000.00",
+  "total_product_fee": "85000.00",
+  "grand_total": "310000.00",
+  "items": [
+    { "id": 7, "product_id": 5, "variant_id": null, "product_name": "Coca Cola", "quantity": 2, "unit_price": "15000.00", "total_price": "30000.00" },
+    { "id": 8, "product_id": 9, "variant_id": null, "product_name": "Fruit plate", "quantity": 1, "unit_price": "55000.00", "total_price": "55000.00" }
+  ],
+  "payment_state": "unpaid",
+  "payment_method": null,
+  "payment_reference": null,
+  "paid_at": null,
+  "amount_paid": "0.00",
+  "balance_due": "310000.00",
+  "payments": [],
+  "opened_by": "cashier1",
+  "stopped_by": "cashier1",
+  "paid_by": null
+}
+```
+
+Show this as the pay screen (screen 1). `billing_policy` and `pricing_rule_name` explain how the table fee was worked out; show `pricing_rule_name` as a small caption when it is not `null`.
+
+### Step 7. Take payment
+
+Call `POST /sessions/{id}/pay` with one of these bodies. Send either `payment_method` or `payments`, never both.
+
+| The customer pays | Body | What comes back |
+| --- | --- | --- |
+| Cash, exact | `{"payment_method": "cash"}` | `payment_state: "paid"` |
+| Cash with change | `{"payment_method": "cash", "cash_tendered": 500000}` | `paid`, with `change_given: "190000.00"` on the line |
+| Bank transfer | `{"payment_method": "bank_transfer"}` | `pending`, with a QR on the line (see below) |
+| Part cash, part transfer | `{"payments": [{"method": "cash", "amount": 200000}, {"method": "bank_transfer", "amount": 110000}]}` | `pending`, cash line paid, transfer line waiting |
+| Card | `{"payment_method": "stripe"}` | `pending`, with `gateway.client_secret` |
+
+The response is the whole bill plus a `gateway` field (`null` unless it is a card payment), so redraw the screen from it. For a cash payment of 500,000 on this bill:
+
+```json
+{
+  "session_id": 42,
+  "grand_total": "310000.00",
+  "payment_state": "paid",
+  "payment_method": "cash",
+  "payment_reference": "manual-3-c1-a1b2c3d4",
+  "paid_at": "2026-10-24T04:16:10.123456Z",
+  "amount_paid": "310000.00",
+  "balance_due": "0.00",
+  "payments": [
+    {
+      "id": 12, "method": "cash", "amount": "310000.00", "status": "completed",
+      "cash_tendered": "500000.00", "change_given": "190000.00",
+      "payment_reference": "manual-3-c1-a1b2c3d4", "note": null,
+      "confirmed_at": "2026-10-24T04:16:10.100000Z",
+      "voided_at": null, "void_reason": null, "transfer": null
+    }
+  ],
+  "paid_by": "cashier1",
+  "gateway": null
+}
+```
+
+(The bill fields from step 6, such as `items`, are also present; they are left out here to keep the example short.)
+
+For the split above, the response has `payment_state: "pending"`, `amount_paid: "200000.00"` and `balance_due: "110000.00"`. The transfer line is the one still waiting:
+
+```json
+{
+  "id": 14, "method": "bank_transfer", "amount": "110000.00", "status": "pending",
+  "cash_tendered": null, "change_given": null,
+  "payment_reference": "manual-3-c1-9f8e7d6c", "note": null,
+  "confirmed_at": null, "voided_at": null, "void_reason": null,
+  "transfer": {
+    "bank_code": "VCB",
+    "account_no": "0123456789",
+    "account_name": "CLB BIDA",
+    "amount": "110000.00",
+    "memo": "PAY7L14",
+    "qr_payload": "000201010212...6304ABCD",
+    "qr_image_url": "https://img.vietqr.io/image/VCB-0123456789-compact2.png?amount=110000&addInfo=PAY7L14",
+    "expires_at": "2026-10-24T04:31:10Z"
+  }
+}
+```
+
+`qr_payload` is shortened here. The real one is a long text string that you draw as a QR code. The memo `PAY7L14` is made of the order number (7) and the line id (14); it is what lets the bank feed find this payment.
+
+Rules the server enforces on this call:
+
+- The amount due is `balance_due`. A split must add up to it exactly, with 1 to 6 lines, or the server answers `422`.
+- A bill that has a waiting transfer line cannot take a new payment: the server answers `409 A payment is already in progress`. Confirm or cancel the waiting line first.
+- Card pays the whole bill in one go. It is refused with `409` once any cash or transfer line exists, and cannot be part of a split.
+- The server may be set to treat a bank transfer as paid at once (`PAYMENT_BANK_TRANSFER_REQUIRES_CONFIRMATION=false`). Then a transfer line comes back `completed` and there is no waiting screen. So always decide the screen from `payment_state` and the lines, never from the method you sent.
+- With `PAYMENT_REQUIRE_OPEN_SHIFT=true` and no open shift the answer is `409 Open a shift before taking payments`.
+
+### Step 8. Finish a bank transfer
+
+While the transfer line is `pending`, show screen 2 and refresh the bill every 3 to 5 seconds. There are three ways it ends:
+
+1. **The bank feed confirms it.** SePay posts the incoming transfer to the backend, which matches the memo and the exact amount. The bill turns `paid` by itself, with `paid_by: null`.
+2. **The cashier presses Received.** `POST /sessions/{id}/pay/lines/14/confirm` (the body is optional: `{"note": "checked in the bank app"}`). The bill is returned, now `paid`.
+3. **The cashier presses Cancel.** `POST /sessions/{id}/pay/lines/14/cancel` (optional `{"reason": "customer left"}`). The line becomes `cancelled`, the bill goes back to part paid or `unpaid`, and the cashier pays the balance another way.
+
+### Step 9. Show the receipt, close the shift
+
+When `payment_state` is `paid`, show the receipt (screen 4). The same data stays available later from `GET /sessions/{id}`, so a customer can ask for it again.
+
+At the end of the day, count the drawer and call `POST /payments/shifts/{id}/close` with `{"counted_cash": 1290000}`. The response shows `expected_cash`, `counted_cash` and `variance` (counted minus expected, negative means cash is missing). Only the cashier who opened the shift or a manager can close it. Cash that leaves or enters the drawer outside a sale is recorded with `POST /payments/shifts/{id}/movements`, for example `{"type": "pay_out", "amount": 20000, "reason": "bought ice"}`. A pay-out larger than the cash in the drawer is refused with `409`.
+
+### Step 10. Manager tools
+
+A manager can void a completed line that was a mistake (`POST /sessions/{id}/pay/lines/{line_id}/void` with `{"reason": "gave too much change"}`). The bill goes back to `pending` or `unpaid` and can be paid again. Money that arrived in the bank but could not be matched is handled in the bank inbox (screen 6). `GET /sessions/{id}/pay/events` returns the audit trail of every payment action on a bill, which is useful for a "history" panel.
 
 ## Screens to build
 
-Six screens cover the whole flow. The pay screen and the transfer-waiting screen are the same page in two states, driven by the bill's `payment_state`.
+Six screens cover the payment part of the flow; the table board and the menu come before them (steps 3 to 5 above). The pay screen and the transfer-waiting screen are the same page in two states, driven by the bill's `payment_state`.
 
 ### 1. Pay screen (after the session is stopped)
 
@@ -39,7 +265,8 @@ Show the bill (items, `total_table_fee`, `total_product_fee`, `grand_total`) and
 - **Cash:** an input for the amount handed over, quick buttons (exact, 50,000, 100,000, 200,000, 500,000) and the change shown live as `tendered - balance_due`. Disable the button while tendered is below `balance_due`. Send `{"payment_method": "cash", "cash_tendered": 500000}`. Leaving tendered out means an exact payment.
 - **Bank transfer:** one button. Send `{"payment_method": "bank_transfer"}`, then show screen 2.
 - **Split:** open the split editor (screen 3).
-- **Card (Stripe):** send `{"payment_method": "stripe"}`. The response has `gateway.client_secret`. Complete the card payment with Stripe's SDK, then call `POST /sessions/{id}/pay/confirm`.
+- **Card (Stripe):** show it only if your app offers cards. No endpoint tells you whether Stripe is configured, so use a setting in the frontend. Send `{"payment_method": "stripe"}`. The response has `gateway.client_secret`. Complete the card payment with Stripe's SDK, then call `POST /sessions/{id}/pay/confirm`. Card pays the whole bill at once, so hide it as soon as the bill has any cash or transfer line; the server refuses it with `409` after that.
+- While a transfer line is waiting, do not show any pay buttons. The server refuses a new payment with `409 A payment is already in progress`. The cashier must press Received or Cancel first.
 - After a successful `paid` response, show the receipt (screen 4).
 
 ### 2. Transfer waiting
@@ -75,6 +302,8 @@ Shown when `payment_state` is `paid`. List every line with its method and amount
 | History | `GET /payments/shifts?limit=30&offset=0` |
 
 If the club sets `PAYMENT_REQUIRE_OPEN_SHIFT=true`, paying without an open shift returns `409`. Check `/payments/shifts/current` before showing the pay screen and send the cashier to open a shift first.
+
+Two more rules from the server. There is one open shift per club, so a second cashier sees the same open shift instead of opening their own. And a pay-out larger than the cash in the drawer is refused with `409`, so show the drawer's `expected_cash` next to the pay-out form and check the amount before you send it.
 
 ### 6. Manager bank inbox
 
@@ -171,6 +400,63 @@ interface PaymentLine {
   voided_at: ISODate | null;
   void_reason: string | null;
   transfer: TransferInstruction | null;
+}
+```
+
+### Tables, menu and items
+
+```ts
+type TableStatus = "available" | "playing" | "reserved" | "maintenance";
+
+interface Table {                    // GET /tables
+  id: number;
+  name: string;
+  status: TableStatus;
+  hourly_rate: Money;
+}
+
+interface ActiveTable {              // GET /tables/active (only tables being played)
+  id: number;
+  name: string;
+  status: TableStatus;
+  session_id: number;
+  start_time: ISODate;
+  elapsed_minutes: number;
+  hourly_rate: Money;
+  current_table_fee: Money;          // running estimate, for display only
+  current_product_fee: Money;
+  current_total: Money;
+}
+
+interface StartSessionResponse {     // POST /tables/{id}/start
+  session_id: number;
+  table_id: number;
+  start_time: ISODate;
+  opened_by: string;
+}
+
+interface ProductVariant {
+  id: number;
+  name: string;
+  sku: string | null;
+  price: number;                     // note: a number here, not a Money string
+  stock: number;
+}
+interface Product {                  // GET /products (no login needed)
+  id: number;
+  name: string;
+  description: string | null;
+  base_price: number;
+  sku: string | null;
+  is_active: boolean;
+  image_url: string | null;
+  variants: ProductVariant[];
+}
+
+interface AddItemRequest {           // POST /sessions/{id}/items
+  product_id: number;
+  variant_id?: number | null;
+  quantity: number;                  // 1 to 1000
 }
 ```
 
@@ -405,6 +691,12 @@ export async function login(username: string, password: string) {
 
 ```ts
 export const api = {
+  tables:       () => request<Table[]>("GET", "/tables"),
+  activeTables: () => request<ActiveTable[]>("GET", "/tables/active"),
+  startTable:   (tableId: number) => request<StartSessionResponse>("POST", `/tables/${tableId}/start`),
+  products:     () => request<Product[]>("GET", "/products"),
+  addItem:      (id: number, b: AddItemRequest) => request<SessionItem>("POST", `/sessions/${id}/items`, b),
+
   bill:  (id: number) => request<Bill>("GET", `/sessions/${id}`),
   stop:  (id: number) => request<Bill>("POST", `/sessions/${id}/stop`),
 
@@ -438,6 +730,11 @@ export const api = {
 ### Usage
 
 ```ts
+// Start a table, add two drinks, stop the session and get the bill
+const { session_id } = await api.startTable(1);
+await api.addItem(session_id, { product_id: 5, quantity: 2 });
+const stopped = await api.stop(session_id);          // stopped.payment_state === "unpaid"
+
 // Cash, customer hands over 500,000 for a 310,000 bill
 const bill = await api.pay(42, { payment_method: "cash", cash_tendered: 500000 });
 // bill.payment_state === "paid", bill.payments[0].change_given === "190000.00"
@@ -498,9 +795,10 @@ The server's `detail` text is readable, but it is English and not a stable code.
 | Status | Meaning | What the UI does |
 | --- | --- | --- |
 | `401` | Token missing or expired | Send the user to login |
+| `400` | Adding an item that cannot be sold (`Product is not available`, `Variant does not belong to this product`) | Show the message and refresh the menu |
 | `403` | Not a manager, or closing someone else's shift | "Only a manager can do this" |
 | `404` | Unknown id, or it belongs to another club | "Not found". Go back to the list |
-| `409` | Wrong state, such as "Stop the session before paying", "Already paid", "A payment is already in progress", or no open shift | Reload the bill and redraw. The screen was out of date |
+| `409` | Wrong state. Table: "Table already has an active session". Session: "Items can only be added to an active session", "Session is already completed", "Stop the session before paying". Payment: "Already paid", "A payment is already in progress", "This order already has cash/transfer payments; pay the balance with those methods" (card after part payment). Shift: "Open a shift before taking payments", "A shift is already open", a pay-out larger than the drawer | Reload the bill, the board or the shift and redraw. The screen was out of date |
 | `422` | Split lines do not add up, cash tendered is below the amount, a void or movement reason is too short, or the amount differs on assign | Show the message next to the form. Validate the same rules in the browser first |
 | `500` on pay | Some lines could not be recorded | Reload the bill. Show which lines failed and offer to pay `balance_due` again |
 
@@ -515,6 +813,9 @@ The server's `detail` text is readable, but it is English and not a stable code.
 - **Automatic confirmation.** A bill can become `paid` with `paid_by: null`. Show "Confirmed automatically by the bank" instead of a cashier name.
 - **Amounts.** Convert both sides with `Number()` before comparing, for example `Number(bill.balance_due) === sum`. VND has no decimals, so amounts are whole numbers.
 - **Time zones.** Timestamps are UTC. Show them in the club's time zone (the backend default is Asia/Ho\_Chi\_Minh).
+- **Stopping twice.** A second stop returns `409 Session is already completed`. Load the bill with `GET /sessions/{id}` and carry on to the pay screen.
+- **Transfer counted as paid at once.** If the server has transfer confirmation switched off, a transfer line comes back `completed` and the bill is `paid` with no waiting screen. Always choose the screen from `payment_state` and the lines.
+- **Menu is not limited to one club.** `GET /products` needs no login and returns every product, so show only `is_active` ones and let the server be the judge when adding an item.
 
 ## Test checklist
 
@@ -543,7 +844,13 @@ Run these on a development backend before release. Use a stopped session with a 
 | 19 | Token expires | The user is sent to login and comes back to the same bill |
 | 20 | Open a bill paid before the payment module | It shows as paid with no line list |
 | 21 | Double click Pay | One payment is created and no error is shown |
-
+| 22 | Start a table that already has a session | `409` message is shown and the board reloads |
+| 23 | Add an item after the session is stopped | `409` message is shown, nothing is added |
+| 24 | Try to pay a session that is still running | `409 Stop the session before paying`, and the Pay button should not have been shown |
+| 25 | Stop the same session twice | The second call returns `409`, and the app shows the bill and the pay screen |
+| 26 | Split 200,000 cash + 110,000 transfer, then press Cash on the waiting bill | `409 A payment is already in progress`. No pay buttons are shown while a transfer waits |
+| 27 | Pay 100,000 cash, then try Card | `409`, and the Card button is already hidden |
+| 28 | Pay out more cash than the drawer holds | `409` message is shown, and the form checks the amount first |
 ### Simulating the bank webhook in development
 
 Ask the backend developer to set `SEPAY_API_KEY` on the dev server, then post a transfer with the memo shown on the QR. Use a new `id` for every test.
@@ -559,7 +866,10 @@ curl -X POST https://<api>/payments/bank-feed/sepay \
 
 It answers `{"success": true}` even when the transfer is not matched, so check the bill or the bank inbox for the result. For the wrong-amount test, change `transferAmount`.
 
-### Two backend gaps to track
+### Backend gaps to track
 
 - `GET /auth/me` returns no roles, so the frontend cannot tell a manager from a cashier. Adding a `roles` list to it would let you hide manager buttons.
 - No endpoint lists every waiting transfer line, so the manager's Assign action needs the manager to open the bill first.
+- `GET /products` needs no login and is not limited to the user's club. Scoping it to the club would stop a cashier seeing another club's menu.
+- No endpoint says whether Stripe is configured, so the Card button has to be switched on in the frontend.
+- `POST /payments/` and `PATCH /payments/{id}` had no login check. The fix is on branch `fix/payments-require-admin-auth` and makes them admin-only; billiard screens never need them.
