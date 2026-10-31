@@ -37,6 +37,13 @@ class HydroActuator(Base):
         default=False,
     )
 
+    # Last state the hardware controller says it actually applied.  This is
+    # deliberately separate from current_state, which is the desired state
+    # written by schedules and manual controls.
+    reported_state = Column(Boolean, nullable=True)
+    reported_state_at = Column(DateTime(timezone=True), nullable=True)
+    reported_state_error = Column(String, nullable=True)
+
     # Last time actuator state changed
     last_state_changed_at = Column(
         DateTime(timezone=True),

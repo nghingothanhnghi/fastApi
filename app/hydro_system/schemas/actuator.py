@@ -53,10 +53,20 @@ class HydroActuatorUpdate(BaseModel):
         v = str(v).strip().lower()   # lower() so "Row_A" and "row_a" match
         return v or None
 
+
+class HydroActuatorStateReport(BaseModel):
+    """Acknowledgement sent by the controller after applying a command."""
+    device_id: int
+    reported_state: bool
+    error: Optional[str] = Field(None, max_length=500)
+
 class HydroActuatorOut(HydroActuatorBase):
     id: int
     device_id: int
     current_state: bool
+    reported_state: Optional[bool] = None
+    reported_state_at: Optional[datetime] = None
+    reported_state_error: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
 

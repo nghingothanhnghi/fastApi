@@ -160,6 +160,35 @@ def control_actuator_by_id(
         "last_state_changed_at": actuator.last_state_changed_at,
     }
 
+
+def report_actuator_state(
+        db: Session,
+        actuator_id: int,
+        device_id: int,
+        reported_state: bool,
+        error: Optional[str] = None,
+):
+    """Persist a controller acknowledgement without changing desired state."""
+    actuator = hydro_actuator_service.get_actuator(db, actuator_id)
+    if not actuator:
+        raise HTTPException(status_code=404, detail="Actuator not found")
+    if actuator.device_id != device_id:
+        raise HTTPException(status_code=400, detail="Actuator does not belong to device")
+
+    actuator.reported_state = reported_state
+    actuator.reported_state_at = datetime.now(timezone.utc)
+    actuator.reported_state_error = error
+    db.commit()
+    db.refresh(actuator)
+
+    return {
+        "actuator_id": actuator.id,
+        "device_id": actuator.device_id,
+        "reported_state": actuator.reported_state,
+        "reported_state_at": actuator.reported_state_at,
+        "reported_state_error": actuator.reported_state_error,
+    }
+
 def stop_actuator_by_id(db: Session, actuator_id: int, source: str = "user"):
     """
     Queue a momentary STOP command (e.g. mid-travel sliding-door halt).

@@ -9,8 +9,9 @@ from app.user.models.user import User
 from sqlalchemy.orm import Session
 # Import controllers with aliases for clarity
 from app.hydro_system.controllers import (
-    system_controller
+    system_controller, actuator_controller
 )
+from app.hydro_system.schemas.actuator import HydroActuatorStateReport
 
 from typing import Optional, List
 from app.hydro_system.routes.actuator_logs_router import actuator_log_router
@@ -18,6 +19,7 @@ from app.hydro_system.routes.device_router import device_router
 from app.hydro_system.helpers.actuator_helper import validate_actuator_access
 
 from app.hydro_system.services.device_config_service import device_config_service
+from app.hydro_system.services.actuator_service import hydro_actuator_service
 from app.hydro_system.controllers.device_controller import _ensure_device_access
 from app.hydro_system.services.device_service import hydro_device_service
 
@@ -34,6 +36,26 @@ def get_status(
 ):
     return system_controller.get_system_status(
         db=db, user_id=current_user.id, device_id=device_id
+    )
+
+
+@router.post("/actuator/{actuator_id}/reported-state", summary="Acknowledge applied actuator state")
+def report_actuator_state(
+    actuator_id: int,
+    report: HydroActuatorStateReport,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    actuator = hydro_actuator_service.get_actuator(db, actuator_id)
+    if not actuator:
+        raise HTTPException(status_code=404, detail="Actuator not found")
+    _ensure_device_access(actuator.device, current_user)
+    return actuator_controller.report_actuator_state(
+        db=db,
+        actuator_id=actuator_id,
+        device_id=report.device_id,
+        reported_state=report.reported_state,
+        error=report.error,
     )
 
 @router.get("/config", summary="Compact config for ESP32")

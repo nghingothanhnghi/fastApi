@@ -118,6 +118,9 @@ def get_system_status(db: Session, user_id: Optional[int] = None, device_id: Opt
                 # Using DB state instead of state_manager for real-time accuracy
                 "current_state": actuator.current_state,
                 "last_state_changed_at": actuator.last_state_changed_at,
+                "reported_state": actuator.reported_state,
+                "reported_state_at": actuator.reported_state_at,
+                "reported_state_error": actuator.reported_state_error,
 
                 # 🔥 MANUAL CONTROL
                 "manual_state": actuator.manual_state,
