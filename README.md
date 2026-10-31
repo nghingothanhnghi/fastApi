@@ -220,6 +220,8 @@ python main.py
 - `POST /api/v1/vision/analyze/{image_id}` - Run a manually requested analysis
 - `GET /api/v1/ai/inference/{job_id}` - Retrieve inference-job status and image URLs
 - `GET /api/v1/plants/{plant_id}/growth-predictions` - Retrieve growth forecasts
+- `GET /api/v1/plants/{plant_id}/recommendations` - List recommendations, newest first
+- `PATCH /api/v1/plants/{plant_id}/recommendations/{recommendation_id}/status` - Review a recommendation (`{"status": "acknowledged" | "dismissed"}`)
 
 ### System Health
 - `GET /health` - Application health check
