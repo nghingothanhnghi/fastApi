@@ -55,6 +55,11 @@ Routes define HTTP paths, accept Pydantic request data, obtain a database sessio
 
 Current route groups include plants/cameras, images, inference, health/growth/anomalies, and recommendations.
 
+Recommendation endpoints (`routes/recommendation_router.py`):
+
+- `GET /api/v1/plants/{plant_id}/recommendations` — list, newest first.
+- `PATCH /api/v1/plants/{plant_id}/recommendations/{recommendation_id}/status` — body `{"status": "acknowledged" | "dismissed"}`; returns the updated recommendation. Other values return 422; unknown plant/recommendation returns 404. Status never becomes an executed state.
+
 ### `schemas/`
 
 Schemas are the API contract. Add or change request validation and response fields here first. Keep schemas separate from SQLAlchemy models so database changes do not accidentally become public API changes.
