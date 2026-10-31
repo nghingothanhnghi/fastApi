@@ -8,7 +8,7 @@ from app.user.models.user import User
 from app.ai_vision.models.ai_recommendation import AIRecommendation
 from app.ai_vision.services.plant_service import plant_service
 from app.ai_vision.helpers.access_helper import ensure_plant_access
-from app.ai_vision.schemas.recommendation_schema import AIRecommendationOut
+from app.ai_vision.schemas.recommendation_schema import AIRecommendationOut, RecommendationStatusUpdate
 
 router = APIRouter(prefix="/api/v1/plants", tags=["AI Vision - Recommendations"])
 
@@ -30,3 +30,37 @@ def get_recommendations(
         .order_by(AIRecommendation.created_at.desc())
         .all()
     )
+
+
+@router.patch(
+    "/{plant_id}/recommendations/{recommendation_id}/status",
+    response_model=AIRecommendationOut,
+)
+def update_recommendation_status(
+    plant_id: int,
+    recommendation_id: int,
+    payload: RecommendationStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plant = plant_service.get_plant(db, plant_id)
+    if not plant:
+        raise HTTPException(404, "Plant not found")
+    ensure_plant_access(plant, current_user)
+
+    # Scope by plant_id so a recommendation can't be changed via another plant's URL
+    rec = (
+        db.query(AIRecommendation)
+        .filter(
+            AIRecommendation.id == recommendation_id,
+            AIRecommendation.plant_id == plant_id,
+        )
+        .first()
+    )
+    if not rec:
+        raise HTTPException(404, "Recommendation not found")
+
+    rec.status = payload.status
+    db.commit()
+    db.refresh(rec)
+    return rec
