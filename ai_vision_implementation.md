@@ -39,7 +39,7 @@ Reused pieces this module does **not** duplicate:
 → (future) AutomationPolicyService → irrigation_session_service / actuator_controller                            
 ```
 
-`AIRecommendation.status` never leaves `pending_review` anywhere in this codebase — there is no code path from `app.ai_vision` into `actuator_controller`, `hydro_schedule_service`, or any irrigation write path. That wiring remains a deliberate future PR, gated on human review of recommendation quality.
+`AIRecommendation.status` is created as `pending_review`. The only transition is a human reviewer calling `PATCH /api/v1/plants/{plant_id}/recommendations/{recommendation_id}/status` with `acknowledged` or `dismissed`; there is no executed/approved-and-run state. There is no code path from `app.ai_vision` into `actuator_controller`, `hydro_schedule_service`, or any irrigation write path. That wiring remains a deliberate future PR, gated on human review of recommendation quality.
 
 ## 3. Actual file layout
 
@@ -93,7 +93,7 @@ app/ai_vision/
 ├── image_router.py — requires get_current_user + ensure_plant_access
 ├── inference_router.py — requires get_current_user + ensure_plant_access
 ├── health_router.py — requires get_current_user + ensure_plant_access
-└── recommendation_router.py — requires get_current_user + ensure_plant_access
+└── recommendation_router.py — GET list + PATCH status (acknowledged|dismissed); requires get_current_user + ensure_plant_access
 └── prediction_router.py — authenticated growth-prediction history
 ```
 

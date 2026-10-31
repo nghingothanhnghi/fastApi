@@ -7,6 +7,7 @@ from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from app.ai_vision.models.ai_recommendation import AIRecommendation
 from app.ai_vision.services.plant_service import plant_service
+from app.ai_vision.services.recommendation_service import recommendation_service
 from app.ai_vision.helpers.access_helper import ensure_plant_access
 from app.ai_vision.schemas.recommendation_schema import AIRecommendationOut, RecommendationStatusUpdate
 
@@ -48,19 +49,9 @@ def update_recommendation_status(
         raise HTTPException(404, "Plant not found")
     ensure_plant_access(plant, current_user)
 
-    # Scope by plant_id so a recommendation can't be changed via another plant's URL
-    rec = (
-        db.query(AIRecommendation)
-        .filter(
-            AIRecommendation.id == recommendation_id,
-            AIRecommendation.plant_id == plant_id,
-        )
-        .first()
+    rec = recommendation_service.update_status(
+        db, plant_id, recommendation_id, payload.status
     )
     if not rec:
         raise HTTPException(404, "Recommendation not found")
-
-    rec.status = payload.status
-    db.commit()
-    db.refresh(rec)
     return rec
