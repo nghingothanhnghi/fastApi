@@ -67,6 +67,16 @@ class MenuUpdate(BaseModel):
     location: Optional[str] = None
 
 
+class MenuSummary(MenuBase):
+    """Menu without its items (used by the list endpoint)."""
+    id: int
+    slug: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class MenuOut(MenuBase):
     id: int
     slug: str

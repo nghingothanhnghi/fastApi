@@ -261,3 +261,57 @@ def test_menu_tree_reorder_and_cycles(client):
     ok = {"items": [{"id": b["id"], "parent_id": None, "order": 0}, {"id": a["id"], "parent_id": None, "order": 1}]}
     r = client.post(f"/cms/menus/{mid}/items/reorder", json=ok, headers=h)
     assert r.status_code == 200 and [i["id"] for i in r.json()] == [b["id"], a["id"]]
+
+
+# ── P1: menu resolution, response models, limits ─────────────────────────
+def test_menu_urls_only_link_published_posts_and_avoid_n_plus_1(client):
+    from sqlalchemy import event
+
+    h = AUTH["mod"]
+    cat = client.post("/cms/categories", json={"name": "News"}, headers=h).json()
+    live = _post(client, title="Live", status="published")
+    draft = _post(client, title="Draft")
+    mid = client.post("/cms/menus", json={"name": "Main", "location": "main"}, headers=h).json()["id"]
+
+    def add(body):
+        r = client.post(f"/cms/menus/{mid}/items", json=body, headers=h)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    c = add({"label": "C", "target_type": "category", "target_id": cat["id"]})
+    assert c["resolved_url"] == "/categories/news"
+    add({"label": "L", "target_type": "post", "target_id": live["id"]})
+    add({"label": "D", "target_type": "post", "target_id": draft["id"]})
+    for i in range(10):
+        add({"label": f"X{i}", "url": f"/x{i}"})
+
+    engine = client.session_factory.kw["bind"]
+    count = {"n": 0}
+    listener = lambda *a, **k: count.__setitem__("n", count["n"] + 1)
+    event.listen(engine, "before_cursor_execute", listener)
+    try:
+        r = client.get("/cms/menus/location/main")
+    finally:
+        event.remove(engine, "before_cursor_execute", listener)
+
+    items = {i["label"]: i for i in r.json()["items"]}
+    assert items["C"]["resolved_url"] == "/categories/news"
+    assert items["L"]["resolved_url"] == f"/posts/{live['slug']}"
+    assert items["D"]["resolved_url"] is None  # unpublished -> no link
+    assert items["X3"]["resolved_url"] == "/x3"
+    assert count["n"] <= 5, f"too many queries for a 13-item menu: {count['n']}"
+
+
+def test_menu_list_is_typed_without_items(client):
+    h = AUTH["mod"]
+    client.post("/cms/menus", json={"name": "Footer", "location": "footer"}, headers=h)
+    r = client.get("/cms/menus")
+    assert r.status_code == 200
+    assert set(r.json()[0]) == {"id", "name", "slug", "location", "created_at", "updated_at"}
+
+
+def test_page_size_limits_come_from_config(client):
+    from app.cms.config import MAX_PAGE_SIZE, MAX_MEDIA_LIMIT
+    assert client.get(f"/cms/posts?page_size={MAX_PAGE_SIZE + 1}").status_code == 422
+    assert client.get(f"/cms/media?limit={MAX_MEDIA_LIMIT + 1}").status_code == 422
+    assert client.get(f"/cms/posts?page_size={MAX_PAGE_SIZE}").status_code == 200
