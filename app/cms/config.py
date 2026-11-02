@@ -10,6 +10,9 @@ CMS_MEDIA_URL = os.getenv("CMS_MEDIA_URL", "/static/cms_media")
 ALLOWED_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".mp4", ".webm"}
 MAX_MEDIA_SIZE_MB = int(os.getenv("CMS_MAX_MEDIA_SIZE_MB", 20))
 
+# Strip unsafe HTML from post content on write. Leave on unless content is rendered as plain text.
+SANITIZE_HTML = os.getenv("CMS_SANITIZE_HTML", "true").lower() not in ("0", "false", "no")
+
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 DEFAULT_MEDIA_LIMIT = 50

@@ -30,6 +30,7 @@ Layering: `routes -> controllers -> services -> models`. Routes handle HTTP and 
 | `CMS_MEDIA_DIR` | `uploads/cms_media` | Where uploads are stored on disk |
 | `CMS_MEDIA_URL` | `/static/cms_media` | Public URL prefix |
 | `CMS_MAX_MEDIA_SIZE_MB` | `20` | Upload size limit |
+| `CMS_SANITIZE_HTML` | `true` | Sanitize post `content` HTML on write |
 
 Allowed extensions: `.jpg .jpeg .png .gif .webp .svg .pdf .mp4 .webm`.
 
@@ -130,7 +131,7 @@ Run the tests: `SECRET_KEY=t DATABASE_URL=sqlite:///./t.db OPENAI_API_KEY=t pyte
 3. **Media: any logged-in user can edit/delete any file.** `PATCH`/`DELETE /cms/media/{id}` only require `get_current_user`. Restrict to the uploader or a moderator, and block deletion of media still referenced by a post (`featured_image_id`) or embedded in content.
 4. **Upload validation is extension-only.** _(fixed: magic-byte check, svg removed)_ A renamed file passes. Check magic bytes / `content_type` against the extension. `.svg` can carry scripts (stored XSS when served from your own origin): sanitize it or serve with `Content-Disposition: attachment` / a CSP header, or drop it from the allow-list.
 5. **Delete-media path handling.** _(open)_ The filename is taken from `media.url` and joined to `CMS_MEDIA_DIR`; safe today because URLs are server-generated, but store the stored filename in its own column instead of parsing the URL.
-6. **Unsafe `content` HTML.** _(open)_ Post `content` is stored raw. If the frontend renders HTML, sanitize on write (e.g. `bleach`/`nh3`) or document that the client must.
+6. **Unsafe `content` HTML.** _(fixed)_ Post `content` is sanitized on write with an allow-list (`utils/sanitize.py`, using `nh3`). Scripts, iframes, forms, event handlers, inline `style` and non-http(s)/mailto/tel URLs are removed; links get `rel="noopener noreferrer"`. Disable with `CMS_SANITIZE_HTML=false` only if content is rendered as plain text. Run `python migrate_cms_sanitize_posts.py` once to clean posts stored before this change. Embeds (YouTube iframes) are intentionally not allowed; add a tag/host allow-list if you need them. `title`, `excerpt` and meta fields are plain text and are not sanitized: render them escaped.
 7. **`PostUpdate` can break the scheduling invariant.** `scheduled_at` is not checked to be in the future on update (only on create and `/schedule`), and naive datetimes are treated as UTC silently. Reuse one helper (`_ensure_future_utc`) in all three places.
 8. **Category cycles.** `CategoryUpdate.parent_id` can set a category as its own parent or create a loop (A -> B -> A); `parent_id` existence is also unchecked. Validate in `category_service`. Same for `parent_id` on menu items (`update_item` only blocks self-parenting, not deeper loops, and does not check the parent is in the same menu).
 9. **Referential checks missing on create/update post.** `category_id`, `featured_image_id` and unknown `tag_ids` are silently ignored or fail with a raw FK `IntegrityError` (500). Return 400/404 with a clear message.

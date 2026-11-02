@@ -11,6 +11,7 @@ from app.cms.models.media import CmsMedia
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
 from app.cms.utils.slugify import slugify, make_unique_slug
+from app.cms.utils.sanitize import sanitize_html
 
 from app.core.logging_config import get_logger
  
@@ -75,7 +76,7 @@ class PostService:
             title=data.title,
             slug=self._unique_slug(db, base_slug),
             excerpt=data.excerpt,
-            content=data.content,
+            content=sanitize_html(data.content),
             post_type=data.post_type,
             status=data.status,
             category_id=data.category_id,
@@ -154,6 +155,8 @@ class PostService:
 
         update_data = data.model_dump(exclude_unset=True)
         tag_ids = update_data.pop("tag_ids", None)
+        if update_data.get("content") is not None:
+            update_data["content"] = sanitize_html(update_data["content"])
 
         self._validate_refs(
             db, update_data.get("category_id"), update_data.get("featured_image_id"), tag_ids
@@ -286,6 +289,17 @@ class PostService:
  
         db.commit()
         return len(due_posts)
+
+    def sanitize_all_posts(self, db: Session) -> int:
+        """Backfill: re-sanitize stored content. Returns how many posts changed (idempotent)."""
+        changed = 0
+        for post in db.query(CmsPost).yield_per(100):
+            clean = sanitize_html(post.content)
+            if clean != post.content:
+                post.content = clean
+                changed += 1
+        db.commit()
+        return changed
 
 
 post_service = PostService()
