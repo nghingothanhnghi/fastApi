@@ -55,14 +55,14 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 | GET | `/{id}` | public |
 | POST | `` | mod |
 | PUT | `/{id}` | mod |
-| DELETE | `/{id}` | admin |
+| DELETE | `/{id}` (`?reassign_to=`) | admin |
 
 ### Tags `/cms/tags`
 | Method | Path | Auth |
 |---|---|---|
 | GET | `` | public |
 | POST | `` | mod |
-| DELETE | `/{id}` | admin |
+| DELETE | `/{id}` (`?force=`, `?merge_into=`) | admin |
 
 ### Media `/cms/media`
 | Method | Path | Auth |
@@ -94,6 +94,24 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 | POST | `/{id}/items` | mod |
 | PUT / DELETE | `/items/{item_id}` | mod |
 | POST | `/{id}/items/reorder` | mod |
+
+## Delete rules
+
+Deleting never silently orphans content.
+
+**Categories** (`DELETE /cms/categories/{id}`, admin)
+- Child categories and posts are **moved up to the deleted category's parent**. A top-level category's children become top-level and its posts become uncategorised.
+- `?reassign_to=<category id>` moves them to that category instead (must exist, must not be the category itself or one of its descendants: 400).
+- **409** while a menu item links to the category; remove or repoint the item first.
+- Response: `{detail, moved_children, moved_posts, moved_to_category_id}`.
+
+**Tags** (`DELETE /cms/tags/{id}`, admin)
+- Unused tag: deleted.
+- Used by posts: **409** with the post count.
+- `?force=true` detaches the tag from its posts and deletes it. `?merge_into=<tag id>` gives those posts the other tag (no duplicates) and then deletes.
+- Response: `{detail, posts_affected, merged_into_tag_id, posts_moved}`.
+
+Not covered yet: deleting a **post** or **menu target** that a menu item links to leaves that item without a link (`resolved_url: null`).
 
 ## Typical flows
 
@@ -139,7 +157,7 @@ Run the tests: `SECRET_KEY=t DATABASE_URL=sqlite:///./t.db OPENAI_API_KEY=t pyte
 
 ### P1 - Correctness / quality
 
-- **`delete_category` / `delete_tag` have no usage protection.** Deleting a parent category sets children and posts to `NULL` silently; decide on policy (block, reassign, or cascade) and document it.
+- **`delete_category` / `delete_tag` usage rules.** _(fixed)_ See [Delete rules](#delete-rules).
 - **`view_count` is incremented on every hit**, including bots and refreshes, and the response returned is the pre-increment object. Consider de-duplicating (IP/session + short TTL) or moving to async/batched counting.
 - **`slugify` drops non-ASCII text** (`NFKD` + ASCII). `đ` is now mapped to `d`; other scripts (CJK etc.) still vanish, consider `python-slugify`/`unidecode`. Titles that fully reduce to nothing become `n-a`, which then collides as `n-a-2`, `n-a-3`.
 - **Search is a plain `ILIKE` on title/excerpt** only. Not searching `content`, and unindexed. For Postgres add `tsvector` + GIN index.

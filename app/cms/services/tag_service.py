@@ -1,8 +1,10 @@
 # app/cms/services/tag_service.py
 from typing import List, Optional
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.tag import CmsTag
+from app.cms.models.post import cms_post_tags
 from app.cms.schemas.tag import TagCreate
 from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
@@ -52,13 +54,54 @@ class TagService:
     def get_all_tags(self, db: Session) -> List[CmsTag]:
         return db.query(CmsTag).order_by(CmsTag.name.asc()).all()
 
-    def delete_tag(self, db: Session, tag_id: int) -> bool:
+    def delete_tag(
+        self, db: Session, tag_id: int, force: bool = False, merge_into: Optional[int] = None
+    ) -> Optional[dict]:
+        """
+        Delete a tag without silently stripping it from posts.
+
+        - Unused tag: deleted.
+        - Used tag: 409 unless `force=True` (detach from posts, then delete) or
+          `merge_into=<tag id>` (posts get that tag instead, then delete).
+
+        Returns a summary dict, or None when the tag does not exist.
+        """
         tag = self.get_tag(db, tag_id)
         if not tag:
-            return False
-        db.delete(tag)
+            return None
+
+        post_ids = [
+            row[0] for row in db.execute(select(cms_post_tags.c.post_id).where(cms_post_tags.c.tag_id == tag_id))
+        ]
+        merged = 0
+
+        if merge_into is not None:
+            if merge_into == tag_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="merge_into cannot be the tag being deleted")
+            if not self.get_tag(db, merge_into):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tag {merge_into} not found")
+            already = {
+                row[0]
+                for row in db.execute(select(cms_post_tags.c.post_id).where(cms_post_tags.c.tag_id == merge_into))
+            }
+            rows = [{"post_id": pid, "tag_id": merge_into} for pid in post_ids if pid not in already]
+            if rows:
+                db.execute(cms_post_tags.insert(), rows)
+            merged = len(rows)
+        elif post_ids and not force:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Tag is used by {len(post_ids)} post(s); pass force=true to detach it or merge_into=<tag id>",
+            )
+
+        db.delete(tag)  # ORM also removes this tag's rows from cms_post_tags
         db.commit()
-        return True
+        return {
+            "detail": "Tag deleted successfully",
+            "posts_affected": len(post_ids),
+            "merged_into_tag_id": merge_into,
+            "posts_moved": merged,
+        }
 
 
 tag_service = TagService()

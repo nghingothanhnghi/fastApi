@@ -478,3 +478,130 @@ def test_retry_helper_conflict_mapping():
             raise boom('duplicate key value violates unique constraint "ix_cms_posts_slug"')
         return "ok"
     assert run_with_slug_retry(db, flaky) == "ok" and n["n"] == 2
+
+
+# ── delete rules: categories ─────────────────────────────────────────────
+def _cat(client, name, parent_id=None):
+    r = client.post("/cms/categories", json={"name": name, "parent_id": parent_id}, headers=AUTH["mod"])
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _cat_of(client, cid):
+    return client.get(f"/cms/categories/{cid}").json()
+
+
+def test_delete_category_promotes_children_and_posts_to_parent(client):
+    root = _cat(client, "Root")
+    mid = _cat(client, "Mid", root["id"])
+    leaf = _cat(client, "Leaf", mid["id"])
+    p_mid = _post(client, status="published", category_id=mid["id"])
+    p_leaf = _post(client, title="Leafy", status="published", category_id=leaf["id"])
+
+    r = client.delete(f"/cms/categories/{mid['id']}", headers=AUTH["admin"])
+    assert r.status_code == 200, r.text
+    assert r.json()["moved_children"] == 1 and r.json()["moved_posts"] == 1
+    assert r.json()["moved_to_category_id"] == root["id"]
+
+    assert _cat_of(client, leaf["id"])["parent_id"] == root["id"]          # hierarchy preserved
+    assert client.get(f"/cms/posts/{p_mid['id']}").json()["category_id"] == root["id"]
+    assert client.get(f"/cms/posts/{p_leaf['id']}").json()["category_id"] == leaf["id"]  # untouched
+    assert client.get(f"/cms/categories/{mid['id']}").status_code == 404
+
+
+def test_delete_top_level_category_leaves_children_as_roots_and_posts_uncategorised(client):
+    root = _cat(client, "Root")
+    child = _cat(client, "Child", root["id"])
+    p = _post(client, status="published", category_id=root["id"])
+    r = client.delete(f"/cms/categories/{root['id']}", headers=AUTH["admin"])
+    assert r.status_code == 200 and r.json()["moved_to_category_id"] is None
+    assert _cat_of(client, child["id"])["parent_id"] is None
+    assert client.get(f"/cms/posts/{p['id']}").json()["category_id"] is None
+
+
+def test_delete_category_reassign_to(client):
+    root = _cat(client, "Root")
+    mid = _cat(client, "Mid", root["id"])
+    leaf = _cat(client, "Leaf", mid["id"])
+    other = _cat(client, "Other")
+    p = _post(client, status="published", category_id=mid["id"])
+    h = AUTH["admin"]
+
+    assert client.delete(f"/cms/categories/{mid['id']}?reassign_to={mid['id']}", headers=h).status_code == 400
+    assert client.delete(f"/cms/categories/{mid['id']}?reassign_to=999", headers=h).status_code == 400
+    # a descendant of the deleted category is not a valid destination (would form a cycle)
+    assert client.delete(f"/cms/categories/{mid['id']}?reassign_to={leaf['id']}", headers=h).status_code == 400
+    assert client.get(f"/cms/categories/{mid['id']}").status_code == 200  # nothing was deleted by the failures
+
+    r = client.delete(f"/cms/categories/{mid['id']}?reassign_to={other['id']}", headers=h)
+    assert r.status_code == 200 and r.json()["moved_to_category_id"] == other["id"]
+    assert _cat_of(client, leaf["id"])["parent_id"] == other["id"]
+    assert client.get(f"/cms/posts/{p['id']}").json()["category_id"] == other["id"]
+
+
+def test_delete_category_blocked_by_menu_item_and_permissions(client):
+    cat = _cat(client, "News")
+    mid = client.post("/cms/menus", json={"name": "Main"}, headers=AUTH["mod"]).json()["id"]
+    item = client.post(
+        f"/cms/menus/{mid}/items",
+        json={"label": "News", "target_type": "category", "target_id": cat["id"]},
+        headers=AUTH["mod"],
+    ).json()
+
+    assert client.delete(f"/cms/categories/{cat['id']}", headers=AUTH["mod"]).status_code == 403  # admin only
+    r = client.delete(f"/cms/categories/{cat['id']}", headers=AUTH["admin"])
+    assert r.status_code == 409 and "menu item" in r.json()["detail"]
+
+    client.delete(f"/cms/menus/items/{item['id']}", headers=AUTH["mod"])
+    assert client.delete(f"/cms/categories/{cat['id']}", headers=AUTH["admin"]).status_code == 200
+    assert client.delete(f"/cms/categories/{cat['id']}", headers=AUTH["admin"]).status_code == 404
+
+
+# ── delete rules: tags ───────────────────────────────────────────────────
+def _tag(client, name):
+    r = client.post("/cms/tags", json={"name": name}, headers=AUTH["mod"])
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _tag_ids(client, post_id):
+    return sorted(t["id"] for t in client.get(f"/cms/posts/{post_id}").json()["tags"])
+
+
+def test_delete_unused_tag_ok_and_used_tag_needs_force(client):
+    h = AUTH["admin"]
+    unused, used = _tag(client, "Unused"), _tag(client, "Used")
+    p = _post(client, status="published", tag_ids=[used["id"]])
+
+    assert client.delete(f"/cms/tags/{unused['id']}", headers=h).status_code == 200
+    r = client.delete(f"/cms/tags/{used['id']}", headers=h)
+    assert r.status_code == 409 and "1 post" in r.json()["detail"]
+    assert _tag_ids(client, p["id"]) == [used["id"]]                      # still attached
+
+    r = client.delete(f"/cms/tags/{used['id']}?force=true", headers=h)
+    assert r.status_code == 200 and r.json()["posts_affected"] == 1
+    assert _tag_ids(client, p["id"]) == []                                 # detached...
+    assert client.get(f"/cms/posts/{p['id']}").status_code == 200          # ...but the post survives
+    assert client.delete(f"/cms/tags/{used['id']}", headers=h).status_code == 404
+
+
+def test_delete_tag_merge_into(client):
+    h = AUTH["admin"]
+    old, new, keep = _tag(client, "Old"), _tag(client, "New"), _tag(client, "Keep")
+    only_old = _post(client, title="A", status="published", tag_ids=[old["id"]])
+    both = _post(client, title="B", status="published", tag_ids=[old["id"], new["id"], keep["id"]])
+
+    assert client.delete(f"/cms/tags/{old['id']}?merge_into={old['id']}", headers=h).status_code == 400
+    assert client.delete(f"/cms/tags/{old['id']}?merge_into=999", headers=h).status_code == 400
+    assert client.get("/cms/tags").json().__len__() == 3                   # failures changed nothing
+
+    r = client.delete(f"/cms/tags/{old['id']}?merge_into={new['id']}", headers=h)
+    assert r.status_code == 200
+    assert r.json()["posts_affected"] == 2 and r.json()["posts_moved"] == 1  # `both` already had "New"
+    assert _tag_ids(client, only_old["id"]) == [new["id"]]
+    assert _tag_ids(client, both["id"]) == sorted([new["id"], keep["id"]])   # no duplicate, others kept
+
+
+def test_delete_tag_admin_only(client):
+    t = _tag(client, "X")
+    assert client.delete(f"/cms/tags/{t['id']}", headers=AUTH["mod"]).status_code == 403
