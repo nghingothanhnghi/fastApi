@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.category import CmsCategory
 from app.cms.schemas.category import CategoryCreate, CategoryUpdate
-from app.cms.utils.slugify import slugify, make_unique_slug
+from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
 
 class CategoryService:
@@ -40,16 +40,19 @@ class CategoryService:
     def create_category(self, db: Session, data: CategoryCreate) -> CmsCategory:
         self._validate_parent(db, data.parent_id)
         base_slug = slugify(data.slug or data.name)
-        category = CmsCategory(
-            name=data.name,
-            slug=self._unique_slug(db, base_slug),
-            description=data.description,
-            parent_id=data.parent_id,
-        )
-        db.add(category)
-        db.commit()
-        db.refresh(category)
-        return category
+
+        def operation() -> int:
+            category = CmsCategory(
+                name=data.name,
+                slug=self._unique_slug(db, base_slug),
+                description=data.description,
+                parent_id=data.parent_id,
+            )
+            db.add(category)
+            db.commit()
+            return category.id
+
+        return self.get_category(db, run_with_slug_retry(db, operation))
 
     def get_category(self, db: Session, category_id: int) -> Optional[CmsCategory]:
         return db.query(CmsCategory).filter(CmsCategory.id == category_id).first()
@@ -70,13 +73,21 @@ class CategoryService:
         update_data = data.model_dump(exclude_unset=True)
         if update_data.get("parent_id") is not None:
             self._validate_parent(db, update_data["parent_id"], category_id)
-        if update_data.get("slug"):
-            update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=category_id)
-        for field, value in update_data.items():
-            setattr(category, field, value)
-        db.commit()
-        db.refresh(category)
-        return category
+
+        def operation() -> Optional[int]:
+            obj = self.get_category(db, category_id)  # re-read: a retry follows a rollback
+            if obj is None:
+                return None
+            values = dict(update_data)
+            if values.get("slug"):
+                values["slug"] = self._unique_slug(db, slugify(values["slug"]), exclude_id=category_id)
+            for field, value in values.items():
+                setattr(obj, field, value)
+            db.commit()
+            return obj.id
+
+        saved_id = run_with_slug_retry(db, operation)
+        return self.get_category(db, saved_id) if saved_id else None
 
     def delete_category(self, db: Session, category_id: int) -> bool:
         category = self.get_category(db, category_id)

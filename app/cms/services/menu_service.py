@@ -9,7 +9,7 @@ from app.cms.models.post import CmsPost, PostStatus
 from app.cms.schemas.menu import (
     MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest
 )
-from app.cms.utils.slugify import slugify, make_unique_slug
+from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
 
 class MenuService:
@@ -31,15 +31,15 @@ class MenuService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Menu location '{data.location}' is already in use",
                 )
-        menu = CmsMenu(
-            name=data.name,
-            slug=self._unique_slug(db, slugify(data.slug or data.name)),
-            location=data.location,
-        )
-        db.add(menu)
-        db.commit()
-        db.refresh(menu)
-        return menu
+        base_slug = slugify(data.slug or data.name)
+
+        def operation() -> int:
+            menu = CmsMenu(name=data.name, slug=self._unique_slug(db, base_slug), location=data.location)
+            db.add(menu)
+            db.commit()
+            return menu.id
+
+        return self.get_menu(db, run_with_slug_retry(db, operation))
 
     def get_menu(self, db: Session, menu_id: int) -> Optional[CmsMenu]:
         return db.query(CmsMenu).filter(CmsMenu.id == menu_id).first()
@@ -67,13 +67,21 @@ class MenuService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Menu location '{update_data['location']}' is already in use",
                 )
-        if update_data.get("slug"):
-            update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=menu_id)
-        for field, value in update_data.items():
-            setattr(menu, field, value)
-        db.commit()
-        db.refresh(menu)
-        return menu
+
+        def operation() -> Optional[int]:
+            obj = self.get_menu(db, menu_id)  # re-read: a retry follows a rollback
+            if obj is None:
+                return None
+            values = dict(update_data)
+            if values.get("slug"):
+                values["slug"] = self._unique_slug(db, slugify(values["slug"]), exclude_id=menu_id)
+            for field, value in values.items():
+                setattr(obj, field, value)
+            db.commit()
+            return obj.id
+
+        saved_id = run_with_slug_retry(db, operation)
+        return self.get_menu(db, saved_id) if saved_id else None
 
     def delete_menu(self, db: Session, menu_id: int) -> bool:
         menu = self.get_menu(db, menu_id)

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.tag import CmsTag
 from app.cms.schemas.tag import TagCreate
-from app.cms.utils.slugify import slugify, make_unique_slug
+from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
 
 class TagService:
@@ -18,18 +18,28 @@ class TagService:
         if db.query(CmsTag.id).filter(CmsTag.name.ilike(data.name.strip())).first():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Tag '{data.name.strip()}' already exists")
         base_slug = slugify(data.slug or data.name)
-        tag = CmsTag(name=data.name.strip(), slug=self._unique_slug(db, base_slug))
-        db.add(tag)
-        db.commit()
-        db.refresh(tag)
-        return tag
+        name = data.name.strip()
+
+        def operation() -> int:
+            tag = CmsTag(name=name, slug=self._unique_slug(db, base_slug))
+            db.add(tag)
+            db.commit()
+            return tag.id
+
+        return self.get_tag(db, run_with_slug_retry(db, operation))
 
     def get_or_create_tag(self, db: Session, name: str) -> CmsTag:
         """Handy for free-text tag input (e.g. a CMS editor tag box)."""
         existing = db.query(CmsTag).filter(CmsTag.name.ilike(name.strip())).first()
         if existing:
             return existing
-        return self.create_tag(db, TagCreate(name=name.strip()))
+        try:
+            return self.create_tag(db, TagCreate(name=name.strip()))
+        except HTTPException as exc:
+            # Lost a race with another request creating the same tag: use theirs.
+            if exc.status_code != status.HTTP_409_CONFLICT:
+                raise
+            return db.query(CmsTag).filter(CmsTag.name.ilike(name.strip())).first()
 
     def get_tag(self, db: Session, tag_id: int) -> Optional[CmsTag]:
         return db.query(CmsTag).filter(CmsTag.id == tag_id).first()

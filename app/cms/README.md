@@ -135,7 +135,7 @@ Run the tests: `SECRET_KEY=t DATABASE_URL=sqlite:///./t.db OPENAI_API_KEY=t pyte
 7. **`PostUpdate` can break the scheduling invariant.** `scheduled_at` is not checked to be in the future on update (only on create and `/schedule`), and naive datetimes are treated as UTC silently. Reuse one helper (`_ensure_future_utc`) in all three places.
 8. **Category cycles.** `CategoryUpdate.parent_id` can set a category as its own parent or create a loop (A -> B -> A); `parent_id` existence is also unchecked. Validate in `category_service`. Same for `parent_id` on menu items (`update_item` only blocks self-parenting, not deeper loops, and does not check the parent is in the same menu).
 9. **Referential checks missing on create/update post.** `category_id`, `featured_image_id` and unknown `tag_ids` are silently ignored or fail with a raw FK `IntegrityError` (500). Return 400/404 with a clear message.
-10. **Slug race + unique constraints.** _(open for the race; duplicate tag name is fixed)_ `make_unique_slug` is check-then-insert; concurrent requests can hit the unique index and return 500. Catch `IntegrityError` and retry. `TagCreate` with an existing name also 500s (unique `name`): use `get_or_create_tag` semantics or return 409.
+10. **Slug race + unique constraints.** _(fixed)_ Creating or renaming a post, category, menu or tag goes through `utils/slugify.run_with_slug_retry`: if two requests pick the same slug, the loser hits the unique index, rolls back and re-runs with the next free slug (up to 5 attempts, then 409). Other unique violations (duplicate tag name, taken menu location) return 409 instead of 500, and `get_or_create_tag` returns the existing tag if it loses a race.
 
 ### P1 - Correctness / quality
 
