@@ -6,6 +6,19 @@ from app.cms.services.menu_service import menu_service
 from app.cms.schemas.menu import MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest
 
 
+def _menu_payload(db: Session, menu, active_only: bool = True) -> dict:
+    """Explicit response body (no SQLAlchemy internals leaking via __dict__)."""
+    return {
+        "id": menu.id,
+        "name": menu.name,
+        "slug": menu.slug,
+        "location": menu.location,
+        "created_at": menu.created_at,
+        "updated_at": menu.updated_at,
+        "items": menu_service.build_tree(db, menu, active_only),
+    }
+
+
 class MenuController:
 
     @staticmethod
@@ -21,14 +34,14 @@ class MenuController:
         menu = menu_service.get_menu(db, menu_id)
         if not menu:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu not found")
-        return {**menu.__dict__, "items": menu_service.build_tree(db, menu, active_only)}
+        return _menu_payload(db, menu, active_only)
 
     @staticmethod
     def get_menu_by_location(db: Session, location: str, active_only: bool = True):
         menu = menu_service.get_menu_by_location(db, location)
         if not menu:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No menu found for location '{location}'")
-        return {**menu.__dict__, "items": menu_service.build_tree(db, menu, active_only)}
+        return _menu_payload(db, menu, active_only)
 
     @staticmethod
     def update_menu(db: Session, menu_id: int, data: MenuUpdate):

@@ -1,6 +1,7 @@
 # app/cms/services/category_service.py
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 from app.cms.models.category import CmsCategory
 from app.cms.schemas.category import CategoryCreate, CategoryUpdate
 from app.cms.utils.slugify import slugify, make_unique_slug
@@ -16,7 +17,28 @@ class CategoryService:
             return db.query(q.exists()).scalar()
         return make_unique_slug(base, exists)
 
+    def _validate_parent(self, db: Session, parent_id: Optional[int], category_id: Optional[int] = None) -> None:
+        """Parent must exist and must not be the category itself or one of its descendants."""
+        if parent_id is None:
+            return
+        parent = self.get_category(db, parent_id)
+        if not parent:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Parent category {parent_id} not found")
+        if category_id is None:
+            return
+        seen = set()
+        node = parent
+        while node is not None and node.id not in seen:
+            if node.id == category_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A category cannot be its own parent or a descendant of itself",
+                )
+            seen.add(node.id)
+            node = node.parent
+
     def create_category(self, db: Session, data: CategoryCreate) -> CmsCategory:
+        self._validate_parent(db, data.parent_id)
         base_slug = slugify(data.slug or data.name)
         category = CmsCategory(
             name=data.name,
@@ -46,6 +68,8 @@ class CategoryService:
         if not category:
             return None
         update_data = data.model_dump(exclude_unset=True)
+        if update_data.get("parent_id") is not None:
+            self._validate_parent(db, update_data["parent_id"], category_id)
         if update_data.get("slug"):
             update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=category_id)
         for field, value in update_data.items():

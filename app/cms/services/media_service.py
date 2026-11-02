@@ -2,6 +2,7 @@
 # Handles physical file storage + the CmsMedia DB record in one place.
 # Same pattern as app/product/services/image_service.py, generalized for the
 # CMS media library (multiple file types, size limits, alt text, delete-from-disk).
+import mimetypes
 import os
 import shutil
 from uuid import uuid4
@@ -10,10 +11,30 @@ from fastapi import UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.cms.models.media import CmsMedia
+from app.cms.models.post import CmsPost
 from app.cms.config import CMS_MEDIA_DIR, CMS_MEDIA_URL, ALLOWED_MEDIA_EXTENSIONS, MAX_MEDIA_SIZE_MB
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _matches_signature(ext: str, head: bytes) -> bool:
+    """Check the file's magic bytes agree with its extension (a renamed file is rejected)."""
+    if ext in (".jpg", ".jpeg"):
+        return head.startswith(b"\xff\xd8\xff")
+    if ext == ".png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == ".gif":
+        return head.startswith((b"GIF87a", b"GIF89a"))
+    if ext == ".webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if ext == ".pdf":
+        return head.startswith(b"%PDF")
+    if ext == ".mp4":
+        return head[4:8] == b"ftyp"
+    if ext == ".webm":
+        return head.startswith(b"\x1a\x45\xdf\xa3")
+    return False
 
 
 class MediaService:
@@ -54,6 +75,14 @@ class MediaService:
                 detail=f"File exceeds max size of {MAX_MEDIA_SIZE_MB}MB",
             )
 
+        head = file.file.read(16)
+        file.file.seek(0)
+        if not _matches_signature(ext, head):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File content does not match its extension",
+            )
+
         try:
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
@@ -64,7 +93,7 @@ class MediaService:
         media = CmsMedia(
             filename=file.filename,
             url=f"{CMS_MEDIA_URL.rstrip('/')}/{filename}",
-            mime_type=file.content_type,
+            mime_type=mimetypes.guess_type(filename)[0] or file.content_type,
             file_size=size_bytes,
             alt_text=alt_text,
             uploaded_by_id=uploaded_by_id,
@@ -100,6 +129,13 @@ class MediaService:
         media = self.get_media(db, media_id)
         if not media:
             return False
+
+        in_use = db.query(CmsPost.id).filter(CmsPost.featured_image_id == media_id).count()
+        if in_use:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Media is used as featured image by {in_use} post(s); detach it first",
+            )
 
         # Best-effort removal from disk; DB row is the source of truth either way
         try:

@@ -1,6 +1,7 @@
 # app/cms/services/tag_service.py
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 from app.cms.models.tag import CmsTag
 from app.cms.schemas.tag import TagCreate
 from app.cms.utils.slugify import slugify, make_unique_slug
@@ -14,6 +15,8 @@ class TagService:
         return make_unique_slug(base, exists)
 
     def create_tag(self, db: Session, data: TagCreate) -> CmsTag:
+        if db.query(CmsTag.id).filter(CmsTag.name.ilike(data.name.strip())).first():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Tag '{data.name.strip()}' already exists")
         base_slug = slugify(data.slug or data.name)
         tag = CmsTag(name=data.name.strip(), slug=self._unique_slug(db, base_slug))
         db.add(tag)
