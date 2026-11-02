@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 
 from app.cms.models.menu import CmsMenu, CmsMenuItem, MenuItemTargetType
 from app.cms.models.category import CmsCategory
-from app.cms.models.post import CmsPost
+from app.cms.models.post import CmsPost, PostStatus
 from app.cms.schemas.menu import (
     MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest
 )
@@ -206,21 +206,46 @@ class MenuService:
             if not db.query(CmsPost).filter(CmsPost.id == target_id).first():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Post {target_id} not found")
 
-    def resolve_item_url(self, db: Session, item: CmsMenuItem) -> Optional[str]:
-        """Compute the actual link for an item, following category/post slugs."""
+    def _prefetch_slugs(self, db: Session, items: List[CmsMenuItem]) -> tuple:
+        """Two queries total instead of one per item. Only *published* posts get a link."""
+        cat_ids = {i.target_id for i in items if i.target_type == MenuItemTargetType.category and i.target_id}
+        post_ids = {i.target_id for i in items if i.target_type == MenuItemTargetType.post and i.target_id}
+        cats = (
+            {c.id: c.slug for c in db.query(CmsCategory.id, CmsCategory.slug).filter(CmsCategory.id.in_(cat_ids))}
+            if cat_ids else {}
+        )
+        posts = (
+            {
+                p.id: p.slug
+                for p in db.query(CmsPost.id, CmsPost.slug).filter(
+                    CmsPost.id.in_(post_ids), CmsPost.status == PostStatus.published
+                )
+            }
+            if post_ids else {}
+        )
+        return cats, posts
+
+    @staticmethod
+    def _resolve(item: CmsMenuItem, cats: dict, posts: dict) -> Optional[str]:
         if item.target_type == MenuItemTargetType.custom:
             return item.url
         if item.target_type == MenuItemTargetType.category:
-            cat = db.query(CmsCategory).filter(CmsCategory.id == item.target_id).first()
-            return f"/categories/{cat.slug}" if cat else None
+            slug = cats.get(item.target_id)
+            return f"/categories/{slug}" if slug else None
         if item.target_type == MenuItemTargetType.post:
-            post = db.query(CmsPost).filter(CmsPost.id == item.target_id).first()
-            return f"/posts/{post.slug}" if post else None
+            slug = posts.get(item.target_id)
+            return f"/posts/{slug}" if slug else None
         return None
+
+    def resolve_item_url(self, db: Session, item: CmsMenuItem) -> Optional[str]:
+        """Compute the actual link for a single item (prefer build_tree for many items)."""
+        cats, posts = self._prefetch_slugs(db, [item])
+        return self._resolve(item, cats, posts)
 
     def build_tree(self, db: Session, menu: CmsMenu, active_only: bool = True) -> List[dict]:
         """Build a nested dict tree (parent_id -> children) with resolved_url set."""
         items = [i for i in menu.items if (i.is_active or not active_only)]
+        cats, posts = self._prefetch_slugs(db, items)
         by_parent: dict = {}
         for i in items:
             by_parent.setdefault(i.parent_id, []).append(i)
@@ -228,7 +253,7 @@ class MenuService:
             children.sort(key=lambda i: i.order)
 
         def serialize(item: CmsMenuItem) -> dict:
-            data = {
+            return {
                 "id": item.id,
                 "menu_id": item.menu_id,
                 "label": item.label,
@@ -239,10 +264,9 @@ class MenuService:
                 "order": item.order,
                 "open_in_new_tab": item.open_in_new_tab,
                 "is_active": item.is_active,
-                "resolved_url": self.resolve_item_url(db, item),
+                "resolved_url": self._resolve(item, cats, posts),
                 "children": [serialize(c) for c in by_parent.get(item.id, [])],
             }
-            return data
 
         return [serialize(i) for i in by_parent.get(None, [])]
 

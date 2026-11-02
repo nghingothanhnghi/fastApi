@@ -261,6 +261,9 @@ class PostService:
                 CmsPost.scheduled_at.isnot(None),
                 CmsPost.scheduled_at <= now,
             )
+            # Several workers may run the job: lock due rows and skip ones another worker holds
+            # (ignored on SQLite, honoured on PostgreSQL).
+            .with_for_update(skip_locked=True)
             .all()
         )
  

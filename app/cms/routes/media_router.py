@@ -7,6 +7,7 @@ from app.database import get_db
 from app.user.utils.token import get_current_user
 from app.user.models.user import User
 from app.user.enums.role_enum import RoleEnum
+from app.cms.config import DEFAULT_MEDIA_LIMIT, MAX_MEDIA_LIMIT
 from app.cms.schemas.media import MediaOut
 from app.cms.controllers.media_controller import media_controller
 
@@ -37,7 +38,7 @@ def upload_media(
 @router.get("", response_model=List[MediaOut])
 def list_media(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(DEFAULT_MEDIA_LIMIT, ge=1, le=MAX_MEDIA_LIMIT),
     db: Session = Depends(get_db),
 ):
     """Browse the media library (e.g. to power an image picker in an editor UI)."""

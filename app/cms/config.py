@@ -12,6 +12,8 @@ MAX_MEDIA_SIZE_MB = int(os.getenv("CMS_MAX_MEDIA_SIZE_MB", 20))
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
+DEFAULT_MEDIA_LIMIT = 50
+MAX_MEDIA_LIMIT = 200
 
 # Ensure the upload directory exists at import time (mirrors app/product/config style)
 Path(CMS_MEDIA_DIR).mkdir(parents=True, exist_ok=True)

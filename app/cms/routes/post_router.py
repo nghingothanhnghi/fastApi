@@ -7,6 +7,7 @@ from app.database import get_db
 from app.user.utils.token import get_current_user, get_current_user_optional
 from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
+from app.cms.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.cms.models.post import PostStatus, PostType
 from app.cms.schemas.post import PostCreate, PostUpdate, PostOut, PaginatedPosts, PostScheduleRequest
 from app.cms.controllers.post_controller import post_controller
@@ -57,7 +58,7 @@ def list_posts(
     author_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, description="Search in title/excerpt"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):

@@ -58,13 +58,16 @@ class MenuController:
 
     @staticmethod
     def create_item(db: Session, menu_id: int, data: MenuItemCreate):
-        return menu_service.create_item(db, menu_id, data)
+        item = menu_service.create_item(db, menu_id, data)
+        item.resolved_url = menu_service.resolve_item_url(db, item)
+        return item
 
     @staticmethod
     def update_item(db: Session, item_id: int, data: MenuItemUpdate):
         item = menu_service.update_item(db, item_id, data)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu item not found")
+        item.resolved_url = menu_service.resolve_item_url(db, item)
         return item
 
     @staticmethod

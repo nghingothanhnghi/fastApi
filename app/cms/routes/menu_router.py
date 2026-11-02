@@ -1,4 +1,5 @@
 # app/cms/routes/menu_router.py
+from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -6,19 +7,20 @@ from app.database import get_db
 from app.user.utils.role_requirements import require_roles
 from app.user.enums.role_enum import RoleEnum
 from app.cms.schemas.menu import (
-    MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest
+    MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest,
+    MenuOut, MenuSummary, MenuItemOut,
 )
 from app.cms.controllers.menu_controller import menu_controller
 
 router = APIRouter(prefix="/cms/menus", tags=["CMS - Menus"])
 
 
-@router.get("")
+@router.get("", response_model=List[MenuSummary])
 def list_menus(db: Session = Depends(get_db)):
     return menu_controller.get_all_menus(db)
 
 
-@router.post("", status_code=201)
+@router.post("", response_model=MenuSummary, status_code=201)
 def create_menu(
     data: MenuCreate,
     db: Session = Depends(get_db),
@@ -27,7 +29,7 @@ def create_menu(
     return menu_controller.create_menu(db, data)
 
 
-@router.get("/location/{location}")
+@router.get("/location/{location}", response_model=MenuOut)
 def get_menu_by_location(
     location: str,
     active_only: bool = Query(True),
@@ -37,7 +39,7 @@ def get_menu_by_location(
     return menu_controller.get_menu_by_location(db, location, active_only)
 
 
-@router.get("/{menu_id}")
+@router.get("/{menu_id}", response_model=MenuOut)
 def get_menu(
     menu_id: int,
     active_only: bool = Query(True),
@@ -46,7 +48,7 @@ def get_menu(
     return menu_controller.get_menu_with_tree(db, menu_id, active_only)
 
 
-@router.put("/{menu_id}")
+@router.put("/{menu_id}", response_model=MenuSummary)
 def update_menu(
     menu_id: int,
     data: MenuUpdate,
@@ -65,7 +67,7 @@ def delete_menu(
     return menu_controller.delete_menu(db, menu_id)
 
 
-@router.post("/{menu_id}/items", status_code=201)
+@router.post("/{menu_id}/items", response_model=MenuItemOut, status_code=201)
 def create_menu_item(
     menu_id: int,
     data: MenuItemCreate,
@@ -75,7 +77,7 @@ def create_menu_item(
     return menu_controller.create_item(db, menu_id, data)
 
 
-@router.put("/items/{item_id}")
+@router.put("/items/{item_id}", response_model=MenuItemOut)
 def update_menu_item(
     item_id: int,
     data: MenuItemUpdate,
@@ -94,7 +96,7 @@ def delete_menu_item(
     return menu_controller.delete_item(db, item_id)
 
 
-@router.post("/{menu_id}/items/reorder")
+@router.post("/{menu_id}/items/reorder", response_model=List[MenuItemOut])
 def reorder_menu_items(
     menu_id: int,
     data: MenuReorderRequest,

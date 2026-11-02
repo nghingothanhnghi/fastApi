@@ -142,13 +142,13 @@ Run the tests: `SECRET_KEY=t DATABASE_URL=sqlite:///./t.db OPENAI_API_KEY=t pyte
 - **`view_count` is incremented on every hit**, including bots and refreshes, and the response returned is the pre-increment object. Consider de-duplicating (IP/session + short TTL) or moving to async/batched counting.
 - **`slugify` drops non-ASCII text** (`NFKD` + ASCII). `đ` is now mapped to `d`; other scripts (CJK etc.) still vanish, consider `python-slugify`/`unidecode`. Titles that fully reduce to nothing become `n-a`, which then collides as `n-a-2`, `n-a-3`.
 - **Search is a plain `ILIKE` on title/excerpt** only. Not searching `content`, and unindexed. For Postgres add `tsvector` + GIN index.
-- **List endpoints are inconsistent.** Posts are paginated with a total; media/categories/tags are not, and `DEFAULT_PAGE_SIZE`/`MAX_PAGE_SIZE` in `config.py` are not used (routes hardcode 20/100/50/200). Use the config values and one shared `Paginated[T]` schema.
-- **Menu endpoints have no `response_model`.** Responses are untyped dicts, so OpenAPI docs show nothing and `MenuOut` is unused. Declare `response_model` on every menu route.
-- **Menu tree N+1.** `resolve_item_url` queries per item. Prefetch all referenced categories/posts in two queries, then resolve from dicts. Also resolve only `published` posts, otherwise menus can link to drafts.
+- **List endpoints are inconsistent.** _(partly fixed: limits now come from `config.py`; response shapes unchanged to avoid breaking clients)_ Posts are paginated with a total; media/categories/tags are not, and `DEFAULT_PAGE_SIZE`/`MAX_PAGE_SIZE` in `config.py` are not used (routes hardcode 20/100/50/200). Use the config values and one shared `Paginated[T]` schema.
+- **Menu endpoints have no `response_model`.** _(fixed)_ Responses are untyped dicts, so OpenAPI docs show nothing and `MenuOut` is unused. Declare `response_model` on every menu route.
+- **Menu tree N+1.** _(fixed: 2 prefetch queries; only published posts get a link)_ `resolve_item_url` queries per item. Prefetch all referenced categories/posts in two queries, then resolve from dicts. Also resolve only `published` posts, otherwise menus can link to drafts.
 - **Dead/unused code.** `from app.cms.models import post` in `post_service.py` shadows the local variable name `post`; `PostBase` has a validator while `PostUpdate` duplicates it; `Path(...).mkdir` runs at import time in `config.py` and again in `main.py` and the service.
 - **`updated_at` uses `onupdate`** only, so it is `NULL` until the first edit. Prefer `server_default=func.now()` too.
 - **Timezone handling**: `scheduled_at` stored `timezone=True`, but the API accepts naive values and assumes UTC. Document it, or reject naive datetimes.
-- **Scheduler is single-process only.** If the app runs several workers/instances, each runs the job. The update is idempotent, but use `SELECT ... FOR UPDATE SKIP LOCKED` to avoid duplicate work and notifications.
+- **Scheduler with several workers.** _(fixed: due rows are locked with `FOR UPDATE SKIP LOCKED` on PostgreSQL)_ If the app runs several workers/instances, each runs the job. The update is idempotent, but use `SELECT ... FOR UPDATE SKIP LOCKED` to avoid duplicate work and notifications.
 
 ### P2 - Features worth adding
 
