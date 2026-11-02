@@ -315,3 +315,75 @@ def test_page_size_limits_come_from_config(client):
     assert client.get(f"/cms/posts?page_size={MAX_PAGE_SIZE + 1}").status_code == 422
     assert client.get(f"/cms/media?limit={MAX_MEDIA_LIMIT + 1}").status_code == 422
     assert client.get(f"/cms/posts?page_size={MAX_PAGE_SIZE}").status_code == 200
+
+
+# ── HTML sanitization ────────────────────────────────────────────────────
+from app.cms.utils.sanitize import sanitize_html
+
+XSS_PAYLOADS = [
+    "<script>alert(1)</script>",
+    '<img src=x onerror="alert(1)">',
+    '<a href="javascript:alert(1)">x</a>',
+    '<a href="JaVaScRiPt:alert(1)">x</a>',
+    '<img src="data:text/html;base64,PHNjcmlwdD4=">',
+    '<iframe src="https://evil.example"></iframe>',
+    '<svg onload=alert(1)></svg>',
+    '<p style="background:url(javascript:alert(1))">x</p>',
+    '<form action="/x"><input name=a></form>',
+    '<object data="x"></object><embed src="x">',
+    '<div onclick="alert(1)">x</div>',
+    "<style>body{display:none}</style>",
+]
+
+
+@pytest.mark.parametrize("payload", XSS_PAYLOADS)
+def test_sanitize_removes_dangerous_markup(payload):
+    out = sanitize_html(payload).lower()
+    for bad in ("<script", "onerror", "onload", "onclick", "javascript:", "data:", "<iframe",
+                "<svg", "<form", "<object", "<embed", "<style", "style="):
+        assert bad not in out, (payload, out)
+
+
+def test_sanitize_keeps_legit_markup_and_hardens_links():
+    html = (
+        '<h2 id="intro">Title</h2><p class="lead">Hi <strong>there</strong> '
+        '<a href="https://example.com" target="_blank">link</a></p>'
+        '<img src="/static/cms_media/a.png" alt="pic" width="10">'
+        '<table><tr><td colspan="2">c</td></tr></table><pre><code>x &lt; y</code></pre>'
+    )
+    out = sanitize_html(html)
+    for keep in ("<h2", "<strong>", 'href="https://example.com"', "<table>", 'colspan="2"',
+                 'src="/static/cms_media/a.png"', 'alt="pic"', "<pre><code>"):
+        assert keep in out, (keep, out)
+    assert 'rel="noopener noreferrer"' in out
+    assert 'href="mailto:a@b.io"' in sanitize_html('<a href="mailto:a@b.io">m</a>')
+
+
+def test_sanitize_is_idempotent_and_handles_none():
+    once = sanitize_html("".join(XSS_PAYLOADS) + "<p>ok</p>")
+    assert sanitize_html(once) == once
+    assert sanitize_html(None) is None and sanitize_html("") == ""
+
+
+def test_post_content_sanitized_on_create_and_update(client):
+    h = AUTH["author"]
+    p = _post(client, status="published", content='<p>hi</p><script>alert(1)</script><img src=x onerror=alert(1)>')
+    assert "<script" not in p["content"] and "onerror" not in p["content"] and "<p>hi</p>" in p["content"]
+
+    r = client.put(f"/cms/posts/{p['id']}", json={"content": '<a href="javascript:alert(1)">x</a>'}, headers=h)
+    assert r.status_code == 200 and "javascript:" not in r.json()["content"]
+    # fetched back from storage it is still clean
+    assert "javascript:" not in client.get(f"/cms/posts/{p['id']}").json()["content"]
+    # updating other fields leaves content untouched
+    r = client.put(f"/cms/posts/{p['id']}", json={"title": "New"}, headers=h)
+    assert r.json()["content"] == client.get(f"/cms/posts/{p['id']}").json()["content"]
+
+
+def test_backfill_cleans_existing_rows(client):
+    p = _post(client, status="published", content="<p>ok</p>")
+    with client.session_factory() as db:
+        db.query(CmsPost).filter(CmsPost.id == p["id"]).update({CmsPost.content: "<p>ok</p><script>x()</script>"})
+        db.commit()
+        assert post_service.sanitize_all_posts(db) == 1
+        assert post_service.sanitize_all_posts(db) == 0  # idempotent
+    assert "<script" not in client.get(f"/cms/posts/{p['id']}").json()["content"]
