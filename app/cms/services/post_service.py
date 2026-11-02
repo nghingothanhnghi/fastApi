@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
 from fastapi import HTTPException, status
 
-from app.cms.models import post
 from app.cms.models.post import CmsPost, PostStatus, PostType
+from app.cms.models.category import CmsCategory
+from app.cms.models.media import CmsMedia
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
 from app.cms.utils.slugify import slugify, make_unique_slug
@@ -35,7 +36,38 @@ class PostService:
             return db.query(q.exists()).scalar()
         return make_unique_slug(base, exists)
 
+    @staticmethod
+    def _ensure_future_utc(value: datetime) -> datetime:
+        """Normalize to aware-UTC (naive input is assumed UTC) and require it to be in the future."""
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        if value <= datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scheduled_at must be in the future",
+            )
+        return value
+
+    def _validate_refs(
+        self,
+        db: Session,
+        category_id: Optional[int] = None,
+        featured_image_id: Optional[int] = None,
+        tag_ids: Optional[List[int]] = None,
+    ) -> None:
+        """Return clear 400s instead of raw FK/IntegrityError 500s."""
+        if category_id is not None and not db.query(CmsCategory.id).filter(CmsCategory.id == category_id).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Category {category_id} not found")
+        if featured_image_id is not None and not db.query(CmsMedia.id).filter(CmsMedia.id == featured_image_id).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Media {featured_image_id} not found")
+        if tag_ids:
+            found = {t.id for t in tag_service.get_tags_by_ids(db, tag_ids)}
+            missing = sorted(set(tag_ids) - found)
+            if missing:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tags not found: {missing}")
+
     def create_post(self, db: Session, data: PostCreate, author_id: int) -> CmsPost:
+        self._validate_refs(db, data.category_id, data.featured_image_id, data.tag_ids)
         base_slug = slugify(data.slug or data.title)
         tags = tag_service.get_tags_by_ids(db, data.tag_ids) if data.tag_ids else []
 
@@ -64,15 +96,7 @@ class PostService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="scheduled_at is required when status is 'scheduled'",
                 )
-            # ✅ normalize incoming value to aware-UTC before comparing
-            scheduled_at = post.scheduled_at
-            if scheduled_at.tzinfo is None:
-                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
-            if scheduled_at <= datetime.now(timezone.utc):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="scheduled_at must be in the future",
-                )
+            post.scheduled_at = self._ensure_future_utc(post.scheduled_at)
 
         db.add(post)
         db.commit()
@@ -131,20 +155,28 @@ class PostService:
         update_data = data.model_dump(exclude_unset=True)
         tag_ids = update_data.pop("tag_ids", None)
 
+        self._validate_refs(
+            db, update_data.get("category_id"), update_data.get("featured_image_id"), tag_ids
+        )
+
         if update_data.get("slug"):
             update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=post_id)
 
         was_published = post.status == PostStatus.published
         new_status = update_data.get("status", post.status)
 
-        # ✅ NEW — validate scheduled_at presence before applying changes
+        # Validate scheduled_at presence/future-ness before applying changes
         if new_status == PostStatus.scheduled:
             incoming_scheduled_at = update_data.get("scheduled_at", post.scheduled_at)
             if not incoming_scheduled_at:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="scheduled_at is required when status is 'scheduled'",
-                )        
+                )
+            if "scheduled_at" in update_data or post.status != PostStatus.scheduled:
+                update_data["scheduled_at"] = self._ensure_future_utc(incoming_scheduled_at)
+        elif update_data.get("scheduled_at") is not None:
+            update_data["scheduled_at"] = self._ensure_future_utc(update_data["scheduled_at"])
 
         for field, value in update_data.items():
             setattr(post, field, value)
@@ -210,16 +242,8 @@ class PostService:
         if not post:
             return None
 
-        # ✅ normalize incoming value to aware-UTC before comparing
-        if scheduled_at.tzinfo is None:
-            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
- 
-        if scheduled_at <= datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="scheduled_at must be in the future",
-            )
- 
+        scheduled_at = self._ensure_future_utc(scheduled_at)
+
         post.status = PostStatus.scheduled
         post.scheduled_at = scheduled_at
         db.commit()

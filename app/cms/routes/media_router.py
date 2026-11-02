@@ -1,15 +1,22 @@
 # app/cms/routes/media_router.py
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
 from app.user.utils.token import get_current_user
 from app.user.models.user import User
+from app.user.enums.role_enum import RoleEnum
 from app.cms.schemas.media import MediaOut
 from app.cms.controllers.media_controller import media_controller
 
 router = APIRouter(prefix="/cms/media", tags=["CMS - Media"])
+
+
+def _ensure_uploader_or_editor(media, user: User) -> None:
+    is_editor = any(user.has_role(r) for r in (RoleEnum.SUPER_ADMIN, RoleEnum.ADMIN, RoleEnum.MODERATOR))
+    if media.uploaded_by_id != user.id and not is_editor:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to modify this media")
 
 
 @router.post("/upload", response_model=MediaOut, status_code=201)
@@ -49,6 +56,7 @@ def update_media(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _ensure_uploader_or_editor(media_controller.get_media(db, media_id), current_user)
     return media_controller.update_media(db, media_id, alt_text)
 
 
@@ -58,4 +66,5 @@ def delete_media(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _ensure_uploader_or_editor(media_controller.get_media(db, media_id), current_user)
     return media_controller.delete_media(db, media_id)

@@ -117,8 +117,18 @@ class MenuService:
 
         update_data = data.model_dump(exclude_unset=True)
 
-        if "parent_id" in update_data and update_data["parent_id"] == item_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An item cannot be its own parent")
+        if "parent_id" in update_data and update_data["parent_id"] is not None:
+            parent_map = {
+                i.id: i.parent_id
+                for i in db.query(CmsMenuItem).filter(CmsMenuItem.menu_id == item.menu_id).all()
+            }
+            if update_data["parent_id"] not in parent_map:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="parent_id must reference an item in the same menu",
+                )
+            parent_map[item_id] = update_data["parent_id"]
+            self._assert_no_cycle(parent_map)
 
         target_type = update_data.get("target_type", item.target_type)
         target_id = update_data.get("target_id", item.target_id)
@@ -141,8 +151,21 @@ class MenuService:
 
     def reorder_items(self, db: Session, menu_id: int, data: MenuReorderRequest) -> List[CmsMenuItem]:
         """Bulk-update order/parent_id for drag-and-drop menu builders."""
+        if not self.get_menu(db, menu_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu not found")
         items = db.query(CmsMenuItem).filter(CmsMenuItem.menu_id == menu_id).all()
         items_by_id = {i.id: i for i in items}
+        new_parents = {i.id: i.parent_id for i in items}
+        for entry in data.items:
+            if entry.id in items_by_id:
+                new_parents[entry.id] = entry.parent_id
+        for entry in data.items:
+            if entry.parent_id is not None and entry.parent_id not in items_by_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"parent_id {entry.parent_id} does not belong to menu {menu_id}",
+                )
+        self._assert_no_cycle(new_parents)
 
         for entry in data.items:
             item = items_by_id.get(entry.id)
@@ -158,6 +181,21 @@ class MenuService:
 
         db.commit()
         return self.get_menu(db, menu_id).items
+
+    @staticmethod
+    def _assert_no_cycle(parent_map: dict) -> None:
+        """parent_map: {item_id: parent_id|None}. Raise 400 if following parents ever loops."""
+        for start in parent_map:
+            seen = set()
+            node = start
+            while node is not None:
+                if node in seen:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Menu items cannot form a parent cycle",
+                    )
+                seen.add(node)
+                node = parent_map.get(node)
 
     # ── Resolution / tree building ──────────────────────────────────────
     def _validate_target(self, db: Session, target_type: MenuItemTargetType, target_id: Optional[int]) -> None:

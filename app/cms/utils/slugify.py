@@ -7,7 +7,9 @@ from typing import Callable
 
 def slugify(value: str) -> str:
     """Convert a string into a URL-friendly, lowercase, hyphenated slug."""
-    value = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    # "đ"/"Đ" have no NFKD decomposition and would otherwise be dropped entirely.
+    value = (value or "").replace("đ", "d").replace("Đ", "D")
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     value = re.sub(r"[^\w\s-]", "", value).strip().lower()
     value = re.sub(r"[-\s]+", "-", value)
     return value or "n-a"

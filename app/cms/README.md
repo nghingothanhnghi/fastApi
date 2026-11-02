@@ -109,26 +109,38 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 
 ## Review: gaps and recommended improvements
 
-Findings from reading the code, ordered by priority. None of these have been applied yet.
+Findings from reading the code, ordered by priority.
+
+**Status:** P0 items 1-4, 7-9 and the menu parts of item 2 are fixed and covered by `app/tests/test_cms.py`. Items marked _(open)_ remain.
+
+Behaviour changes from the fixes:
+- Anonymous users and non-editors only see `published` posts (`?status=draft` returns 403, unpublished post by id/slug returns 404). Authors see their own posts; ADMIN/MODERATOR/SUPER_ADMIN see all.
+- Post create/update returns 400 for unknown `category_id`, `featured_image_id` or `tag_ids`, and `scheduled_at` must be in the future on create, update and `/schedule`.
+- Media edit/delete is limited to the uploader or an editor; deleting a file used as a featured image returns 409.
+- Uploads must match their extension's magic bytes, and `.svg` is no longer allowed.
+- Duplicate tag name returns 409. Category and menu-item parent loops return 400.
+- `slugify` maps `đ/Đ` to `d/D`.
+
+Run the tests: `SECRET_KEY=t DATABASE_URL=sqlite:///./t.db OPENAI_API_KEY=t pytest app/tests/test_cms.py`
 
 ### P0 - Bugs / security
 
 1. **Drafts, scheduled and archived posts are publicly readable.** `GET /cms/posts`, `/{id}` and `/slug/{slug}` have no auth and no status filter, so anyone can list `status=draft` or open an unpublished post by slug. Fix: public endpoints should force `status=published` (and `published_at <= now`); only authenticated editors/authors may see other statuses (e.g. add `/cms/posts/admin` or check the optional user).
 2. **Menu reorder 500s on an unknown menu.** `reorder_items` calls `self.get_menu(db, menu_id).items` without a None check, and `create_item` correctly 404s but `reorder` does not. Also `menu_controller` builds responses with `{**menu.__dict__, ...}`, which leaks SQLAlchemy internals (`_sa_instance_state`) and breaks on expired/lazy attributes; build a `MenuOut` explicitly instead.
 3. **Media: any logged-in user can edit/delete any file.** `PATCH`/`DELETE /cms/media/{id}` only require `get_current_user`. Restrict to the uploader or a moderator, and block deletion of media still referenced by a post (`featured_image_id`) or embedded in content.
-4. **Upload validation is extension-only.** A renamed file passes. Check magic bytes / `content_type` against the extension. `.svg` can carry scripts (stored XSS when served from your own origin): sanitize it or serve with `Content-Disposition: attachment` / a CSP header, or drop it from the allow-list.
-5. **Delete-media path handling.** The filename is taken from `media.url` and joined to `CMS_MEDIA_DIR`; safe today because URLs are server-generated, but store the stored filename in its own column instead of parsing the URL.
-6. **Unsafe `content` HTML.** Post `content` is stored raw. If the frontend renders HTML, sanitize on write (e.g. `bleach`/`nh3`) or document that the client must.
+4. **Upload validation is extension-only.** _(fixed: magic-byte check, svg removed)_ A renamed file passes. Check magic bytes / `content_type` against the extension. `.svg` can carry scripts (stored XSS when served from your own origin): sanitize it or serve with `Content-Disposition: attachment` / a CSP header, or drop it from the allow-list.
+5. **Delete-media path handling.** _(open)_ The filename is taken from `media.url` and joined to `CMS_MEDIA_DIR`; safe today because URLs are server-generated, but store the stored filename in its own column instead of parsing the URL.
+6. **Unsafe `content` HTML.** _(open)_ Post `content` is stored raw. If the frontend renders HTML, sanitize on write (e.g. `bleach`/`nh3`) or document that the client must.
 7. **`PostUpdate` can break the scheduling invariant.** `scheduled_at` is not checked to be in the future on update (only on create and `/schedule`), and naive datetimes are treated as UTC silently. Reuse one helper (`_ensure_future_utc`) in all three places.
 8. **Category cycles.** `CategoryUpdate.parent_id` can set a category as its own parent or create a loop (A -> B -> A); `parent_id` existence is also unchecked. Validate in `category_service`. Same for `parent_id` on menu items (`update_item` only blocks self-parenting, not deeper loops, and does not check the parent is in the same menu).
 9. **Referential checks missing on create/update post.** `category_id`, `featured_image_id` and unknown `tag_ids` are silently ignored or fail with a raw FK `IntegrityError` (500). Return 400/404 with a clear message.
-10. **Slug race + unique constraints.** `make_unique_slug` is check-then-insert; concurrent requests can hit the unique index and return 500. Catch `IntegrityError` and retry. `TagCreate` with an existing name also 500s (unique `name`): use `get_or_create_tag` semantics or return 409.
+10. **Slug race + unique constraints.** _(open for the race; duplicate tag name is fixed)_ `make_unique_slug` is check-then-insert; concurrent requests can hit the unique index and return 500. Catch `IntegrityError` and retry. `TagCreate` with an existing name also 500s (unique `name`): use `get_or_create_tag` semantics or return 409.
 
 ### P1 - Correctness / quality
 
 - **`delete_category` / `delete_tag` have no usage protection.** Deleting a parent category sets children and posts to `NULL` silently; decide on policy (block, reassign, or cascade) and document it.
 - **`view_count` is incremented on every hit**, including bots and refreshes, and the response returned is the pre-increment object. Consider de-duplicating (IP/session + short TTL) or moving to async/batched counting.
-- **`slugify` drops non-ASCII text** (`NFKD` + ASCII). Vietnamese titles like "Hệ thống thủy canh" lose characters and "đ" disappears. Add an explicit `đ -> d` mapping (and optionally `python-slugify` / `unidecode`). Titles that fully reduce to nothing become `n-a`, which then collides as `n-a-2`, `n-a-3`.
+- **`slugify` drops non-ASCII text** (`NFKD` + ASCII). `đ` is now mapped to `d`; other scripts (CJK etc.) still vanish, consider `python-slugify`/`unidecode`. Titles that fully reduce to nothing become `n-a`, which then collides as `n-a-2`, `n-a-3`.
 - **Search is a plain `ILIKE` on title/excerpt** only. Not searching `content`, and unindexed. For Postgres add `tsvector` + GIN index.
 - **List endpoints are inconsistent.** Posts are paginated with a total; media/categories/tags are not, and `DEFAULT_PAGE_SIZE`/`MAX_PAGE_SIZE` in `config.py` are not used (routes hardcode 20/100/50/200). Use the config values and one shared `Paginated[T]` schema.
 - **Menu endpoints have no `response_model`.** Responses are untyped dicts, so OpenAPI docs show nothing and `MenuOut` is unused. Declare `response_model` on every menu route.
@@ -154,7 +166,7 @@ Findings from reading the code, ordered by priority. None of these have been app
 
 ### P3 - Testing and tooling
 
-- **No CMS tests exist** (`app/tests` has none). Start with: slug uniqueness, schedule validation (past/naive/None), scheduled job flips due posts only, draft not visible publicly (after fix), permission matrix per role, menu reorder + cycle prevention, upload rejects bad type/size.
+- **Tests:** `app/tests/test_cms.py` now covers posts, scheduling, visibility, permissions, uploads, categories, tags and menus. Still worth adding: slug uniqueness, schedule validation (past/naive/None), scheduled job flips due posts only, draft not visible publicly (after fix), permission matrix per role, menu reorder + cycle prevention, upload rejects bad type/size.
 - **No migrations**: the repo uses ad-hoc `migrate_*.py` scripts. Adopt Alembic (or add a `migrate_cms.py`) so schema changes such as new columns do not depend on `create_all`.
 - Add `pyproject`-level lint (ruff) and type checks for this package; remove emoji comments (`✅`, `⏰`) in code for consistency if desired.
 
