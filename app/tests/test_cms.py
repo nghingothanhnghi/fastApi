@@ -387,3 +387,94 @@ def test_backfill_cleans_existing_rows(client):
         assert post_service.sanitize_all_posts(db) == 1
         assert post_service.sanitize_all_posts(db) == 0  # idempotent
     assert "<script" not in client.get(f"/cms/posts/{p['id']}").json()["content"]
+
+
+# ── slug races (check-then-insert) ───────────────────────────────────────
+def _force_first_slug(monkeypatch, service, slug):
+    """Make the service's FIRST slug pick return an already-taken slug, as if another request
+    grabbed it between our existence check and our commit. Later picks behave normally."""
+    real = service._unique_slug
+    calls = {"n": 0}
+
+    def stub(*args, **kwargs):
+        calls["n"] += 1
+        return slug if calls["n"] == 1 else real(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_unique_slug", stub)
+    return calls
+
+
+def test_post_create_retries_on_slug_race(client, monkeypatch):
+    first = _post(client, title="Alpha")
+    calls = _force_first_slug(monkeypatch, post_service, first["slug"])
+    second = _post(client, title="Alpha")  # would be a 500 without the retry
+    assert second["slug"] == "alpha-2" and calls["n"] == 2
+    assert second["id"] != first["id"]
+
+
+def test_post_update_retries_on_slug_race(client, monkeypatch):
+    a = _post(client, title="Alpha")
+    b = _post(client, title="Beta", content="<p>keep</p>")
+    _force_first_slug(monkeypatch, post_service, a["slug"])
+    r = client.put(f"/cms/posts/{b['id']}", json={"slug": "alpha", "title": "Beta 2"}, headers=AUTH["author"])
+    assert r.status_code == 200, r.text
+    assert r.json()["slug"] == "alpha-2" and r.json()["title"] == "Beta 2"  # edits survive the retry
+
+
+def test_category_menu_tag_retry_on_slug_race(client, monkeypatch):
+    from app.cms.services.category_service import category_service
+    from app.cms.services.menu_service import menu_service
+    from app.cms.services.tag_service import tag_service
+
+    h = AUTH["mod"]
+    cat = client.post("/cms/categories", json={"name": "News"}, headers=h).json()
+    _force_first_slug(monkeypatch, category_service, cat["slug"])
+    assert client.post("/cms/categories", json={"name": "News"}, headers=h).json()["slug"] == "news-2"
+
+    m = client.post("/cms/menus", json={"name": "Main"}, headers=h).json()
+    _force_first_slug(monkeypatch, menu_service, m["slug"])
+    assert client.post("/cms/menus", json={"name": "Main"}, headers=h).json()["slug"] == "main-2"
+
+    t = client.post("/cms/tags", json={"name": "Hydro"}, headers=h).json()
+    _force_first_slug(monkeypatch, tag_service, t["slug"])
+    r = client.post("/cms/tags", json={"name": "Hydro Ponics", "slug": "hydro"}, headers=h)
+    assert r.status_code == 201 and r.json()["slug"] == "hydro-2"
+
+
+def test_retry_helper_conflict_mapping():
+    from sqlalchemy.exc import IntegrityError
+    from app.cms.utils.slugify import run_with_slug_retry
+
+    class FakeDb:
+        rollbacks = 0
+        def rollback(self): self.rollbacks += 1
+
+    def boom(msg):
+        return IntegrityError("stmt", {}, Exception(msg))
+
+    # non-slug violation -> immediate 409, no retries
+    db, n = FakeDb(), {"n": 0}
+    def other():
+        n["n"] += 1
+        raise boom("UNIQUE constraint failed: cms_tags.name")
+    with pytest.raises(HTTPException) as e:
+        run_with_slug_retry(db, other)
+    assert e.value.status_code == 409 and n["n"] == 1 and db.rollbacks == 1
+
+    # persistent slug conflict -> gives up after `attempts` with 409
+    db, n = FakeDb(), {"n": 0}
+    def always():
+        n["n"] += 1
+        raise boom("UNIQUE constraint failed: cms_posts.slug")
+    with pytest.raises(HTTPException) as e:
+        run_with_slug_retry(db, always, attempts=3)
+    assert e.value.status_code == 409 and n["n"] == 3
+
+    # succeeds on the 2nd try
+    db, n = FakeDb(), {"n": 0}
+    def flaky():
+        n["n"] += 1
+        if n["n"] == 1:
+            raise boom('duplicate key value violates unique constraint "ix_cms_posts_slug"')
+        return "ok"
+    assert run_with_slug_retry(db, flaky) == "ok" and n["n"] == 2

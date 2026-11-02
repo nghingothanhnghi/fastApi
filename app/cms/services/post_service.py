@@ -10,7 +10,7 @@ from app.cms.models.category import CmsCategory
 from app.cms.models.media import CmsMedia
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
-from app.cms.utils.slugify import slugify, make_unique_slug
+from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 from app.cms.utils.sanitize import sanitize_html
 
 from app.core.logging_config import get_logger
@@ -70,39 +70,42 @@ class PostService:
     def create_post(self, db: Session, data: PostCreate, author_id: int) -> CmsPost:
         self._validate_refs(db, data.category_id, data.featured_image_id, data.tag_ids)
         base_slug = slugify(data.slug or data.title)
-        tags = tag_service.get_tags_by_ids(db, data.tag_ids) if data.tag_ids else []
+        scheduled_at = data.scheduled_at
 
-        post = CmsPost(
-            title=data.title,
-            slug=self._unique_slug(db, base_slug),
-            excerpt=data.excerpt,
-            content=sanitize_html(data.content),
-            post_type=data.post_type,
-            status=data.status,
-            category_id=data.category_id,
-            featured_image_id=data.featured_image_id,
-            meta_title=data.meta_title,
-            meta_description=data.meta_description,
-            is_featured=data.is_featured,
-            author_id=author_id,
-            tags=tags,
-            scheduled_at=data.scheduled_at,
-        )
-        if post.status == PostStatus.published:
-            post.published_at = datetime.now(timezone.utc)
-
-        if post.status == PostStatus.scheduled:
-            if not post.scheduled_at:
+        if data.status == PostStatus.scheduled:
+            if not scheduled_at:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="scheduled_at is required when status is 'scheduled'",
                 )
-            post.scheduled_at = self._ensure_future_utc(post.scheduled_at)
+            scheduled_at = self._ensure_future_utc(scheduled_at)
 
-        db.add(post)
-        db.commit()
-        db.refresh(post)
-        return self.get_post(db, post.id)
+        def operation() -> int:
+            tags = tag_service.get_tags_by_ids(db, data.tag_ids) if data.tag_ids else []
+            post = CmsPost(
+                title=data.title,
+                slug=self._unique_slug(db, base_slug),
+                excerpt=data.excerpt,
+                content=sanitize_html(data.content),
+                post_type=data.post_type,
+                status=data.status,
+                category_id=data.category_id,
+                featured_image_id=data.featured_image_id,
+                meta_title=data.meta_title,
+                meta_description=data.meta_description,
+                is_featured=data.is_featured,
+                author_id=author_id,
+                tags=tags,
+                scheduled_at=scheduled_at,
+            )
+            if post.status == PostStatus.published:
+                post.published_at = datetime.now(timezone.utc)
+            db.add(post)
+            db.commit()
+            return post.id
+
+        post_id = run_with_slug_retry(db, operation)
+        return self.get_post(db, post_id)
 
     def get_post(self, db: Session, post_id: int) -> Optional[CmsPost]:
         return self._base_query(db).filter(CmsPost.id == post_id).first()
@@ -162,9 +165,6 @@ class PostService:
             db, update_data.get("category_id"), update_data.get("featured_image_id"), tag_ids
         )
 
-        if update_data.get("slug"):
-            update_data["slug"] = self._unique_slug(db, slugify(update_data["slug"]), exclude_id=post_id)
-
         was_published = post.status == PostStatus.published
         new_status = update_data.get("status", post.status)
 
@@ -181,24 +181,34 @@ class PostService:
         elif update_data.get("scheduled_at") is not None:
             update_data["scheduled_at"] = self._ensure_future_utc(update_data["scheduled_at"])
 
-        for field, value in update_data.items():
-            setattr(post, field, value)
+        def operation() -> Optional[int]:
+            # Re-read inside the operation: a retry follows a rollback that expired everything.
+            obj = db.query(CmsPost).filter(CmsPost.id == post_id).first()
+            if obj is None:
+                return None
+            values = dict(update_data)
+            if values.get("slug"):
+                values["slug"] = self._unique_slug(db, slugify(values["slug"]), exclude_id=post_id)
+            for field, value in values.items():
+                setattr(obj, field, value)
 
-        if tag_ids is not None:
-            post.tags = tag_service.get_tags_by_ids(db, tag_ids)
+            if tag_ids is not None:
+                obj.tags = tag_service.get_tags_by_ids(db, tag_ids)
 
-        # Auto-stamp published_at the first time a post transitions to published
-        if post.status == PostStatus.published and not was_published:
-            post.published_at = datetime.now(timezone.utc)
+            # Auto-stamp published_at the first time a post transitions to published
+            if obj.status == PostStatus.published and not was_published:
+                obj.published_at = datetime.now(timezone.utc)
 
-        # Leaving 'scheduled' (manually or via publish/archive) clears the
-        # scheduled_at marker so the background job stops picking it up.
-        if new_status != PostStatus.scheduled and "scheduled_at" not in update_data:
-            post.scheduled_at = None            
+            # Leaving 'scheduled' (manually or via publish/archive) clears the
+            # scheduled_at marker so the background job stops picking it up.
+            if new_status != PostStatus.scheduled and "scheduled_at" not in update_data:
+                obj.scheduled_at = None
 
-        db.commit()
-        db.refresh(post)
-        return self.get_post(db, post.id)
+            db.commit()
+            return obj.id
+
+        saved_id = run_with_slug_retry(db, operation)
+        return self.get_post(db, saved_id) if saved_id else None
 
     def delete_post(self, db: Session, post_id: int) -> bool:
         post = db.query(CmsPost).filter(CmsPost.id == post_id).first()
