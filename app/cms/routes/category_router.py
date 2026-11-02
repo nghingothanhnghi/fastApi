@@ -48,7 +48,13 @@ def update_category(
 @router.delete("/{category_id}")
 def delete_category(
     category_id: int,
+    reassign_to: Optional[int] = Query(None, description="Move child categories and posts here instead of to the parent"),
     db: Session = Depends(get_db),
     current_user=Depends(require_roles(RoleEnum.ADMIN)),
 ):
-    return category_controller.delete_category(db, category_id)
+    """
+    Child categories and posts are moved (default: up to the deleted category's parent,
+    or uncategorised if it was top-level) rather than orphaned.
+    409 while a menu item still links to this category.
+    """
+    return category_controller.delete_category(db, category_id, reassign_to)

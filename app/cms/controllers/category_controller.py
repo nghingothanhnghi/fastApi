@@ -31,11 +31,11 @@ class CategoryController:
         return category
 
     @staticmethod
-    def delete_category(db: Session, category_id: int):
-        success = category_service.delete_category(db, category_id)
-        if not success:
+    def delete_category(db: Session, category_id: int, reassign_to: Optional[int] = None):
+        result = category_service.delete_category(db, category_id, reassign_to)
+        if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
-        return {"detail": "Category deleted successfully"}
+        return result
 
 
 category_controller = CategoryController()

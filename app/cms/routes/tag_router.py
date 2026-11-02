@@ -1,7 +1,7 @@
 # app/cms/routes/tag_router.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.database import get_db
 from app.user.utils.role_requirements import require_roles
@@ -29,7 +29,10 @@ def create_tag(
 @router.delete("/{tag_id}")
 def delete_tag(
     tag_id: int,
+    force: bool = Query(False, description="Delete even if posts use it (detaches it from them)"),
+    merge_into: Optional[int] = Query(None, description="Give posts this tag instead, then delete"),
     db: Session = Depends(get_db),
     current_user=Depends(require_roles(RoleEnum.ADMIN)),
 ):
-    return tag_controller.delete_tag(db, tag_id)
+    """A tag used by posts is refused with 409 unless `force=true` or `merge_into=<tag id>` is given."""
+    return tag_controller.delete_tag(db, tag_id, force, merge_into)

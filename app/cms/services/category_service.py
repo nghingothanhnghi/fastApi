@@ -3,6 +3,8 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.category import CmsCategory
+from app.cms.models.menu import CmsMenuItem, MenuItemTargetType
+from app.cms.models.post import CmsPost
 from app.cms.schemas.category import CategoryCreate, CategoryUpdate
 from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
@@ -89,13 +91,61 @@ class CategoryService:
         saved_id = run_with_slug_retry(db, operation)
         return self.get_category(db, saved_id) if saved_id else None
 
-    def delete_category(self, db: Session, category_id: int) -> bool:
+    def delete_category(self, db: Session, category_id: int, reassign_to: Optional[int] = None) -> Optional[dict]:
+        """
+        Delete a category without silently orphaning its content.
+
+        - Child categories and posts are MOVED, by default to the deleted category's parent
+          (or left uncategorised when it was top-level). `reassign_to` picks another destination.
+        - Refused with 409 while a menu item still links to the category (it would dangle).
+
+        Returns a summary dict, or None when the category does not exist.
+        """
         category = self.get_category(db, category_id)
         if not category:
-            return False
-        db.delete(category)
+            return None
+
+        in_menus = (
+            db.query(CmsMenuItem.id)
+            .filter(CmsMenuItem.target_type == MenuItemTargetType.category, CmsMenuItem.target_id == category_id)
+            .count()
+        )
+        if in_menus:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Category is linked from {in_menus} menu item(s); remove or repoint them first",
+            )
+
+        if reassign_to is not None:
+            if reassign_to == category_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reassign_to cannot be the category being deleted")
+            # Must exist and must not sit below the deleted category (that would create a cycle).
+            self._validate_parent(db, reassign_to, category_id)
+            new_parent_id = reassign_to
+        else:
+            new_parent_id = category.parent_id
+
+        moved_children = (
+            db.query(CmsCategory)
+            .filter(CmsCategory.parent_id == category_id)
+            .update({CmsCategory.parent_id: new_parent_id}, synchronize_session=False)
+        )
+        moved_posts = (
+            db.query(CmsPost)
+            .filter(CmsPost.category_id == category_id)
+            .update({CmsPost.category_id: new_parent_id}, synchronize_session=False)
+        )
+        # Bulk updates bypass the session: drop stale collections so the ORM delete
+        # below cannot "nullify" rows we just moved.
+        db.expire_all()
+        db.delete(self.get_category(db, category_id))
         db.commit()
-        return True
+        return {
+            "detail": "Category deleted successfully",
+            "moved_children": moved_children,
+            "moved_posts": moved_posts,
+            "moved_to_category_id": new_parent_id,
+        }
 
 
 # ✅ Singleton instance (same convention as the rest of the codebase)
