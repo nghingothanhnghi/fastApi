@@ -2,6 +2,8 @@
 
 Headless CMS for the platform: categories, tags, media library, posts/pages (with scheduled publishing) and navigation menus. It reuses the existing `users` table and role system for authors and permissions.
 
+> Building a client? See [`FRONTEND_GUIDE.md`](./FRONTEND_GUIDE.md): contracts, flows, editor constraints and known gaps.
+
 ```
 app/cms/
 ├── config.py        # media dir/url, allowed extensions, size limit, pagination defaults
