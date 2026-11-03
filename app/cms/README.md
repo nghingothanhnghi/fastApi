@@ -55,6 +55,7 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 |---|---|---|
 | GET | `` (`?parent_id=`) | public |
 | GET | `/{id}` | public |
+| GET | `/slug/{slug}` | public |
 | POST | `` | mod |
 | PUT | `/{id}` | mod |
 | DELETE | `/{id}` (`?reassign_to=`) | admin |
@@ -63,6 +64,7 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 | Method | Path | Auth |
 |---|---|---|
 | GET | `` | public |
+| GET | `/slug/{slug}` | public |
 | POST | `` | mod |
 | DELETE | `/{id}` (`?force=`, `?merge_into=`) | admin |
 
@@ -79,7 +81,7 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 | Method | Path | Auth |
 |---|---|---|
 | POST | `` | user |
-| GET | `` (`status, post_type, category_id, tag_id, author_id, search, page, page_size`) | public |
+| GET | `` (`status, post_type, category_id, tag_id, author_id, search, is_featured, sort, order, page, page_size`) | public |
 | GET | `/slug/{slug}` (`track_view`) | public |
 | GET | `/{id}` | public |
 | PUT / DELETE | `/{id}` | author or editor |

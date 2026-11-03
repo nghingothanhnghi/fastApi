@@ -17,6 +17,12 @@ def list_tags(db: Session = Depends(get_db)):
     return tag_controller.get_all_tags(db)
 
 
+@router.get("/slug/{slug}", response_model=TagOut)
+def get_tag_by_slug(slug: str, db: Session = Depends(get_db)):
+    """Public: resolve a tag from its URL slug (e.g. for /tags/:slug pages)."""
+    return tag_controller.get_tag_by_slug(db, slug)
+
+
 @router.post("", response_model=TagOut, status_code=201)
 def create_tag(
     data: TagCreate,

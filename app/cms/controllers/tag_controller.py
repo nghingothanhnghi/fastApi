@@ -9,6 +9,13 @@ from app.cms.schemas.tag import TagCreate
 class TagController:
 
     @staticmethod
+    def get_tag_by_slug(db: Session, slug: str):
+        tag = tag_service.get_tag_by_slug(db, slug)
+        if not tag:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+        return tag
+
+    @staticmethod
     def create_tag(db: Session, data: TagCreate):
         return tag_service.create_tag(db, data)
 
