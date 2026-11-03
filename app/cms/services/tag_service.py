@@ -46,6 +46,9 @@ class TagService:
     def get_tag(self, db: Session, tag_id: int) -> Optional[CmsTag]:
         return db.query(CmsTag).filter(CmsTag.id == tag_id).first()
 
+    def get_tag_by_slug(self, db: Session, slug: str) -> Optional[CmsTag]:
+        return db.query(CmsTag).filter(CmsTag.slug == slug).first()
+
     def get_tags_by_ids(self, db: Session, tag_ids: List[int]) -> List[CmsTag]:
         if not tag_ids:
             return []

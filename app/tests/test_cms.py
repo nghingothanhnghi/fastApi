@@ -605,3 +605,70 @@ def test_delete_tag_merge_into(client):
 def test_delete_tag_admin_only(client):
     t = _tag(client, "X")
     assert client.delete(f"/cms/tags/{t['id']}", headers=AUTH["mod"]).status_code == 403
+
+
+# ── frontend gaps: slug lookups, is_featured filter, sort ────────────────
+def test_category_and_tag_lookup_by_slug_is_public(client):
+    cat = _cat(client, "Hydro Tips")
+    tag = _tag(client, "Nutrients")
+    r = client.get(f"/cms/categories/slug/{cat['slug']}")          # no auth header
+    assert r.status_code == 200 and r.json()["id"] == cat["id"]
+    r = client.get(f"/cms/tags/slug/{tag['slug']}")
+    assert r.status_code == 200 and r.json()["id"] == tag["id"]
+    assert client.get("/cms/categories/slug/nope").status_code == 404
+    assert client.get("/cms/tags/slug/nope").status_code == 404
+    # the id route still works next to the slug route
+    assert client.get(f"/cms/categories/{cat['id']}").status_code == 200
+
+
+def _titles(client, query="", who=None):
+    r = client.get(f"/cms/posts?{query}", headers=AUTH[who] if who else {})
+    assert r.status_code == 200, r.text
+    return [p["title"] for p in r.json()["results"]]
+
+
+def test_is_featured_filter(client):
+    _post(client, title="Hero", status="published", is_featured=True)
+    _post(client, title="Normal", status="published")
+    assert _titles(client, "is_featured=true") == ["Hero"]
+    assert _titles(client, "is_featured=false") == ["Normal"]
+    assert sorted(_titles(client)) == ["Hero", "Normal"]            # omitted -> no filter
+    assert client.get("/cms/posts?is_featured=maybe").status_code == 422
+
+
+def test_sort_by_published_at_and_defaults(client):
+    a = _post(client, title="A")                                     # created first
+    b = _post(client, title="B")
+    c = _post(client, title="C")                                     # stays a draft
+    h = AUTH["author"]
+    client.post(f"/cms/posts/{b['id']}/publish", headers=h)         # B goes live first...
+    client.post(f"/cms/posts/{a['id']}/publish", headers=h)         # ...then A
+
+    # default is unchanged (created_at desc): newest created first
+    assert _titles(client) == ["B", "A"]
+    assert _titles(client, "", "mod") == ["C", "B", "A"]
+    # published_at desc: most recently published first
+    assert _titles(client, "sort=published_at") == ["A", "B"]
+    assert _titles(client, "sort=published_at&order=asc") == ["B", "A"]
+    # unpublished posts (no publish date) sort last in a "newest" list for editors
+    assert _titles(client, "sort=published_at&status=draft", "mod") == ["C"]
+    assert _titles(client, "sort=published_at", "mod") == ["A", "B", "C"]
+
+
+def test_sort_by_title_view_count_and_validation(client):
+    x = _post(client, title="Banana", status="published")
+    _post(client, title="Apple", status="published")
+    client.get(f"/cms/posts/slug/{x['slug']}")                       # Banana: 1 view
+    assert _titles(client, "sort=title&order=asc") == ["Apple", "Banana"]
+    assert _titles(client, "sort=view_count") == ["Banana", "Apple"]
+    assert client.get("/cms/posts?sort=password").status_code == 422   # whitelist only
+    assert client.get("/cms/posts?order=sideways").status_code == 422
+
+
+def test_sorting_paginates_stably(client):
+    for i in range(5):
+        _post(client, title=f"P{i}", status="published")             # equal view_count (0)
+    seen = []
+    for page in (1, 2, 3):
+        seen += _titles(client, f"sort=view_count&page={page}&page_size=2")
+    assert sorted(seen) == ["P0", "P1", "P2", "P3", "P4"]            # no dupes, none missing

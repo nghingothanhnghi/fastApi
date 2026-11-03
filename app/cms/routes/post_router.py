@@ -1,7 +1,7 @@
 # app/cms/routes/post_router.py
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Literal, Optional
 
 from app.database import get_db
 from app.user.utils.token import get_current_user, get_current_user_optional
@@ -57,6 +57,11 @@ def list_posts(
     tag_id: Optional[int] = Query(None),
     author_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, description="Search in title/excerpt"),
+    is_featured: Optional[bool] = Query(None, description="Only featured (true) or only non-featured (false) posts"),
+    sort: Literal["created_at", "published_at", "title", "view_count"] = Query(
+        "created_at", description="Sort key. Use published_at for a public feed (drafts sort last)"
+    ),
+    order: Literal["asc", "desc"] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
@@ -78,7 +83,8 @@ def list_posts(
             )
         status_filter = PostStatus.published
     return post_controller.list_posts(
-        db, status_filter, post_type, category_id, tag_id, author_id, search, page, page_size
+        db, status_filter, post_type, category_id, tag_id, author_id, search, page, page_size,
+        is_featured=is_featured, sort=sort, order=order,
     )
 
 

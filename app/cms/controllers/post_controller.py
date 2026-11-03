@@ -42,6 +42,9 @@ class PostController:
         search: Optional[str],
         page: int,
         page_size: int,
+        is_featured: Optional[bool] = None,
+        sort: str = "created_at",
+        order: str = "desc",
     ):
         posts, total = post_service.list_posts(
             db,
@@ -53,6 +56,9 @@ class PostController:
             search=search,
             page=page,
             page_size=page_size,
+            is_featured=is_featured,
+            sort=sort,
+            order=order,
         )
         return {"results": posts, "total": total, "page": page, "page_size": page_size}
 

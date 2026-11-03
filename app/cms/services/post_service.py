@@ -20,6 +20,14 @@ logger = get_logger(__name__)
 
 class PostService:
 
+    # Whitelisted sort keys for list_posts (never interpolate user input into ORDER BY).
+    SORT_COLUMNS = {
+        "created_at": CmsPost.created_at,
+        "published_at": CmsPost.published_at,
+        "title": CmsPost.title,
+        "view_count": CmsPost.view_count,
+    }
+
     def _base_query(self, db: Session):
         # Eager-load everything the PostOut/PostListItem schemas need, in one query.
         return db.query(CmsPost).options(
@@ -124,6 +132,9 @@ class PostService:
         search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        is_featured: Optional[bool] = None,
+        sort: str = "created_at",
+        order: str = "desc",
     ) -> Tuple[List[CmsPost], int]:
         query = self._base_query(db)
 
@@ -137,14 +148,23 @@ class PostService:
             query = query.filter(CmsPost.author_id == author_id)
         if tag_id:
             query = query.filter(CmsPost.tags.any(id=tag_id))
+        if is_featured is not None:
+            query = query.filter(CmsPost.is_featured == is_featured)
         if search:
             like = f"%{search}%"
             query = query.filter(or_(CmsPost.title.ilike(like), CmsPost.excerpt.ilike(like)))
 
         total = query.with_entities(func.count(CmsPost.id.distinct())).scalar()
 
+        sort_column = self.SORT_COLUMNS.get(sort, CmsPost.created_at)
+        descending = order != "asc"
+        primary = sort_column.desc() if descending else sort_column.asc()
+        if sort == "published_at":
+            primary = primary.nullslast()  # drafts (no publish date) never lead a "newest" list
+        tiebreak = CmsPost.id.desc() if descending else CmsPost.id.asc()  # stable pagination
+
         posts = (
-            query.order_by(CmsPost.created_at.desc())
+            query.order_by(primary, tiebreak)
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()

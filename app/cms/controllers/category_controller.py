@@ -20,6 +20,13 @@ class CategoryController:
         return category
 
     @staticmethod
+    def get_category_by_slug(db: Session, slug: str):
+        category = category_service.get_category_by_slug(db, slug)
+        if not category:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+        return category
+
+    @staticmethod
     def get_all_categories(db: Session, parent_id: Optional[int] = None):
         return category_service.get_all_categories(db, parent_id)
 

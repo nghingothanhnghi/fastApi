@@ -42,6 +42,9 @@ These are behaviour changes since the module's first version. Update clients acc
 | Menus | Untyped responses; list included items | Typed. `GET /cms/menus` returns **summaries without `items`**. Links to unpublished posts have `resolved_url: null` |
 | Slug races | Occasional 500 | Retried server-side; at worst **409** |
 | Delete responses | `{detail}` | Category/tag deletes also return move/affected counts |
+| `GET /auth/me` | No roles | Includes `roles` (active roles only) |
+| Category / tag lookup | By id only (tags: none) | `GET /cms/categories/slug/{slug}` and `GET /cms/tags/slug/{slug}` (public) |
+| Post list | Always newest-created first | New `is_featured`, `sort` (`created_at` default, `published_at`, `title`, `view_count`) and `order` (`desc` default, `asc`) params; defaults unchanged |
 
 ---
 
@@ -120,6 +123,9 @@ export interface MenuSummary {
 }
 export interface Menu extends MenuSummary { items: MenuItem[] }
 
+export interface Role { id: number; name: string; display_name: string; is_active: boolean; permissions: string[] | null }
+export interface Me { id: number; username: string; email: string; roles: Role[] }  // trimmed: more profile fields exist
+
 export interface ApiErrorBody { detail: string | { loc: (string | number)[]; msg: string; type: string }[] }
 ```
 
@@ -146,22 +152,21 @@ export async function login(base: string, username: string, password: string) {
 - Token lifetime defaults to **30 days** (`ACCESS_TOKEN_EXPIRE_MINUTES=43200`). There is **no refresh token**; on `401` send the user to login.
 - Store the token in memory plus a persistent store appropriate to your platform (secure storage on mobile). Since auth is a bearer header, no cookies/CSRF handling is needed.
 
-### Finding out the user's roles (important)
+### Finding out the user's roles
 
-`GET /auth/me` returns the profile but **does not include roles**. Fetch them separately; a user may read their own roles:
+`GET /auth/me` returns the profile **with the caller's active roles**:
 
 ```ts
 export async function loadSession(api: Api) {
-  const me = await api.get<{ id: number; username: string }>("/auth/me");
-  const roles = await api.get<{ name: string }[]>(`/roles/user/${me.id}`);
-  const names = new Set(roles.map((r) => r.name));          // "super_admin" | "admin" | "moderator" | "user" | "manager"
+  const me = await api.get<Me>("/auth/me");
+  const names = new Set(me.roles.map((r) => r.name));       // "super_admin" | "admin" | "moderator" | "user" | "manager"
   const isEditor = ["super_admin", "admin", "moderator"].some((r) => names.has(r));
   const isAdmin = ["super_admin", "admin"].some((r) => names.has(r));
   return { me, isEditor, isAdmin };
 }
 ```
 
-Use roles only to **show or hide UI**. The backend is the source of truth and returns 403.
+Inactive roles are not listed. Use roles only to **show or hide UI**. The backend is the source of truth and returns 403.
 
 ### Permission matrix (as enforced today)
 
@@ -262,14 +267,19 @@ All CMS messages are English literals (not localized by the i18n middleware); ma
 ```ts
 export const loadFeed = (api: Api, page = 1) =>
   api.get<Paginated<PostListItem>>("/cms/posts", {
-    status: "published", post_type: "post", page, page_size: 12,
+    status: "published", post_type: "post", sort: "published_at", order: "desc", page, page_size: 12,
+  });
+
+export const loadFeatured = (api: Api, limit = 3) =>
+  api.get<Paginated<PostListItem>>("/cms/posts", {
+    status: "published", is_featured: true, sort: "published_at", page_size: limit,
   });
 ```
 
 - Anonymous callers always get published posts; the `status` param is optional for them (passing `published` is fine, anything else is 403).
-- **Sort order is `created_at` descending**, not `published_at`. A post scheduled later still sorts by when it was created (see [gaps](#11-known-gaps-and-suggested-backend-additions)).
+- **Default sort is still `created_at` descending** (kept for backward compatibility). For a public feed pass **`sort=published_at`** so scheduled and re-published posts appear by go-live date. Other keys: `title`, `view_count`; `order=asc|desc`. Posts without a publish date (drafts, visible to editors only) sort last under `published_at`. Ties are broken by id, so paging is stable. Unknown `sort`/`order` values are rejected with 422.
 - Filters: `category_id` (exact category, **does not include descendants**), `tag_id`, `author_id`, `search` (case-insensitive match on **title and excerpt only**, not content).
-- There is **no `is_featured` filter**. For a hero/featured block fetch a page and filter `is_featured` client-side, or request the backend addition.
+- `is_featured=true|false` filters featured posts (omit for no filter); see `loadFeatured` above for a hero block.
 
 ### Post / page detail (SEO-critical)
 
@@ -301,7 +311,17 @@ export const loadMenu = (api: Api, location: string) =>
 ### Category and tag pages
 
 - Categories are a **flat list** with `parent_id`; build the tree on the client (`GET /cms/categories`). The list endpoint cannot return top-level only (see gaps).
-- There is **no lookup by slug** for categories or tags. For `/categories/:slug`, load the list once (cache it) and find the slug locally, then call `GET /cms/posts?category_id=<id>`. Same for tags (`GET /cms/tags`, then `tag_id`).
+- Resolve slugs with `GET /cms/categories/slug/{slug}` and `GET /cms/tags/slug/{slug}` (public, 404 when unknown), then list posts with `category_id` / `tag_id`:
+
+```ts
+export async function loadCategoryPage(api: Api, slug: string, page = 1) {
+  const category = await api.get<Category>(`/cms/categories/slug/${encodeURIComponent(slug)}`);
+  const posts = await api.get<Paginated<PostListItem>>("/cms/posts", {
+    status: "published", category_id: category.id, sort: "published_at", page,
+  });
+  return { category, posts };
+}
+```
 
 ### Caching
 
@@ -428,13 +448,14 @@ Consequences to design around:
 
 | Purpose | Request | Response |
 |---|---|---|
-| List posts | `GET /cms/posts?status&post_type&category_id&tag_id&author_id&search&page&page_size` | `Paginated<PostListItem>` |
+| Current user | `GET /auth/me` | `Me` (with `roles`) |
+| List posts | `GET /cms/posts?status&post_type&category_id&tag_id&author_id&search&is_featured&sort&order&page&page_size` | `Paginated<PostListItem>` |
 | Post by slug | `GET /cms/posts/slug/{slug}?track_view` | `Post` |
 | Post by id | `GET /cms/posts/{id}` | `Post` |
 | Create / update / delete post | `POST /cms/posts` · `PUT /cms/posts/{id}` · `DELETE /cms/posts/{id}` | `Post` / `Post` / `{detail}` |
 | Publish / archive / schedule | `POST /cms/posts/{id}/publish` · `/archive` · `/schedule {scheduled_at}` | `Post` |
-| Categories | `GET /cms/categories[?parent_id]` · `GET /{id}` · `POST` · `PUT /{id}` · `DELETE /{id}[?reassign_to]` | `Category[]` / `Category` / `{detail, moved_*}` |
-| Tags | `GET /cms/tags` · `POST` · `DELETE /{id}[?force][&merge_into]` | `Tag[]` / `Tag` / `{detail, posts_*}` |
+| Categories | `GET /cms/categories[?parent_id]` · `GET /{id}` · `GET /slug/{slug}` · `POST` · `PUT /{id}` · `DELETE /{id}[?reassign_to]` | `Category[]` / `Category` / `{detail, moved_*}` |
+| Tags | `GET /cms/tags` · `GET /slug/{slug}` · `POST` · `DELETE /{id}[?force][&merge_into]` | `Tag[]` / `Tag` / `{detail, posts_*}` |
 | Media | `POST /cms/media/upload` · `GET /cms/media?skip&limit` · `GET /{id}` · `PATCH /{id}` · `DELETE /{id}` | `Media` |
 | Menus | `GET /cms/menus` · `GET /cms/menus/location/{loc}` · `GET /cms/menus/{id}` · `POST` · `PUT /{id}` · `DELETE /{id}` | `MenuSummary[]` / `Menu` |
 | Menu items | `POST /cms/menus/{id}/items` · `PUT /cms/menus/items/{itemId}` · `DELETE /cms/menus/items/{itemId}` · `POST /cms/menus/{id}/items/reorder` | `MenuItem` / `MenuItem[]` |
@@ -456,11 +477,11 @@ Things a frontend will run into today, with the workaround and the backend chang
 
 | # | Gap | Workaround today | Suggested backend change |
 |---|---|---|---|
-| 1 | `/auth/me` has no roles | `GET /roles/user/{id}` | Return `roles` in `UserOut` (or a `/auth/me/permissions`) |
-| 2 | No category or tag lookup by slug (`/categories/:slug` pages) | Cache the full list, find locally | `GET /cms/categories/slug/{slug}`, `GET /cms/tags/slug/{slug}` (the service already has `get_category_by_slug`) |
+| ~~1~~ | ~~`/auth/me` has no roles~~ **Resolved** | | |
+| ~~2~~ | ~~No category or tag lookup by slug~~ **Resolved** | | |
 | 3 | Category list is flat; cannot request top-level only; no tree endpoint | Build tree client-side | `?tree=true` using the existing `CategoryWithChildren` schema; `?root=true` |
-| 4 | Post list sorted by `created_at`, not `published_at` | Re-sort client-side per page (inexact across pages) | `order_by=published_at` option; default public feed to `published_at desc` |
-| 5 | No `is_featured` filter | Filter client-side | `is_featured` query param |
+| ~~4~~ | ~~Post list only sortable by `created_at`~~ **Resolved** with `sort`/`order` (the default is still `created_at desc`, so pass `sort=published_at`) | | |
+| ~~5~~ | ~~No `is_featured` filter~~ **Resolved** | | |
 | 6 | Category filter excludes descendants | Fetch child ids from the tree and call per id | `include_children=true` |
 | 7 | View counting only via `GET .../slug` (`track_view`), no de-duplication | `track_view=false` on SSR/bots | `POST /cms/posts/{id}/view` with de-dup |
 | 8 | Search covers title and excerpt only | Accept | Full-text search (PostgreSQL `tsvector`) |
@@ -471,7 +492,7 @@ Things a frontend will run into today, with the workaround and the backend chang
 | 13 | Menu links to unpublished or deleted posts silently become `resolved_url: null`; deleting a post does not warn about menu items | Hide null items | Block post delete (409) while a menu item references it, like categories |
 | 14 | Uploads on ephemeral disk | See [§10](#10-deployment-and-environment-notes-for-the-frontend-team) | Persistent disk or S3/R2 backend |
 
-If you want any of these, items 1, 2, 4, 5 and 7 are small and low-risk.
+Items 1, 2, 4 and 5 are done. Item 7 (view endpoint) is the next small, low-risk one.
 
 ---
 
@@ -479,10 +500,10 @@ If you want any of these, items 1, 2, 4, 5 and 7 are small and low-risk.
 
 - [ ] Types generated from `/openapi.json`; CI diff check
 - [ ] Single `Api` wrapper with 401 handling and `ApiError` → form mapping
-- [ ] Login via form-encoded `/auth/login`; roles loaded via `/roles/user/{id}`
-- [ ] Public pages use `status=published`, `track_view=false` on SSR, and absolute media URLs
+- [ ] Login via form-encoded `/auth/login`; roles read from `/auth/me`
+- [ ] Public pages use `status=published`, `sort=published_at`, `track_view=false` on SSR, and absolute media URLs
 - [ ] Menu renderer uses `resolved_url`, skips `null`, supports nested children
-- [ ] `/categories/:slug` and `/posts/:slug` routes exist (menu links point to them)
+- [ ] `/categories/:slug` and `/posts/:slug` routes exist (menu links point to them) and resolve slugs via the `/slug/{slug}` endpoints
 - [ ] Editor: classes instead of inline styles, uploads instead of base64, no iframes
 - [ ] Post form sends partial updates; replaces state from the response; handles 409/400/422
 - [ ] Delete dialogs for categories/tags offer `reassign_to` / `merge_into` / `force`

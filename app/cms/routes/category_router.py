@@ -21,6 +21,12 @@ def list_categories(
     return category_controller.get_all_categories(db, parent_id)
 
 
+@router.get("/slug/{slug}", response_model=CategoryOut)
+def get_category_by_slug(slug: str, db: Session = Depends(get_db)):
+    """Public: resolve a category from its URL slug (e.g. for /categories/:slug pages)."""
+    return category_controller.get_category_by_slug(db, slug)
+
+
 @router.get("/{category_id}", response_model=CategoryOut)
 def get_category(category_id: int, db: Session = Depends(get_db)):
     return category_controller.get_category(db, category_id)
