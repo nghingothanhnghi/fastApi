@@ -9,6 +9,7 @@ from app.user.models.user import User
 from app.user.enums.role_enum import RoleEnum
 from app.cms.config import DEFAULT_MEDIA_LIMIT, MAX_MEDIA_LIMIT
 from app.cms.schemas.media import MediaOut
+from app.cms.schemas.common import DeleteOut
 from app.cms.controllers.media_controller import media_controller
 
 router = APIRouter(prefix="/cms/media", tags=["CMS - Media"])
@@ -61,7 +62,7 @@ def update_media(
     return media_controller.update_media(db, media_id, alt_text)
 
 
-@router.delete("/{media_id}")
+@router.delete("/{media_id}", response_model=DeleteOut)
 def delete_media(
     media_id: int,
     db: Session = Depends(get_db),

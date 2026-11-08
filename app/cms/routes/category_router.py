@@ -6,7 +6,7 @@ from typing import List, Optional
 from app.database import get_db
 from app.user.utils.role_requirements import require_roles
 from app.user.enums.role_enum import RoleEnum
-from app.cms.schemas.category import CategoryCreate, CategoryUpdate, CategoryOut
+from app.cms.schemas.category import CategoryCreate, CategoryUpdate, CategoryOut, CategoryDeleteOut
 from app.cms.controllers.category_controller import category_controller
 
 router = APIRouter(prefix="/cms/categories", tags=["CMS - Categories"])
@@ -51,7 +51,7 @@ def update_category(
     return category_controller.update_category(db, category_id, data)
 
 
-@router.delete("/{category_id}")
+@router.delete("/{category_id}", response_model=CategoryDeleteOut)
 def delete_category(
     category_id: int,
     reassign_to: Optional[int] = Query(None, description="Move child categories and posts here instead of to the parent"),

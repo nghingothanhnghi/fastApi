@@ -4,6 +4,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from app.cms.models.menu import MenuItemTargetType
+from app.cms.schemas.common import NonNullableUpdateMixin
 
 
 class MenuItemBase(BaseModel):
@@ -29,7 +30,9 @@ class MenuItemCreate(MenuItemBase):
     pass
 
 
-class MenuItemUpdate(BaseModel):
+class MenuItemUpdate(NonNullableUpdateMixin):
+    non_nullable_fields = frozenset({"label", "target_type", "order", "open_in_new_tab", "is_active"})
+
     label: Optional[str] = None
     target_type: Optional[MenuItemTargetType] = None
     url: Optional[str] = None
@@ -61,7 +64,9 @@ class MenuCreate(MenuBase):
     slug: Optional[str] = Field(None, description="Auto-generated from name if omitted")
 
 
-class MenuUpdate(BaseModel):
+class MenuUpdate(NonNullableUpdateMixin):
+    non_nullable_fields = frozenset({"name", "slug"})
+
     name: Optional[str] = None
     slug: Optional[str] = None
     location: Optional[str] = None

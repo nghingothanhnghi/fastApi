@@ -7,6 +7,8 @@ from fastapi import HTTPException, status
 
 from app.cms.models.post import CmsPost, PostStatus, PostType
 from app.cms.models.category import CmsCategory
+from app.cms.models.menu import MenuItemTargetType
+from app.cms.services.menu_service import menu_service
 from app.cms.models.media import CmsMedia
 from app.cms.schemas.post import PostCreate, PostUpdate
 from app.cms.services.tag_service import tag_service
@@ -121,6 +123,17 @@ class PostService:
     def get_post_by_slug(self, db: Session, slug: str) -> Optional[CmsPost]:
         return self._base_query(db).filter(CmsPost.slug == slug).first()
 
+    @staticmethod
+    def _category_with_descendants(db: Session, category_id: int) -> List[int]:
+        """`category_id` plus the ids of every category below it (breadth-first, cycle-safe)."""
+        found = {category_id}
+        frontier = [category_id]
+        while frontier:
+            rows = db.query(CmsCategory.id).filter(CmsCategory.parent_id.in_(frontier)).all()
+            frontier = [r[0] for r in rows if r[0] not in found]
+            found.update(frontier)
+        return list(found)
+
     def list_posts(
         self,
         db: Session,
@@ -135,6 +148,7 @@ class PostService:
         is_featured: Optional[bool] = None,
         sort: str = "created_at",
         order: str = "desc",
+        include_descendants: bool = False,
     ) -> Tuple[List[CmsPost], int]:
         query = self._base_query(db)
 
@@ -143,7 +157,10 @@ class PostService:
         if post_type:
             query = query.filter(CmsPost.post_type == post_type)
         if category_id:
-            query = query.filter(CmsPost.category_id == category_id)
+            if include_descendants:
+                query = query.filter(CmsPost.category_id.in_(self._category_with_descendants(db, category_id)))
+            else:
+                query = query.filter(CmsPost.category_id == category_id)
         if author_id:
             query = query.filter(CmsPost.author_id == author_id)
         if tag_id:
@@ -230,13 +247,34 @@ class PostService:
         saved_id = run_with_slug_retry(db, operation)
         return self.get_post(db, saved_id) if saved_id else None
 
-    def delete_post(self, db: Session, post_id: int) -> bool:
+    def delete_post(self, db: Session, post_id: int, force: bool = False) -> Optional[dict]:
+        """
+        Delete a post without leaving dangling menu links.
+
+        - Menu items with target_type='post' pointing at it -> 409 (naming menu and item)...
+        - ...unless `force=True`: those items are deleted together with the post (same ORM delete
+          as DELETE /cms/menus/items/{id}, so their child items are handled identically).
+
+        Returns {"detail", "menu_items_removed"}, or None when the post does not exist.
+        """
         post = db.query(CmsPost).filter(CmsPost.id == post_id).first()
         if not post:
-            return False
+            return None
+
+        linked = menu_service.find_items_targeting(db, MenuItemTargetType.post, post_id)
+        if linked and not force:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Post is linked from {len(linked)} menu item(s): {menu_service.describe_items(linked)}; "
+                    "remove them first or pass force=true to delete the post and those menu items"
+                ),
+            )
+        for item, _menu_name in linked:
+            db.delete(item)
         db.delete(post)
         db.commit()
-        return True
+        return {"detail": "Post deleted successfully", "menu_items_removed": len(linked)}
 
     def increment_view_count(self, db: Session, post_id: int) -> None:
         db.query(CmsPost).filter(CmsPost.id == post_id).update(

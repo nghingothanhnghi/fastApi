@@ -7,6 +7,7 @@ from app.cms.models.post import PostStatus, PostType
 from app.cms.schemas.tag import TagOut
 from app.cms.schemas.category import CategoryOut
 from app.cms.schemas.media import MediaOut
+from app.cms.schemas.common import NonNullableUpdateMixin
 
 
 class PostBase(BaseModel):
@@ -36,7 +37,9 @@ class PostCreate(PostBase):
     tag_ids: List[int] = []
 
 
-class PostUpdate(BaseModel):
+class PostUpdate(NonNullableUpdateMixin):
+    non_nullable_fields = frozenset({"title", "slug", "content", "post_type", "status", "is_featured"})
+
     title: Optional[str] = None
     slug: Optional[str] = None
     excerpt: Optional[str] = None
@@ -123,3 +126,11 @@ class PaginatedPosts(BaseModel):
     total: int
     page: int
     page_size: int
+    pages: int = Field(..., description="ceil(total / page_size); 0 when there are no results")
+
+
+class PostDeleteOut(BaseModel):
+    detail: str
+    menu_items_removed: int = Field(
+        ..., description="Menu items removed because they linked to the post (only non-zero with ?force=true)"
+    )

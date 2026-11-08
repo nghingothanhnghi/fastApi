@@ -115,6 +115,23 @@ class MenuService:
         db.refresh(item)
         return item
 
+    def find_items_targeting(self, db: Session, target_type: MenuItemTargetType, target_id: int) -> List[tuple]:
+        """Menu items pointing at a category/post as [(CmsMenuItem, menu name)], ordered by menu then item."""
+        return (
+            db.query(CmsMenuItem, CmsMenu.name)
+            .join(CmsMenu, CmsMenu.id == CmsMenuItem.menu_id)
+            .filter(CmsMenuItem.target_type == target_type, CmsMenuItem.target_id == target_id)
+            .order_by(CmsMenu.name.asc(), CmsMenuItem.id.asc())
+            .all()
+        )
+
+    @staticmethod
+    def describe_items(rows: List[tuple], limit: int = 5) -> str:
+        """'"Header" > "About", "Footer" > "About us"' (first `limit`, then '... and N more')."""
+        shown = ", ".join(f'"{menu_name}" > "{item.label}"' for item, menu_name in rows[:limit])
+        extra = len(rows) - limit
+        return f"{shown}, ... and {extra} more" if extra > 0 else shown
+
     def get_item(self, db: Session, item_id: int) -> Optional[CmsMenuItem]:
         return db.query(CmsMenuItem).filter(CmsMenuItem.id == item_id).first()
 
@@ -140,6 +157,14 @@ class MenuService:
 
         target_type = update_data.get("target_type", item.target_type)
         target_id = update_data.get("target_id", item.target_id)
+        # `url: null` is allowed (e.g. when switching to a post/category target), but the merged
+        # result must still be valid: a custom item without a url cannot be serialised.
+        if ("target_type" in update_data or "url" in update_data) and target_type == MenuItemTargetType.custom:
+            if not update_data.get("url", item.url):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="url is required when target_type is 'custom'",
+                )
         if "target_type" in update_data or "target_id" in update_data:
             self._validate_target(db, target_type, target_id)
 

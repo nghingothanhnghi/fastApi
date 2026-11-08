@@ -672,3 +672,310 @@ def test_sorting_paginates_stably(client):
     for page in (1, 2, 3):
         seen += _titles(client, f"sort=view_count&page={page}&page_size=2")
     assert sorted(seen) == ["P0", "P1", "P2", "P3", "P4"]            # no dupes, none missing
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Frontend-integration round: partial updates, typed deletes, menu-safe post
+# delete, `pages`, tag update, include_descendants
+# ═══════════════════════════════════════════════════════════════════════════
+def _menu(client, name="Header", location=None):
+    body = {"name": name, **({"location": location} if location else {})}
+    r = client.post("/cms/menus", json=body, headers=AUTH["mod"])
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _item(client, menu_id, **body):
+    r = client.post(f"/cms/menus/{menu_id}/items", json=body, headers=AUTH["mod"])
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+# ── A1: update semantics (omit = keep, null = clear, null on required = 422) ──
+def test_post_update_null_clears_optional_fields_and_empty_body_changes_nothing(client):
+    cat = _cat(client, "News")
+    media_id = client.post(
+        "/cms/media/upload", files={"file": ("a.png", io.BytesIO(PNG), "image/png")}, headers=AUTH["author"]
+    ).json()["id"]
+    when = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    p = _post(
+        client, excerpt="ex", meta_title="mt", meta_description="md",
+        category_id=cat["id"], featured_image_id=media_id, status="scheduled", scheduled_at=when,
+    )
+    h = AUTH["author"]
+
+    before = client.get(f"/cms/posts/{p['id']}", headers=h).json()
+    r = client.put(f"/cms/posts/{p['id']}", json={}, headers=h)
+    assert r.status_code == 200
+    assert r.json() == before                                   # {} touches nothing (incl. updated_at)
+
+    for field in ("excerpt", "meta_title", "meta_description", "category_id", "featured_image_id"):
+        r = client.put(f"/cms/posts/{p['id']}", json={field: None}, headers=h)
+        assert r.status_code == 200, (field, r.text)
+        assert r.json()[field] is None, field
+        # ...and nothing else moved
+        assert r.json()["title"] == "Hello World" and r.json()["content"] == "x"
+    assert r.json()["scheduled_at"] is not None                  # untouched by the nulls above
+
+    # scheduled_at can be cleared once the post is no longer 'scheduled'
+    r = client.put(f"/cms/posts/{p['id']}", json={"status": "draft", "scheduled_at": None}, headers=h)
+    assert r.status_code == 200 and r.json()["scheduled_at"] is None and r.json()["status"] == "draft"
+
+
+def test_post_update_omitted_fields_are_kept(client):
+    p = _post(client, excerpt="keep me", meta_title="mt")
+    r = client.put(f"/cms/posts/{p['id']}", json={"title": "New title"}, headers=AUTH["author"])
+    assert r.status_code == 200
+    assert r.json()["excerpt"] == "keep me" and r.json()["meta_title"] == "mt"
+
+
+@pytest.mark.parametrize("field", ["title", "slug", "content", "post_type", "status", "is_featured"])
+def test_post_update_null_on_required_field_is_422(client, field):
+    p = _post(client)
+    r = client.put(f"/cms/posts/{p['id']}", json={field: None}, headers=AUTH["author"])
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"][0]["loc"][-1] == field
+    after = client.get(f"/cms/posts/{p['id']}", headers=AUTH["author"]).json()
+    assert after["title"] == "Hello World" and after["status"] == "draft"
+
+
+def test_category_update_null_clears_and_empty_changes_nothing(client):
+    parent = _cat(client, "Parent")
+    c = client.post(
+        "/cms/categories", json={"name": "Child", "description": "d", "parent_id": parent["id"]}, headers=AUTH["mod"]
+    ).json()
+    h = AUTH["mod"]
+
+    assert client.put(f"/cms/categories/{c['id']}", json={}, headers=h).json() == _cat_of(client, c["id"]) == c
+    r = client.put(f"/cms/categories/{c['id']}", json={"description": None}, headers=h)
+    assert r.status_code == 200 and r.json()["description"] is None and r.json()["parent_id"] == parent["id"]
+    r = client.put(f"/cms/categories/{c['id']}", json={"parent_id": None}, headers=h)
+    assert r.status_code == 200 and r.json()["parent_id"] is None and r.json()["name"] == "Child"
+
+    for field in ("name", "slug"):
+        assert client.put(f"/cms/categories/{c['id']}", json={field: None}, headers=h).status_code == 422
+
+
+def test_menu_update_null_clears_location_and_rejects_null_name(client):
+    m = _menu(client, "Header", "header")
+    h = AUTH["mod"]
+    assert client.put(f"/cms/menus/{m['id']}", json={}, headers=h).json()["location"] == "header"
+    r = client.put(f"/cms/menus/{m['id']}", json={"location": None}, headers=h)
+    assert r.status_code == 200 and r.json()["location"] is None and r.json()["name"] == "Header"
+    assert client.get("/cms/menus/location/header").status_code == 404
+    for field in ("name", "slug"):
+        assert client.put(f"/cms/menus/{m['id']}", json={field: None}, headers=h).status_code == 422
+
+
+def test_menu_item_update_null_clears_and_rejects_null_required(client):
+    mid = _menu(client)["id"]
+    h = AUTH["mod"]
+    parent = _item(client, mid, label="Parent", url="/p")
+    post = _post(client, status="published")
+    child = _item(client, mid, label="Child", url="/c", parent_id=parent["id"])
+
+    assert client.put(f"/cms/menus/items/{child['id']}", json={}, headers=h).json() == {**child, "resolved_url": "/c"}
+
+    # parent_id null = "No parent"
+    r = client.put(f"/cms/menus/items/{child['id']}", json={"parent_id": None}, headers=h)
+    assert r.status_code == 200 and r.json()["parent_id"] is None and r.json()["label"] == "Child"
+
+    # switch custom -> post and clear the url in one request
+    r = client.put(
+        f"/cms/menus/items/{child['id']}",
+        json={"target_type": "post", "target_id": post["id"], "url": None}, headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["url"] is None and r.json()["resolved_url"] == f"/posts/{post['slug']}"
+
+    # ...and clear target_id again by going back to a custom link
+    r = client.put(
+        f"/cms/menus/items/{child['id']}", json={"target_type": "custom", "url": "/x", "target_id": None}, headers=h
+    )
+    assert r.status_code == 200 and r.json()["target_id"] is None and r.json()["resolved_url"] == "/x"
+
+    for field in ("label", "target_type", "order", "open_in_new_tab", "is_active"):
+        r = client.put(f"/cms/menus/items/{child['id']}", json={field: None}, headers=h)
+        assert r.status_code == 422, (field, r.text)
+
+    # clearing the url of a custom item would leave an unserialisable item -> 422, not a 500
+    assert client.put(f"/cms/menus/items/{child['id']}", json={"url": None}, headers=h).status_code == 422
+    assert client.get(f"/cms/menus/{mid}", headers=h).status_code == 200
+
+
+# ── A2: typed delete bodies ──────────────────────────────────────────────
+def test_delete_endpoints_declare_response_models(client):
+    spec = client.get("/openapi.json").json()
+    for path in ("/cms/posts/{post_id}", "/cms/media/{media_id}", "/cms/menus/{menu_id}",
+                 "/cms/menus/items/{item_id}", "/cms/categories/{category_id}", "/cms/tags/{tag_id}"):
+        schema = spec["paths"][path]["delete"]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema.get("$ref"), f"DELETE {path} has an untyped 200 body"
+
+
+def test_delete_response_shapes(client):
+    h = AUTH["admin"]
+    cat = _cat(client, "C")
+    assert set(client.delete(f"/cms/categories/{cat['id']}", headers=h).json()) == {
+        "detail", "moved_children", "moved_posts", "moved_to_category_id"}
+    tag = _tag(client, "T")
+    assert set(client.delete(f"/cms/tags/{tag['id']}", headers=h).json()) == {
+        "detail", "posts_affected", "merged_into_tag_id", "posts_moved"}
+    p = _post(client)
+    assert client.delete(f"/cms/posts/{p['id']}", headers=h).json() == {
+        "detail": "Post deleted successfully", "menu_items_removed": 0}
+    m = _menu(client)
+    it = _item(client, m["id"], label="A", url="/a")
+    assert client.delete(f"/cms/menus/items/{it['id']}", headers=h).json() == {"detail": "Menu item deleted successfully"}
+    assert client.delete(f"/cms/menus/{m['id']}", headers=h).json() == {"detail": "Menu deleted successfully"}
+
+
+# ── A3: post delete vs menu items ────────────────────────────────────────
+def test_delete_post_blocked_by_menu_item_names_menu_and_item(client):
+    p = _post(client, status="published")
+    h = AUTH["author"]
+    header, footer = _menu(client, "Header"), _menu(client, "Footer")
+    _item(client, header["id"], label="About us", target_type="post", target_id=p["id"])
+    _item(client, footer["id"], label="Our story", target_type="post", target_id=p["id"])
+
+    r = client.delete(f"/cms/posts/{p['id']}", headers=h)
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert '"Header" > "About us"' in d and '"Footer" > "Our story"' in d and "force=true" in d
+    assert client.get(f"/cms/posts/{p['id']}").status_code == 200       # nothing deleted
+
+
+def test_delete_post_force_removes_menu_items_and_reports_count(client):
+    p = _post(client, status="published")
+    other = _post(client, title="Other", status="published")
+    cat = _cat(client, "Cat")
+    header, footer = _menu(client, "Header"), _menu(client, "Footer")
+    _item(client, header["id"], label="About us", target_type="post", target_id=p["id"])
+    _item(client, footer["id"], label="Our story", target_type="post", target_id=p["id"])
+    keep_other = _item(client, header["id"], label="Other", target_type="post", target_id=other["id"])
+    keep_cat = _item(client, header["id"], label="Cat", target_type="category", target_id=cat["id"])
+    keep_custom = _item(client, header["id"], label="Custom", url="/c")
+
+    # an author may delete their post but force-removing editor-managed menu items needs an editor
+    assert client.delete(f"/cms/posts/{p['id']}?force=true", headers=AUTH["author"]).status_code == 403
+    assert client.get(f"/cms/posts/{p['id']}").status_code == 200
+
+    r = client.delete(f"/cms/posts/{p['id']}?force=true", headers=AUTH["mod"])
+    assert r.status_code == 200 and r.json() == {"detail": "Post deleted successfully", "menu_items_removed": 2}
+    assert client.get(f"/cms/posts/{p['id']}").status_code == 404
+
+    # only the two items that pointed at the post are gone
+    remaining = {i["id"] for i in client.get(f"/cms/menus/{header['id']}?active_only=false").json()["items"]}
+    assert remaining == {keep_other["id"], keep_cat["id"], keep_custom["id"]}
+    assert client.get(f"/cms/menus/{footer['id']}").json()["items"] == []
+
+
+def test_delete_post_force_requires_editor_even_without_links_and_unknown_post_is_404(client):
+    p = _post(client)
+    assert client.delete(f"/cms/posts/{p['id']}?force=true", headers=AUTH["author"]).status_code == 403
+    assert client.get(f"/cms/posts/{p['id']}", headers=AUTH["author"]).status_code == 200
+    assert client.delete(f"/cms/posts/{p['id']}?force=true", headers=AUTH["mod"]).json()["menu_items_removed"] == 0
+    assert client.delete("/cms/posts/9999", headers=AUTH["admin"]).status_code == 404
+
+
+def test_delete_post_without_links_still_works_for_author(client):
+    p = _post(client)
+    r = client.delete(f"/cms/posts/{p['id']}", headers=AUTH["author"])
+    assert r.status_code == 200 and r.json()["menu_items_removed"] == 0
+
+
+def test_delete_post_force_handles_child_items_like_item_delete(client):
+    p = _post(client, status="published")
+    m = _menu(client)
+    parent = _item(client, m["id"], label="Parent", target_type="post", target_id=p["id"])
+    child = _item(client, m["id"], label="Child", url="/c", parent_id=parent["id"])
+    r = client.delete(f"/cms/posts/{p['id']}?force=true", headers=AUTH["admin"])
+    assert r.json()["menu_items_removed"] == 1
+    # same outcome as DELETE /cms/menus/items/{id}: the menu stays readable
+    assert client.get(f"/cms/menus/{m['id']}?active_only=false").status_code == 200
+    ids = [i["id"] for i in client.get(f"/cms/menus/{m['id']}?active_only=false").json()["items"]]
+    assert parent["id"] not in ids
+
+
+def test_delete_category_409_names_menu_and_item(client):
+    cat = _cat(client, "Cat")
+    m = _menu(client, "Main")
+    _item(client, m["id"], label="News", target_type="category", target_id=cat["id"])
+    r = client.delete(f"/cms/categories/{cat['id']}", headers=AUTH["admin"])
+    assert r.status_code == 409 and '"Main" > "News"' in r.json()["detail"] and "menu item" in r.json()["detail"]
+
+
+# ── B4: pages ────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("n,page_size,pages", [(0, 2, 0), (1, 2, 1), (4, 2, 2), (5, 2, 3)])
+def test_paginated_posts_has_pages(client, n, page_size, pages):
+    for i in range(n):
+        _post(client, title=f"P{i}", status="published")
+    r = client.get(f"/cms/posts?page_size={page_size}")
+    assert r.status_code == 200
+    assert r.json()["pages"] == pages and r.json()["total"] == n
+
+
+# ── B5: tag update ───────────────────────────────────────────────────────
+def test_tag_update_name_slug_and_permissions(client):
+    t = _tag(client, "Hydroponic")
+    h = AUTH["mod"]
+    url = f"/cms/tags/{t['id']}"
+
+    assert client.put(url, json={"name": "x"}, headers=AUTH["author"]).status_code == 403
+    assert client.put(url, json={"name": "x"}).status_code == 401
+
+    r = client.put(url, json={}, headers=h)                               # nothing changes
+    assert r.status_code == 200 and r.json() == t
+
+    r = client.put(url, json={"name": "  Hydroponics  "}, headers=h)
+    assert r.status_code == 200 and r.json()["name"] == "Hydroponics" and r.json()["slug"] == t["slug"]
+
+    r = client.put(url, json={"slug": "Nutrient Mix!"}, headers=h)
+    assert r.status_code == 200 and r.json()["slug"] == "nutrient-mix" and r.json()["name"] == "Hydroponics"
+    assert client.get("/cms/tags/slug/nutrient-mix").json()["id"] == t["id"]
+
+    assert client.put(f"/cms/tags/9999", json={"name": "x"}, headers=h).status_code == 404
+    assert client.put(url, json={"name": ""}, headers=h).status_code == 422
+    assert client.put(url, json={"name": "   "}, headers=h).status_code == 422
+    assert client.put(url, json={"name": "a" * 101}, headers=h).status_code == 422
+    assert client.put(url, json={"name": None}, headers=h).status_code == 422
+    assert client.put(url, json={"slug": None}, headers=h).status_code == 422
+
+
+def test_tag_update_duplicates_are_409_but_own_values_are_fine(client):
+    a, b = _tag(client, "Alpha"), _tag(client, "Beta")
+    h = AUTH["admin"]
+    assert client.put(f"/cms/tags/{b['id']}", json={"name": "alpha"}, headers=h).status_code == 409   # case-insensitive
+    assert client.put(f"/cms/tags/{b['id']}", json={"slug": a["slug"]}, headers=h).status_code == 409
+    # re-sending its own name/slug (or just changing case) is not a conflict
+    assert client.put(f"/cms/tags/{a['id']}", json={"name": "ALPHA", "slug": a["slug"]}, headers=h).status_code == 200
+    assert client.get("/cms/tags/slug/" + b["slug"]).json()["name"] == "Beta"   # b untouched by the failures
+
+
+# ── B6: include_descendants ──────────────────────────────────────────────
+def test_posts_filter_include_descendants(client):
+    root = _cat(client, "Root")
+    mid = _cat(client, "Mid", root["id"])
+    leaf = _cat(client, "Leaf", mid["id"])
+    sibling = _cat(client, "Sibling", root["id"])
+    other = _cat(client, "Other")
+    ids = {}
+    for name, c in [("in-root", root), ("in-mid", mid), ("in-leaf", leaf), ("in-sibling", sibling), ("in-other", other)]:
+        ids[name] = _post(client, title=name, status="published", category_id=c["id"])["id"]
+
+    def listed(qs):
+        r = client.get(f"/cms/posts?{qs}")
+        assert r.status_code == 200, r.text
+        return sorted(p["title"] for p in r.json()["results"])
+
+    # default and explicit false: exact category only
+    assert listed(f"category_id={root['id']}") == ["in-root"]
+    assert listed(f"category_id={root['id']}&include_descendants=false") == ["in-root"]
+    # recursive
+    assert listed(f"category_id={root['id']}&include_descendants=true") == ["in-leaf", "in-mid", "in-root", "in-sibling"]
+    assert listed(f"category_id={mid['id']}&include_descendants=true") == ["in-leaf", "in-mid"]
+    assert listed(f"category_id={leaf['id']}&include_descendants=true") == ["in-leaf"]
+    # without category_id the flag is a no-op
+    assert len(listed("include_descendants=true")) == 5
+    # total/pages reflect the recursive match
+    r = client.get(f"/cms/posts?category_id={root['id']}&include_descendants=true&page_size=3").json()
+    assert r["total"] == 4 and r["pages"] == 2

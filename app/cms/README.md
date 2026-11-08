@@ -66,6 +66,7 @@ Auth legend: **public** = no auth, **user** = any logged-in user, **mod** = ADMI
 | GET | `` | public |
 | GET | `/slug/{slug}` | public |
 | POST | `` | mod |
+| PUT | `/{id}` | mod |
 | DELETE | `/{id}` (`?force=`, `?merge_into=`) | admin |
 
 ### Media `/cms/media`
@@ -108,6 +109,7 @@ Deleting never silently orphans content.
 - `?reassign_to=<category id>` moves them to that category instead (must exist, must not be the category itself or one of its descendants: 400).
 - **409** while a menu item links to the category; remove or repoint the item first.
 - Response: `{detail, moved_children, moved_posts, moved_to_category_id}`.
+- The 409 message names each linking menu and item, e.g. `"Header" > "News"`.
 
 **Tags** (`DELETE /cms/tags/{id}`, admin)
 - Unused tag: deleted.
@@ -115,7 +117,14 @@ Deleting never silently orphans content.
 - `?force=true` detaches the tag from its posts and deletes it. `?merge_into=<tag id>` gives those posts the other tag (no duplicates) and then deletes.
 - Response: `{detail, posts_affected, merged_into_tag_id, posts_moved}`.
 
-Not covered yet: deleting a **post** or **menu target** that a menu item links to leaves that item without a link (`resolved_url: null`).
+**Posts** (`DELETE /cms/posts/{id}`, author or editor)
+- **409** while a menu item with `target_type=post` links to the post; the message names each menu and item (`"Header" > "About us"`).
+- `?force=true` (editors only, 403 otherwise) deletes the post **and** those menu items. Child items of a removed item are handled exactly as in `DELETE /cms/menus/items/{id}` (they stay in the menu, promoted to top level).
+- Response: `{detail, menu_items_removed}`.
+
+## Partial updates (PUT)
+
+`PUT` on posts, categories, menus, menu items and tags is a partial update: **omitted = unchanged, explicit `null` = clear** (optional fields only). `null` on a field that can never be empty (post `title/slug/content/post_type/status/is_featured`, category/menu/tag `name/slug`, menu item `label/target_type/order/open_in_new_tab/is_active`) is a **422**. `{}` changes nothing.
 
 ## Typical flows
 

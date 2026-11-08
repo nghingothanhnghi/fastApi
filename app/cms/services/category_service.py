@@ -3,7 +3,8 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.category import CmsCategory
-from app.cms.models.menu import CmsMenuItem, MenuItemTargetType
+from app.cms.models.menu import MenuItemTargetType
+from app.cms.services.menu_service import menu_service
 from app.cms.models.post import CmsPost
 from app.cms.schemas.category import CategoryCreate, CategoryUpdate
 from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
@@ -105,15 +106,14 @@ class CategoryService:
         if not category:
             return None
 
-        in_menus = (
-            db.query(CmsMenuItem.id)
-            .filter(CmsMenuItem.target_type == MenuItemTargetType.category, CmsMenuItem.target_id == category_id)
-            .count()
-        )
+        in_menus = menu_service.find_items_targeting(db, MenuItemTargetType.category, category_id)
         if in_menus:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Category is linked from {in_menus} menu item(s); remove or repoint them first",
+                detail=(
+                    f"Category is linked from {len(in_menus)} menu item(s): "
+                    f"{menu_service.describe_items(in_menus)}; remove or repoint them first"
+                ),
             )
 
         if reassign_to is not None:

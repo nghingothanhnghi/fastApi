@@ -10,6 +10,7 @@ from app.cms.schemas.menu import (
     MenuCreate, MenuUpdate, MenuItemCreate, MenuItemUpdate, MenuReorderRequest,
     MenuOut, MenuSummary, MenuItemOut,
 )
+from app.cms.schemas.common import DeleteOut
 from app.cms.controllers.menu_controller import menu_controller
 
 router = APIRouter(prefix="/cms/menus", tags=["CMS - Menus"])
@@ -58,7 +59,7 @@ def update_menu(
     return menu_controller.update_menu(db, menu_id, data)
 
 
-@router.delete("/{menu_id}")
+@router.delete("/{menu_id}", response_model=DeleteOut)
 def delete_menu(
     menu_id: int,
     db: Session = Depends(get_db),
@@ -87,7 +88,7 @@ def update_menu_item(
     return menu_controller.update_item(db, item_id, data)
 
 
-@router.delete("/items/{item_id}")
+@router.delete("/items/{item_id}", response_model=DeleteOut)
 def delete_menu_item(
     item_id: int,
     db: Session = Depends(get_db),

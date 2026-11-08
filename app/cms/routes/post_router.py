@@ -9,7 +9,7 @@ from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.cms.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.cms.models.post import PostStatus, PostType
-from app.cms.schemas.post import PostCreate, PostUpdate, PostOut, PaginatedPosts, PostScheduleRequest
+from app.cms.schemas.post import PostCreate, PostUpdate, PostOut, PaginatedPosts, PostScheduleRequest, PostDeleteOut
 from app.cms.controllers.post_controller import post_controller
 from app.cms.services.post_service import post_service
 
@@ -54,6 +54,9 @@ def list_posts(
     status_filter: Optional[PostStatus] = Query(None, alias="status"),
     post_type: Optional[PostType] = Query(None),
     category_id: Optional[int] = Query(None),
+    include_descendants: bool = Query(
+        False, description="With category_id: also match posts in all child categories (recursive)"
+    ),
     tag_id: Optional[int] = Query(None),
     author_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, description="Search in title/excerpt"),
@@ -85,6 +88,7 @@ def list_posts(
     return post_controller.list_posts(
         db, status_filter, post_type, category_id, tag_id, author_id, search, page, page_size,
         is_featured=is_featured, sort=sort, order=order,
+        include_descendants=include_descendants,
     )
 
 
@@ -126,15 +130,19 @@ def update_post(
     return post_controller.update_post(db, post_id, data)
 
 
-@router.delete("/{post_id}")
+@router.delete("/{post_id}", response_model=PostDeleteOut)
 def delete_post(
     post_id: int,
+    force: bool = Query(False, description="Also delete menu items that link to this post (editors only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     post = post_controller.get_post(db, post_id)
     _ensure_owner_or_editor(post, current_user)
-    return post_controller.delete_post(db, post_id)
+    if force and not _is_editor(current_user):
+        # Menu items are editor-managed; an author must not be able to wipe them as a side effect.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="force=true requires an editor role")
+    return post_controller.delete_post(db, post_id, force)
 
 
 @router.post("/{post_id}/publish", response_model=PostOut)
