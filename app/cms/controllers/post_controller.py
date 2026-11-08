@@ -2,6 +2,7 @@
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+import math
 from typing import Optional
 
 from app.cms.services.post_service import post_service
@@ -45,6 +46,7 @@ class PostController:
         is_featured: Optional[bool] = None,
         sort: str = "created_at",
         order: str = "desc",
+        include_descendants: bool = False,
     ):
         posts, total = post_service.list_posts(
             db,
@@ -59,8 +61,15 @@ class PostController:
             is_featured=is_featured,
             sort=sort,
             order=order,
+            include_descendants=include_descendants,
         )
-        return {"results": posts, "total": total, "page": page, "page_size": page_size}
+        return {
+            "results": posts,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": math.ceil(total / page_size) if page_size else 0,
+        }
 
     @staticmethod
     def update_post(db: Session, post_id: int, data: PostUpdate):
@@ -70,11 +79,11 @@ class PostController:
         return post
 
     @staticmethod
-    def delete_post(db: Session, post_id: int):
-        success = post_service.delete_post(db, post_id)
-        if not success:
+    def delete_post(db: Session, post_id: int, force: bool = False):
+        result = post_service.delete_post(db, post_id, force)
+        if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-        return {"detail": "Post deleted successfully"}
+        return result
 
     @staticmethod
     def publish_post(db: Session, post_id: int):

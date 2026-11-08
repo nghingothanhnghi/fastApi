@@ -19,7 +19,7 @@ Everything here was verified against the code and the generated OpenAPI (`GET /o
 | IDs / slugs | Integer ids. Slugs are unique per resource, server-generated, and may get a `-2`, `-3` suffix |
 | CORS | Origins come from env `CORS_ALLOWED_ORIGINS` (comma list) or `FRONTEND_URL`, default `http://localhost:5173`. Credentials allowed, all methods/headers |
 | Media files | Served as static files from the API origin at `/static/cms_media/<uuid>.<ext>` (`MediaOut.url` is **relative**) |
-| Pagination | Posts: `page` + `page_size` (default 20, max 100) with `total`. Media: `skip` + `limit` (default 50, max 200), no total. Categories/tags/menus: not paginated |
+| Pagination | Posts: `page` + `page_size` (default 20, max 100) with `total` and `pages`; `category_id` + `include_descendants=true` also matches child categories. Media: `skip` + `limit` (default 50, max 200), no total. Categories/tags/menus: not paginated |
 
 ---
 
@@ -392,11 +392,11 @@ export const setAlt = (api: Api, id: number, alt: string) =>
 
 - Create/update need an editor; delete needs an admin.
 - `parent_id` must exist and cannot be the category itself or a descendant (400).
-- Delete: `DELETE /cms/categories/{id}[?reassign_to=<id>]`. Default behaviour moves child categories and posts up to the parent (top-level: children become top-level, posts become uncategorised). Response `{detail, moved_children, moved_posts, moved_to_category_id}`; show a confirmation naming the counts. 409 if a menu item links to it.
+- Delete: `DELETE /cms/categories/{id}[?reassign_to=<id>]`. Default behaviour moves child categories and posts up to the parent (top-level: children become top-level, posts become uncategorised). Response `{detail, moved_children, moved_posts, moved_to_category_id}`; show a confirmation naming the counts. 409 if a menu item links to it (the message names the menu and item).
 
 ### Tags
 
-- Only list, create and delete exist (no update, no get-by-id).
+- List, create, **update** (`PUT /cms/tags/{id}` `{name?, slug?}`, editor; 409 on duplicate name/slug; renaming keeps the slug) and delete exist (no get-by-id).
 - Duplicate name (case-insensitive) → 409; for free-text tag inputs, check your cached tag list first and reuse the existing tag's id.
 - Delete: 409 when the tag is in use; offer **"Merge into…"** (`?merge_into=<id>`) or **"Remove from all posts and delete"** (`?force=true`). Response `{detail, posts_affected, merged_into_tag_id, posts_moved}`.
 
@@ -452,10 +452,10 @@ Consequences to design around:
 | List posts | `GET /cms/posts?status&post_type&category_id&tag_id&author_id&search&is_featured&sort&order&page&page_size` | `Paginated<PostListItem>` |
 | Post by slug | `GET /cms/posts/slug/{slug}?track_view` | `Post` |
 | Post by id | `GET /cms/posts/{id}` | `Post` |
-| Create / update / delete post | `POST /cms/posts` · `PUT /cms/posts/{id}` · `DELETE /cms/posts/{id}` | `Post` / `Post` / `{detail}` |
+| Create / update / delete post | `POST /cms/posts` · `PUT /cms/posts/{id}` · `DELETE /cms/posts/{id}[?force]` | `Post` / `Post` / `{detail, menu_items_removed}` (409 while a menu item links to it; `force` is editor-only) |
 | Publish / archive / schedule | `POST /cms/posts/{id}/publish` · `/archive` · `/schedule {scheduled_at}` | `Post` |
 | Categories | `GET /cms/categories[?parent_id]` · `GET /{id}` · `GET /slug/{slug}` · `POST` · `PUT /{id}` · `DELETE /{id}[?reassign_to]` | `Category[]` / `Category` / `{detail, moved_*}` |
-| Tags | `GET /cms/tags` · `GET /slug/{slug}` · `POST` · `DELETE /{id}[?force][&merge_into]` | `Tag[]` / `Tag` / `{detail, posts_*}` |
+| Tags | `GET /cms/tags` · `GET /slug/{slug}` · `POST` · `PUT /{id}` · `DELETE /{id}[?force][&merge_into]` | `Tag[]` / `Tag` / `{detail, posts_*}` |
 | Media | `POST /cms/media/upload` · `GET /cms/media?skip&limit` · `GET /{id}` · `PATCH /{id}` · `DELETE /{id}` | `Media` |
 | Menus | `GET /cms/menus` · `GET /cms/menus/location/{loc}` · `GET /cms/menus/{id}` · `POST` · `PUT /{id}` · `DELETE /{id}` | `MenuSummary[]` / `Menu` |
 | Menu items | `POST /cms/menus/{id}/items` · `PUT /cms/menus/items/{itemId}` · `DELETE /cms/menus/items/{itemId}` · `POST /cms/menus/{id}/items/reorder` | `MenuItem` / `MenuItem[]` |
@@ -489,7 +489,7 @@ Things a frontend will run into today, with the workaround and the backend chang
 | 10 | No slug redirects when a slug changes | Avoid renaming published posts | Slug history table + 301 handling |
 | 11 | No optimistic locking | Compare `updated_at` client-side | `If-Match`/version field |
 | 12 | Media list has no `total`; unused-in-content files are not tracked | Page until short | Add `total`; usage tracking |
-| 13 | Menu links to unpublished or deleted posts silently become `resolved_url: null`; deleting a post does not warn about menu items | Hide null items | Block post delete (409) while a menu item references it, like categories |
+| 13 | Menu links to unpublished or deleted posts silently become `resolved_url: null`; unpublished posts still give `resolved_url: null` | Hide null items | _(post delete is now blocked with 409 while a menu item references it; `?force=true` removes the items)_ |
 | 14 | Uploads on ephemeral disk | See [§10](#10-deployment-and-environment-notes-for-the-frontend-team) | Persistent disk or S3/R2 backend |
 
 Items 1, 2, 4 and 5 are done. Item 7 (view endpoint) is the next small, low-risk one.

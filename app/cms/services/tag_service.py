@@ -1,11 +1,11 @@
 # app/cms/services/tag_service.py
 from typing import List, Optional
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.cms.models.tag import CmsTag
 from app.cms.models.post import cms_post_tags
-from app.cms.schemas.tag import TagCreate
+from app.cms.schemas.tag import TagCreate, TagUpdate
 from app.cms.utils.slugify import slugify, make_unique_slug, run_with_slug_retry
 
 
@@ -56,6 +56,37 @@ class TagService:
 
     def get_all_tags(self, db: Session) -> List[CmsTag]:
         return db.query(CmsTag).order_by(CmsTag.name.asc()).all()
+
+    def update_tag(self, db: Session, tag_id: int, data: TagUpdate) -> Optional[CmsTag]:
+        """
+        Rename / re-slug a tag. Omitted fields are untouched. A duplicate name or slug is a 409
+        (unlike create, which silently suffixes the slug: here the caller asked for that exact slug).
+        Renaming does NOT regenerate the slug, so existing /tags/<slug> URLs keep working.
+        """
+        if not self.get_tag(db, tag_id):
+            return None
+        update_data = data.model_dump(exclude_unset=True)
+
+        def operation() -> Optional[int]:
+            obj = self.get_tag(db, tag_id)  # re-read: a retry follows a rollback
+            if obj is None:
+                return None
+            if "name" in update_data:
+                name = update_data["name"]
+                clash = db.query(CmsTag.id).filter(func.lower(CmsTag.name) == name.lower(), CmsTag.id != tag_id).first()
+                if clash:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Tag '{name}' already exists")
+                obj.name = name
+            if "slug" in update_data:
+                slug = slugify(update_data["slug"])
+                if db.query(CmsTag.id).filter(CmsTag.slug == slug, CmsTag.id != tag_id).first():
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Tag slug '{slug}' already exists")
+                obj.slug = slug
+            db.commit()
+            return obj.id
+
+        saved_id = run_with_slug_retry(db, operation)
+        return self.get_tag(db, saved_id) if saved_id else None
 
     def delete_tag(
         self, db: Session, tag_id: int, force: bool = False, merge_into: Optional[int] = None
