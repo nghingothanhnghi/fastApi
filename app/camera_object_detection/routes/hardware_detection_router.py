@@ -120,6 +120,16 @@ async def get_hardware_detections(
     detections = hardware_detection_service.get_hardware_detections(db, filters)
     return detections
 
+@router.get("/summary", response_model=List[HardwareDetectionSummaryResponse])
+async def get_hardware_detection_summaries(
+    location: Optional[str] = Query(None, description="Filter by location"),
+    db: Session = Depends(get_db),
+):
+    """Get hardware detection summaries, optionally filtered by location"""
+    try:
+        return hardware_detection_service.get_hardware_detection_summaries(db, location)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.patch("/{detection_id}", response_model=HardwareDetectionResponse)
 async def patch_hardware_detection(
@@ -350,3 +360,5 @@ def get_camera_sources_by_location(
     Get distinct camera sources for a given location.
     """
     return hardware_detection_service.get_camera_sources_by_location(db, location)
+
+
