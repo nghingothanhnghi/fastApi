@@ -159,7 +159,7 @@ async def validate_hardware_detection(
         # Broadcast validation event
         detection_dict = detection.dict() if hasattr(detection, 'dict') else detection.__dict__
         location = detection_dict.get('location', 'unknown')
-        validation_status = validation_data.is_valid
+        validation_status = validation_data.is_validated
         asyncio.create_task(broadcast_detection_validated(detection_dict, location, validation_status))
         
         return detection
