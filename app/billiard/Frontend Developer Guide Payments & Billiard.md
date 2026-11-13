@@ -1,12 +1,23 @@
 # Frontend Developer Guide: Payments & Billiard
 
-Oct 24, 2026 · @Someone
+Updated Nov 13, 2026 · @Someone
 
 ## Start here
 
 The frontend needs about 25 endpoints to run a billiard table from start to payment: open a table, add drinks, stop the session, take payment, run the cash drawer and review bank transfers. Generate types from the backend's OpenAPI file, and use this guide for the screens and rules the schema cannot tell you.
 
 New to the project? Read "The whole process, start to finish" first. It follows one session from the first tap to the receipt, then the screen-by-screen sections explain each part in detail.
+
+### What changed since Oct 24
+
+| Change | What to do in the frontend |
+| --- | --- |
+| `GET /auth/me` now returns `roles` | Use it to decide whether to show manager buttons. The old "no roles" workaround is no longer needed (see "Who sees which buttons") |
+| `POST /payments/` and `PATCH /payments/{id}` are admin only (the auth fix is merged) | Nothing to change. Billiard screens never used them |
+| `GET /payments/bank-feed/transactions` is paged (`limit` 1 to 200, default 50, and `offset`) | Add paging to the manager inbox (screen 6) |
+| Scoreboard endpoints for the games played in a session | New: see "Extra billiard screens" |
+| Pricing rules and a price quote | New: see "Extra billiard screens". The bill's `pricing_rule_name` comes from these |
+| Table usage report and table creation (manager) | New: see "Extra billiard screens" |
 
 ### Set up
 
@@ -31,10 +42,15 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 | Cash drawer | `/payments/shifts...` | `Shift` or `ShiftSummary` |
 | Manager bank inbox | `/payments/bank-feed/transactions...` | `BankTransaction` |
 | Another business later | `/payments/orders/{source_type}/{source_id}/...` | `Order` (same lines as the bill) |
+| Scoreboard | `/sessions/{id}/games`, `/games/{id}/score`, `/games/{id}/reset`, `/games/{id}/new`, `/games/{id}/finish` | `Game`, `NewGameResponse` |
+| Pricing rules and quote | `/billiard/pricing-rules`, `/billiard/pricing-rules/quote` | `PricingRule[]`, `PricingQuote` |
+| Manager reports and set-up | `/reports/tables/usage`, `POST /tables` | `TableUsageReport`, `Table` |
+
+`/controller/...` (events, sync, state, register) is for the table controller devices (ESP32), not for the frontend. Do not build screens on it.
 
 Billiard screens should use the `/sessions/{id}/pay...` URLs because they return the full bill, so one response redraws the whole screen. The `/payments/orders/...` URLs return the payment part only. For billiard they work too, with `source_type` set to `billiard_session` and `source_id` set to the session id, but you do not need them.
 
-Do not build billiard screens on `POST /payments/`, `PATCH /payments/{id}` or `/payments/stripe/*`. Those are back-office routes for administrators (admin or super admin only). A cashier gets a `403` there. `POST /payments/` and `PATCH /payments/{id}` had no login check at all until the fix on branch `fix/payments-require-admin-auth`, so do not rely on them being open. Everything a cashier needs is under `/sessions`, `/tables` and `/payments/shifts`.
+Do not build billiard screens on `POST /payments/`, `PATCH /payments/{id}` or `/payments/stripe/*`. Those are back-office routes for administrators (admin or super admin only). A cashier gets a `403` there. `POST /payments/` and `PATCH /payments/{id}` used to have no login check at all; the fix is merged and they now require an admin. Everything a cashier needs is under `/sessions`, `/tables` and `/payments/shifts`.
 
 ## The whole process, start to finish
 
@@ -70,7 +86,7 @@ The lifecycle of one bill, so you know which step is allowed when:
 
 `POST /auth/login` takes form data (`username`, `password`), not JSON, and returns `{"access_token": "...", "token_type": "bearer"}`. Send the token as `Authorization: Bearer <token>` from now on. The token expires, and a `401` anywhere means send the user to login and then back to the same screen.
 
-`GET /auth/me` returns the user but not their roles (see the gaps at the end). Keep whatever role information your login flow gets, because it decides whether to show manager buttons.
+Right after login, call `GET /auth/me`. It returns the user with a `roles` list (each role has a `name` such as `"manager"`). Keep it, because it decides whether to show manager buttons (see "Who sees which buttons").
 
 ### Step 2. Open the shift
 
@@ -307,11 +323,44 @@ Two more rules from the server. There is one open shift per club, so a second ca
 
 ### 6. Manager bank inbox
 
-A list from `GET /payments/bank-feed/transactions?status=needs_review`, with tabs for `unmatched`, `matched` and `ignored`. Each row shows the amount, the transfer `content`, the `reason`, and the time.
+A list from `GET /payments/bank-feed/transactions?status=needs_review`, with tabs for `unmatched`, `matched` and `ignored`. Each row shows the amount, the transfer `content`, the `reason`, and the time. The list is paged: `limit` is 1 to 200 (default 50) and `offset` skips rows, so add a "Load more" button that raises `offset` by `limit` until a page comes back shorter than `limit`.
 
 - **Ignore** asks for a note and calls `POST /payments/bank-feed/transactions/{id}/ignore`.
 - **Assign** links the money to a waiting transfer line: `POST /payments/bank-feed/transactions/{id}/assign` with `{"line_id": 7}`. The amount must equal the line's amount, so show the line's amount next to the transaction and block a mismatch.
 - There is no endpoint that lists every waiting transfer line. For assign, let the manager open the bill (`GET /sessions/{id}`) and pick the pending transfer line from `payments[]`.
+
+## Extra billiard screens
+
+These do not touch payment, but they sit on the same table and session screens.
+
+### 7. Scoreboard (games inside a session)
+
+A running session can have games, and each game keeps a score for player A and player B. Only one game can be active in a session at a time.
+
+| Action | Call | Notes |
+| --- | --- | --- |
+| List the games | `GET /sessions/{id}/games` | `Game[]` |
+| Start a game | `POST /sessions/{id}/games` (no body, `201`) | `409 Session is not active` once the session is stopped, `409 Session already has an active game` if one is running |
+| Change a score | `POST /games/{game_id}/score` with `{"player": "A", "delta": 1}` | `delta` is -10 to 10 and never 0. `409 Score cannot go below 0` |
+| Reset the score | `POST /games/{game_id}/reset` | Back to 0 to 0 |
+| Next game | `POST /games/{game_id}/new` | Completes this game and opens the next at 0 to 0. The session and its billing timer are not touched. Returns `{finished, started}` |
+| Finish | `POST /games/{game_id}/finish` | Completes this game without starting another |
+
+Use `+1` and `-1` buttons. Replace the game in your list with the one the server returns, and never add to the score locally. Games can be changed only while the game and the session are active, so on `409` reload the list.
+
+### 8. Pricing rules and price quote
+
+The table fee on the bill comes from the pricing rules; the bill shows the rule that applied in `pricing_rule_name` and `pricing_params`.
+
+- `GET /billiard/pricing-rules` lists the rules. Any logged-in user can read them. Managers create (`POST`), change (`PUT /{rule_id}`) and delete (`DELETE /{rule_id}`) them.
+- A rule has a `rule_type`: `per_minute`, `hourly`, `block` (set `params.block_minutes`, 1 to 1440) or `minimum_hour` (set `params.min_minutes`, 1 to 1440). Other `params` keys are dropped by the server.
+- A rule can be limited to one `table_id`, to days (`days_of_week` such as `"sat,sun"`) and to a time window. `start_time` and `end_time` must be sent together. When several rules match, the highest `priority` wins, and a rule for one specific table beats an all-tables rule of the same priority.
+- `GET /billiard/pricing-rules/quote?table_id=1&minutes=90` answers "what would 90 minutes cost now" and writes nothing. Use it for a price preview on the table tile. `at` is optional; unlike other timestamps, a time without an offset in `at` means the club's local time, not UTC.
+
+### 9. Manager set-up and report
+
+- `POST /tables` with `{"name": "T05", "hourly_rate": 100000}` adds a table (managers only, `201`). The name is 1 to 50 characters and the rate must be above 0.
+- `GET /reports/tables/usage?start_date=...&end_date=...` returns one row per table and a `totals` row. The dates filter on the session's end time. Revenue columns count paid sessions only, and `unpaid_total` is money for sessions that were stopped but not yet paid.
 
 ## State to UI rules
 
@@ -355,11 +404,21 @@ Cash lines are `completed` as soon as they are created, so a pending cash line o
 | Action | Allowed for |
 | --- | --- |
 | Pay, Received, Cancel, open shift, pay-in or pay-out | Any logged-in user of the club |
+| Scoreboard (start a game, change score, reset, new game, finish) | Any logged-in user of the club |
+| Price quote, list pricing rules | Any logged-in user of the club |
 | Void a line | Manager or admin |
 | List, assign or ignore bank transactions | Manager or admin |
+| Create a table, create, change or delete a pricing rule, table usage report | Manager or admin |
 | Close a shift | The user who opened it, or a manager |
 
-A gap you need to know about: `GET /auth/me` does not return roles, and the endpoints that do (`GET /users`) are for administration. Until the backend adds roles to `/auth/me`, use the role information your login flow already keeps. If you have none, show manager buttons to everyone and turn a `403` into the message "Only a manager can do this". The server enforces every rule, so a visible button never gives access it should not.
+`GET /auth/me` returns `roles`, so decide from it. Role names are `super_admin`, `admin`, `manager`, `moderator` and `user`. The server always lets a `super_admin` through, so treat `super_admin`, `admin` and `manager` as managers:
+
+```ts
+const MANAGER_ROLES = ["super_admin", "admin", "manager"];
+const isManager = (me: Me) => me.roles.some(r => MANAGER_ROLES.includes(r.name));
+```
+
+Use it only to hide buttons. The server enforces every rule, so a `403` can still happen (for example a role change while the app is open). Turn it into the message "Only a manager can do this".
 
 ## TypeScript types
 
@@ -407,6 +466,24 @@ interface PaymentLine {
 
 ```ts
 type TableStatus = "available" | "playing" | "reserved" | "maintenance";
+
+interface Role {                     // inside GET /auth/me
+  id: number;
+  name: string;                      // "super_admin" | "admin" | "manager" | "moderator" | "user"
+  display_name: string;
+  description: string | null;
+  is_active: boolean;
+  permissions: string[] | null;
+  is_system_role: boolean;
+  created_at: ISODate;
+  updated_at: ISODate | null;
+}
+interface Me {                       // GET /auth/me (only the fields the screens use)
+  id: number;
+  username: string;
+  client_id: string | null;
+  roles: Role[];
+}
 
 interface Table {                    // GET /tables
   id: number;
@@ -457,6 +534,82 @@ interface AddItemRequest {           // POST /sessions/{id}/items
   product_id: number;
   variant_id?: number | null;
   quantity: number;                  // 1 to 1000
+}
+
+interface CreateTableRequest { name: string; hourly_rate: number }   // POST /tables (manager)
+```
+
+### Scoreboard, pricing and report
+
+```ts
+type GameStatus = "active" | "completed" | "cancelled";
+interface Game {                     // /sessions/{id}/games and /games/{id}/...
+  id: number;
+  session_id: number;
+  game_number: number;
+  start_time: ISODate;
+  end_time: ISODate | null;
+  player_a_score: number;
+  player_b_score: number;
+  status: GameStatus;
+}
+interface ScoreChangeRequest { player: "A" | "B"; delta: number }   // -10 to 10, not 0
+interface NewGameResponse { finished: Game; started: Game }
+
+type PricingRuleType = "per_minute" | "hourly" | "block" | "minimum_hour";
+interface PricingRule {              // GET /billiard/pricing-rules
+  id: number;
+  name: string;
+  rule_type: PricingRuleType;
+  hourly_rate: Money | null;
+  params: Record<string, unknown> | null;   // block: { block_minutes }, minimum_hour: { min_minutes }
+  table_id: number | null;           // null = every table
+  days_of_week: string | null;       // "sat,sun"; null = every day
+  start_time: string | null;         // "18:00:00"; sent together with end_time
+  end_time: string | null;
+  priority: number;                  // 0 to 1000
+  is_active: boolean;
+  created_at: ISODate;
+}
+interface PricingRuleRequest {       // POST (all needed fields) and PUT (any field)
+  name: string;                      // 1 to 100 characters
+  rule_type: PricingRuleType;
+  hourly_rate?: number;              // above 0
+  params?: Record<string, unknown>;
+  table_id?: number | null;
+  days_of_week?: string | null;      // mon,tue,wed,thu,fri,sat,sun
+  start_time?: string | null;
+  end_time?: string | null;
+  priority?: number;
+  is_active?: boolean;
+}
+interface PricingQuote {             // GET /billiard/pricing-rules/quote
+  table_id: number;
+  at: ISODate;
+  minutes: number;
+  rule_id: number | null;
+  rule_name: string | null;
+  rule_type: string;
+  hourly_rate: Money;
+  params: Record<string, unknown>;
+  fee: Money;
+}
+
+interface TableUsageRow {
+  table_id: number;
+  table_name: string;
+  times_played: number;
+  total_minutes: number;
+  table_revenue: Money;              // paid sessions only
+  product_revenue: Money;            // paid sessions only
+  total_revenue: Money;              // paid sessions only
+  unpaid_total: Money;               // stopped but not yet paid
+}
+interface TableUsageReport {         // GET /reports/tables/usage
+  period_start: ISODate | null;
+  period_end: ISODate | null;
+  rows: TableUsageRow[];
+  totals: TableUsageRow;
 }
 ```
 
@@ -718,8 +871,34 @@ export const api = {
   moveCash: (id: number, b: MovementRequest) => request<ShiftSummary>("POST", `/payments/shifts/${id}/movements`, b),
   closeShift: (id: number, b: CloseShiftRequest) => request<ShiftSummary>("POST", `/payments/shifts/${id}/close`, b),
 
-  bankTransactions: (status?: BankTxStatus) =>                    // manager only
-    request<BankTransaction[]>("GET", `/payments/bank-feed/transactions${status ? `?status=${status}` : ""}`),
+  me: () => request<Me>("GET", "/auth/me"),
+
+  games:       (sessionId: number) => request<Game[]>("GET", `/sessions/${sessionId}/games`),
+  startGame:   (sessionId: number) => request<Game>("POST", `/sessions/${sessionId}/games`),
+  changeScore: (gameId: number, b: ScoreChangeRequest) => request<Game>("POST", `/games/${gameId}/score`, b),
+  resetScore:  (gameId: number) => request<Game>("POST", `/games/${gameId}/reset`),
+  newGame:     (gameId: number) => request<NewGameResponse>("POST", `/games/${gameId}/new`),
+  finishGame:  (gameId: number) => request<Game>("POST", `/games/${gameId}/finish`),
+
+  pricingRules: () => request<PricingRule[]>("GET", "/billiard/pricing-rules"),
+  quote: (tableId: number, minutes: number, at?: string) =>
+    request<PricingQuote>("GET", `/billiard/pricing-rules/quote?table_id=${tableId}&minutes=${minutes}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
+  createRule: (b: PricingRuleRequest) => request<PricingRule>("POST", "/billiard/pricing-rules", b),             // manager
+  updateRule: (id: number, b: Partial<PricingRuleRequest>) => request<PricingRule>("PUT", `/billiard/pricing-rules/${id}`, b),  // manager
+  createTable: (b: CreateTableRequest) => request<Table>("POST", "/tables", b),                                  // manager
+  tableUsage: (startDate?: string, endDate?: string) => {                                                         // manager
+    const q = new URLSearchParams();
+    if (startDate) q.set("start_date", startDate);
+    if (endDate) q.set("end_date", endDate);
+    const qs = q.toString();
+    return request<TableUsageReport>("GET", `/reports/tables/usage${qs ? `?${qs}` : ""}`);
+  },
+
+  bankTransactions: (status?: BankTxStatus, limit = 50, offset = 0) => {   // manager only
+    const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (status) q.set("status", status);
+    return request<BankTransaction[]>("GET", `/payments/bank-feed/transactions?${q}`);
+  },
   assignTx: (txId: number, lineId: number) =>
     request<BankTransaction>("POST", `/payments/bank-feed/transactions/${txId}/assign`, { line_id: lineId }),
   ignoreTx: (txId: number, note?: string) =>
@@ -796,9 +975,9 @@ The server's `detail` text is readable, but it is English and not a stable code.
 | --- | --- | --- |
 | `401` | Token missing or expired | Send the user to login |
 | `400` | Adding an item that cannot be sold (`Product is not available`, `Variant does not belong to this product`) | Show the message and refresh the menu |
-| `403` | Not a manager, or closing someone else's shift | "Only a manager can do this" |
+| `403` | Not a manager (void, bank inbox, create table, pricing rules, usage report), or closing someone else's shift | "Only a manager can do this" |
 | `404` | Unknown id, or it belongs to another club | "Not found". Go back to the list |
-| `409` | Wrong state. Table: "Table already has an active session". Session: "Items can only be added to an active session", "Session is already completed", "Stop the session before paying". Payment: "Already paid", "A payment is already in progress", "This order already has cash/transfer payments; pay the balance with those methods" (card after part payment). Shift: "Open a shift before taking payments", "A shift is already open", a pay-out larger than the drawer | Reload the bill, the board or the shift and redraw. The screen was out of date |
+| `409` | Wrong state. Table: "Table already has an active session". Session: "Items can only be added to an active session", "Session is already completed", "Stop the session before paying". Payment: "Already paid", "A payment is already in progress", "This order already has cash/transfer payments; pay the balance with those methods" (card after part payment). Shift: "Open a shift before taking payments", "A shift is already open", a pay-out larger than the drawer. Scoreboard: "Session is not active", "Game is not active", "Session already has an active game", "Score cannot go below 0" | Reload the bill, the board or the shift and redraw. The screen was out of date |
 | `422` | Split lines do not add up, cash tendered is below the amount, a void or movement reason is too short, or the amount differs on assign | Show the message next to the form. Validate the same rules in the browser first |
 | `500` on pay | Some lines could not be recorded | Reload the bill. Show which lines failed and offer to pay `balance_due` again |
 
@@ -851,6 +1030,14 @@ Run these on a development backend before release. Use a stopped session with a 
 | 26 | Split 200,000 cash + 110,000 transfer, then press Cash on the waiting bill | `409 A payment is already in progress`. No pay buttons are shown while a transfer waits |
 | 27 | Pay 100,000 cash, then try Card | `409`, and the Card button is already hidden |
 | 28 | Pay out more cash than the drawer holds | `409` message is shown, and the form checks the amount first |
+| 29 | Log in as a cashier, then as a manager, and compare `GET /auth/me` | The cashier has no manager buttons (void, bank inbox, reports); the manager has them |
+| 30 | Scroll the bank inbox past 50 rows | "Load more" fetches the next page with `offset=50` and no row repeats |
+| 31 | Start a game, press +1 for A three times, then -1 for B at 0 | A shows 3; the B change returns `409 Score cannot go below 0` and the score stays 0 |
+| 32 | Press "Next game" | The old game is `completed`, a new one is `active`, and the list shows both |
+| 33 | Start a second game while one is active, or after the session is stopped | `409` message is shown and the list reloads |
+| 34 | Ask for a quote for 90 minutes on a table with a block or minimum-hour rule | `fee` and `rule_name` match the rule, and nothing is created |
+| 35 | Open the table usage report for a date range | Revenue counts paid sessions only, and `unpaid_total` covers stopped but unpaid sessions |
+
 ### Simulating the bank webhook in development
 
 Ask the backend developer to set `SEPAY_API_KEY` on the dev server, then post a transfer with the memo shown on the QR. Use a new `id` for every test.
@@ -868,8 +1055,8 @@ It answers `{"success": true}` even when the transfer is not matched, so check t
 
 ### Backend gaps to track
 
-- `GET /auth/me` returns no roles, so the frontend cannot tell a manager from a cashier. Adding a `roles` list to it would let you hide manager buttons.
 - No endpoint lists every waiting transfer line, so the manager's Assign action needs the manager to open the bill first.
 - `GET /products` needs no login and is not limited to the user's club. Scoping it to the club would stop a cashier seeing another club's menu.
 - No endpoint says whether Stripe is configured, so the Card button has to be switched on in the frontend.
-- `POST /payments/` and `PATCH /payments/{id}` had no login check. The fix is on branch `fix/payments-require-admin-auth` and makes them admin-only; billiard screens never need them.
+
+Fixed since Oct 24 (kept here so old notes make sense): `GET /auth/me` now returns `roles`, and `POST /payments/` and `PATCH /payments/{id}` are admin only.
