@@ -32,7 +32,7 @@ class DetectionWebSocketManager:
                         f"websocket={websocket}, state={getattr(websocket, 'client_state', None)}")
 
             # Make sure WebSocket is accepted before doing anything else
-            await self._ensure_already_accepted(websocket)
+            self._ensure_already_accepted(websocket)
 
             # Store connection
             self.active_connections[connection_id] = websocket
