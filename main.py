@@ -51,6 +51,7 @@ from app.transform_data.jobs.transform_job import transform_unprocessed_data
 from app.jackpot.jobs.draw_job import draw_job
 from app.hydro_system.scheduler import start_sensor_job
 from app.cms.jobs.scheduled_publish_job import publish_scheduled_posts_job
+from app.payments.jobs.transfer_expiry_job import expire_stale_transfer_lines_job
 from app.utils.background_tasks import start_hardware_detection_background_tasks
 from app.core import config
 
@@ -203,6 +204,8 @@ try:
     add_cron_job(draw_job, job_id="jackpot_draw_job", day_of_week="tue,thu,sat", hour=18, minute=0, job_name="Jackpot Draw Job")
     # CMS: publish any 'scheduled' post whose scheduled_at has passed, checked every minute
     add_job(publish_scheduled_posts_job, job_id="cms_scheduled_publish_job", seconds=60, job_name="CMS Scheduled Publish Job")
+    # Payments: cancel bank-transfer lines whose QR expired long ago and were never paid
+    add_job(expire_stale_transfer_lines_job, job_id="payments_transfer_expiry_job", minutes=5, job_name="Payments Transfer Expiry Job")
     # AI Vision: poll for queued image-analysis jobs every 15 seconds
     add_job(process_queued_inference_jobs, job_id="ai_vision_inference_job", seconds=15, job_name="AI Vision Inference Job")
 
