@@ -71,6 +71,26 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _aware(value: Optional[datetime]) -> Optional[datetime]:
+    """SQLite returns naive datetimes; everything we store is UTC."""
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+EXPIRED_NOTE = "Transfer not received in time"
+
+
+def _is_stale_transfer(line: PaymentLine, stale_before: datetime) -> bool:
+    expires_at = _aware(line.expires_at)
+    return (
+        line.method == "bank_transfer"
+        and line.status == LineStatus.PENDING
+        and expires_at is not None
+        and expires_at <= stale_before
+    )
+
+
 def _uid(user: Optional[User]) -> Optional[int]:
     """None = the system (e.g. the bank feed confirmed a transfer automatically)."""
     return user.id if user else None
@@ -536,6 +556,83 @@ class PaymentOrderService:
         db.commit()
         db.refresh(order)
         return order
+
+    @staticmethod
+    def expire_line(db: Session, line_id: int, stale_before: datetime) -> bool:
+        """System: cancel a bank-transfer line that is still pending and whose QR expired at or
+        before `stale_before`. Returns True when the line was cancelled.
+
+        The line is re-checked under the lock, so a transfer the bank confirmed a moment ago is
+        never cancelled. The line is cancelled first and the payment record marked failed after
+        (best effort), so a completed payment can never be marked failed by this path.
+        """
+        line = db.get(PaymentLine, line_id)
+        if line is None or not _is_stale_transfer(line, stale_before):
+            return False
+        source_type, source_id = line.order.source_type, line.order.source_id
+
+        adapter = payable_registry.get(source_type)
+        obj = adapter.load(db, source_id, None, lock=True)          # system caller: no tenant check
+        order = PaymentOrderService.get_order(db, source_type, source_id, lock=True)
+        line = _find_line(order, line_id)
+        if not _is_stale_transfer(line, stale_before):
+            db.rollback()                                           # settled meanwhile: release the locks
+            return False
+
+        payment_id = line.payment_id
+        expired_at = _aware(line.expires_at)
+        line.status = LineStatus.CANCELLED
+        line.note = EXPIRED_NOTE
+        _log(db, order.id, "line_expired", None, line_id,
+             {"memo": line.transfer_memo, "amount": str(line.amount),
+              "expired_at": expired_at.isoformat() if expired_at else None})
+        _settle(db, order, adapter, obj, None)
+        db.commit()
+
+        if payment_id:
+            try:
+                existing = payment_service.get_payment(db, payment_id)
+                meta = {**(existing.extra_metadata or {}), "cancelled": True, "cancel_reason": EXPIRED_NOTE} if existing else None
+                payment_service.update_payment_status(
+                    db, payment_id, PaymentUpdate(status=PaymentStatus.FAILED, extra_metadata=meta),
+                )
+            except Exception:
+                db.rollback()
+                logger.exception("Transfer line %s expired but its payment record %s was not marked failed",
+                                 line_id, payment_id)
+        return True
+
+    @staticmethod
+    def expire_stale_transfer_lines(db: Session, now: Optional[datetime] = None, limit: int = 200,
+                                    grace_minutes: Optional[int] = None) -> int:
+        """Cancel pending transfer lines that expired more than `grace_minutes` ago (default:
+        config.TRANSFER_AUTO_CANCEL_GRACE_MINUTES; 0 or less = off). Returns how many were cancelled."""
+        grace = config.TRANSFER_AUTO_CANCEL_GRACE_MINUTES if grace_minutes is None else grace_minutes
+        if grace <= 0:
+            return 0
+        cutoff = (now or _now()) - timedelta(minutes=grace)
+        ids = [
+            line_id for (line_id,) in
+            db.query(PaymentLine.id)
+            .filter(
+                PaymentLine.method == "bank_transfer",
+                PaymentLine.status == LineStatus.PENDING,
+                PaymentLine.expires_at.isnot(None),
+                PaymentLine.expires_at <= cutoff,
+            )
+            .order_by(PaymentLine.id)
+            .limit(limit)
+            .all()
+        ]
+        cancelled = 0
+        for line_id in ids:
+            try:
+                if PaymentOrderService.expire_line(db, line_id, cutoff):
+                    cancelled += 1
+            except Exception:
+                db.rollback()
+                logger.exception("Could not expire transfer line %s", line_id)
+        return cancelled
 
     @staticmethod
     def void_line(db: Session, source_type: str, source_id: str, line_id: int, user: User,

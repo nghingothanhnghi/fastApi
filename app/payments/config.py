@@ -41,6 +41,11 @@ BANK_TRANSFER_REQUIRES_CONFIRMATION = _flag(_env(
     default="true",
 ))
 TRANSFER_EXPIRE_MINUTES = int(_env("PAYMENT_TRANSFER_EXPIRE_MINUTES", "BILLIARD_TRANSFER_EXPIRE_MINUTES", default="15"))
+# A pending transfer line is cancelled by a background job this many minutes AFTER its QR
+# expired (the grace period lets a slow bank webhook still match it). The bill then goes back
+# to unpaid so the cashier can start over; money that still arrives later is kept for a
+# manager ("money for a cancelled line"). 0 turns the job off.
+TRANSFER_AUTO_CANCEL_GRACE_MINUTES = int(_env("PAYMENT_TRANSFER_AUTO_CANCEL_GRACE_MINUTES", default="60"))
 # Prefix of the transfer content that identifies a payment line, e.g. PAY12L34. Letters/digits only.
 # If you use SePay's "payment code structure", set the same prefix there.
 MEMO_PREFIX = _env("PAYMENT_MEMO_PREFIX", default="PAY").strip().upper() or "PAY"

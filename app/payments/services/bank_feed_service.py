@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.payments import config
 from app.payments.models.bank_transaction import BankTransaction, BankTxStatus
-from app.payments.models.order import PaymentLine, PaymentLineStatus
+from app.payments.models.order import PaymentLine, PaymentLineStatus, PaymentOrder
 from app.payments.services.order_service import payment_order_service
 from app.payments.utils.money import CENT
 from app.payments.utils.permissions import is_manager
@@ -202,6 +202,44 @@ class BankFeedService:
         if status:
             q = q.filter(BankTransaction.status == status)
         return q.order_by(BankTransaction.id.desc()).offset(offset).limit(min(max(limit, 1), 200)).all()
+
+    @staticmethod
+    def list_pending_lines(db: Session, user: User, amount: Optional[Decimal] = None,
+                           limit: int = 50, offset: int = 0) -> list[dict]:
+        """Manager: bank-transfer lines still waiting for money (newest first), optionally only
+        those of an exact `amount`, so a transaction can be assigned without opening each bill."""
+        BankFeedService._require_manager(user)
+        q = (
+            db.query(PaymentLine)
+            .join(PaymentOrder, PaymentLine.order_id == PaymentOrder.id)
+            .filter(PaymentLine.method == "bank_transfer", PaymentLine.status == PaymentLineStatus.PENDING)
+        )
+        if not user.is_super_admin():
+            q = q.filter(PaymentOrder.client_id == user.client_id)
+        if amount is not None:
+            q = q.filter(PaymentLine.amount == Decimal(amount).quantize(CENT))
+        lines = q.order_by(PaymentLine.id.desc()).offset(offset).limit(min(max(limit, 1), 200)).all()
+
+        now = _now()
+        rows = []
+        for line in lines:
+            expires_at = line.expires_at
+            if expires_at is not None and expires_at.tzinfo is None:      # SQLite drops the zone; we store UTC
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            rows.append({
+                "line_id": line.id,
+                "order_id": line.order_id,
+                "source_type": line.order.source_type,
+                "source_id": line.order.source_id,
+                "amount": line.amount,
+                "currency": line.order.currency,
+                "order_total": line.order.total,
+                "transfer_memo": line.transfer_memo,
+                "created_at": line.created_at,
+                "expires_at": expires_at,
+                "expired": expires_at is not None and expires_at <= now,
+            })
+        return rows
 
     @staticmethod
     def _get(db: Session, tx_id: int, user: User) -> BankTransaction:

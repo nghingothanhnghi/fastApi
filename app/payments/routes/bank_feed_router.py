@@ -1,6 +1,7 @@
 # app/payments/routes/bank_feed_router.py
 import json
 import logging
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.payments import config
 from app.payments.schemas.bank_feed import (
     AssignBankTransactionRequest, BankTransactionResponse, IgnoreBankTransactionRequest,
+    PendingTransferLineResponse,
 )
 from app.payments.services.bank_feed_service import bank_feed_service
 from app.payments.utils.sepay import SepayAuthError, SepayNotConfigured, verify_request
@@ -61,6 +63,17 @@ def list_transactions(
 ):
     """Manager: bank transactions, e.g. `?status=needs_review` for money that needs a decision."""
     return bank_feed_service.list_transactions(db, current_user, status, limit, offset)
+
+
+@router.get("/pending-lines", response_model=list[PendingTransferLineResponse])
+def list_pending_lines(
+    amount: Optional[Decimal] = Query(None, gt=0, description="Only lines of exactly this amount"),
+    limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Manager: bank-transfer lines still waiting for money. Use it to pick the `line_id` for
+    `POST /transactions/{tx_id}/assign` (`?amount=` narrows it to lines matching the transaction)."""
+    return bank_feed_service.list_pending_lines(db, current_user, amount, limit, offset)
 
 
 @router.post("/transactions/{tx_id}/assign", response_model=BankTransactionResponse)

@@ -327,7 +327,7 @@ A list from `GET /payments/bank-feed/transactions?status=needs_review`, with tab
 
 - **Ignore** asks for a note and calls `POST /payments/bank-feed/transactions/{id}/ignore`.
 - **Assign** links the money to a waiting transfer line: `POST /payments/bank-feed/transactions/{id}/assign` with `{"line_id": 7}`. The amount must equal the line's amount, so show the line's amount next to the transaction and block a mismatch.
-- There is no endpoint that lists every waiting transfer line. For assign, let the manager open the bill (`GET /sessions/{id}`) and pick the pending transfer line from `payments[]`.
+- To pick the line, call `GET /payments/bank-feed/pending-lines?amount=<transaction amount>` (managers only; `limit` 1 to 200, default 50, and `offset`). Each row has `line_id`, `order_id`, `source_type`, `source_id` (the session id for billiard), `amount`, `order_total`, `transfer_memo`, `created_at`, `expires_at` and `expired`. Show a picker with the table or session, the amount and the time, and send the chosen `line_id` to assign. Without `amount` it lists every waiting line, newest first.
 
 ## Extra billiard screens
 
@@ -985,7 +985,8 @@ The server's `detail` text is readable, but it is English and not a stable code.
 
 - **Double click.** Disable the pay button while a request is running. A second pay call returns `409`, which you treat as "reload the bill".
 - **Page reload during a transfer.** The QR data is on the bill (`GET /sessions/{id}`), so rebuild the waiting screen from it. Do not store the QR yourself.
-- **QR expired.** `transfer.expires_at` only says when to stop showing the QR as valid. The line stays `pending` until someone confirms or cancels it, so keep both buttons. To start over, cancel and pay again for a new QR.
+- **QR expired.** `transfer.expires_at` only says when to stop showing the QR as valid. The line stays `pending` for a grace period (60 minutes by default) so a slow bank notification can still match it, so keep both buttons. To start over, cancel and pay again for a new QR.
+- **Line cancelled by the server.** After the grace period a background job cancels the line itself: its `status` becomes `cancelled`, its `note` is "Transfer not received in time", and the bill goes back to `unpaid` (or stays `pending` if another part was already paid). If the screen is polling, treat that like any cancelled line and show the pay buttons again. If the customer pays after that, the money appears in the manager inbox as `needs_review` ("Money received for a line that is cancelled"); to apply it, pay again with a new transfer line and assign the transaction to it.
 - **Paid, then voided.** A bill can move from `paid` back to `pending` or `unpaid`. Redraw from the response and never assume paid is final.
 - **Two cashiers on one bill.** Treat every response as the truth and redraw. Do not merge it with local state.
 - **Old paid bills.** A bill that is `paid` with `payments: []` was settled before the payment module. Show it as paid and hide the line list.
@@ -1020,6 +1021,8 @@ Run these on a development backend before release. Use a stopped session with a 
 | 16 | Turn on `PAYMENT_REQUIRE_OPEN_SHIFT` and pay with no shift | The user is sent to open a shift |
 | 17 | Webhook with the wrong amount | The manager inbox shows a `needs_review` row with the reason, and the bill stays `pending` |
 | 18 | Assign that transaction to a line of a different amount | Blocked in the UI, and the server would return `422` |
+| 18a | Open the assign picker for a transaction | It lists only waiting lines of the same amount (`?amount=`), each with its table or session and time |
+| 18b | Leave a transfer line unpaid for more than the QR time plus the grace period | The line shows `cancelled` ("Transfer not received in time") and the bill can be paid again; a later transfer lands in `needs_review` |
 | 19 | Token expires | The user is sent to login and comes back to the same bill |
 | 20 | Open a bill paid before the payment module | It shows as paid with no line list |
 | 21 | Double click Pay | One payment is created and no error is shown |
@@ -1055,8 +1058,7 @@ It answers `{"success": true}` even when the transfer is not matched, so check t
 
 ### Backend gaps to track
 
-- No endpoint lists every waiting transfer line, so the manager's Assign action needs the manager to open the bill first.
 - `GET /products` needs no login and is not limited to the user's club. Scoping it to the club would stop a cashier seeing another club's menu.
 - No endpoint says whether Stripe is configured, so the Card button has to be switched on in the frontend.
 
-Fixed since Oct 24 (kept here so old notes make sense): `GET /auth/me` now returns `roles`, and `POST /payments/` and `PATCH /payments/{id}` are admin only.
+Fixed since Oct 24 (kept here so old notes make sense): `GET /auth/me` now returns `roles`, `POST /payments/` and `PATCH /payments/{id}` are admin only, `GET /payments/bank-feed/pending-lines` lists the waiting transfer lines, and stale transfer lines are cancelled automatically.

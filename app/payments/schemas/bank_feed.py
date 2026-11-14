@@ -30,6 +30,22 @@ class BankTransactionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PendingTransferLineResponse(BaseModel):
+    """A bank-transfer line still waiting for money: what a manager picks when assigning a
+    bank transaction by hand."""
+    line_id: int
+    order_id: int
+    source_type: str
+    source_id: str
+    amount: Decimal
+    currency: str
+    order_total: Decimal
+    transfer_memo: Optional[str] = None
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    expired: bool                       # the QR has expired (the line may still be paid until it is cancelled)
+
+
 class AssignBankTransactionRequest(BaseModel):
     line_id: int
 
