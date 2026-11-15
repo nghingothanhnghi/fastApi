@@ -35,6 +35,7 @@ def test_device():
     db: Session = next(override_get_db())
     device = HydroDevice(
         name="Test ESP32 Device",
+        device_id="esp32-abc123",
         type="esp32",
         external_id="esp32-abc123",
         user_id=1,  # or a test user
@@ -52,14 +53,9 @@ def test_device():
 
 def test_create_sensor_data_success(test_device):
     """Simulate ESP32 sending sensor data and ensure it's saved"""
-    payload = {
-        "device_id": "esp32-abc123",  # external_id
-        "temperature": 25.3,
-        "humidity": 50.0,
-        "light": 300.0,
-        "moisture": 45.5,
-        "water_level": 75.0,
-    }
+    payload = {"device_id": "esp32-abc123",
+                "data": {"temperature": 25.3, "humidity": 50.0, "light": 300.0,
+                        "moisture": 45.5, "water_level": 75.0}}
 
     response = client.post("/sensor/data", json=payload)
     assert response.status_code == 200
