@@ -347,6 +347,6 @@ reset to `unpaid`. A fresh database gets everything from `init_db`.
 | `test_stripe_provider.py` | Zero-decimal currencies, rounding, refunds |
 | `test_billiard_payments.py` | Only billiard's side: adapter rules, state mirror, legacy sessions, URLs |
 
-`app/tests/payments_testkit.py` holds the fake business and shared fixtures. If you add a business
+`app/tests/test_payments_testkit.py` holds the fake business and shared fixtures. If you add a business
 module, give it one small integration test like `test_billiard_payments.py`; the payment rules are
 already covered here.

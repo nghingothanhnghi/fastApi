@@ -1,6 +1,6 @@
 # app/tests/test_payments_bank_feed.py
 # SePay webhook: authentication, idempotency, matching rules, manager workflow, HTTP.
-# Runs against the FAKE business (payments_testkit); no billiard involved.
+# Runs against the FAKE business (test_payments_testkit); no billiard involved.
 import hashlib
 import hmac
 import json
@@ -20,7 +20,7 @@ from app.payments.routes.bank_feed_router import router as bank_feed_router
 from app.payments.services.bank_feed_service import bank_feed_service as feed
 from app.payments.services.order_service import payment_order_service as svc
 from app.payments.utils.sepay import SepayAuthError, SepayNotConfigured, verify_request
-from app.tests.payments_testkit import (  # noqa: F401  (fixtures are used by name)
+from app.tests.test_payments_testkit import (  # noqa: F401  (fixtures are used by name)
     CLIENT, D, FAKE, cashier, db, engine, events, fake, make_user, manager, pay, view,
 )
 

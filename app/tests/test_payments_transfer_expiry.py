@@ -1,6 +1,6 @@
 # app/tests/test_payments_transfer_expiry.py
 # Expiry of stale bank-transfer lines (background job) and the manager's pending-lines list.
-# Runs against the FAKE business (payments_testkit); no billiard involved.
+# Runs against the FAKE business (test_payments_testkit); no billiard involved.
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,7 +15,7 @@ from app.payments.models.payment import PaymentStatus, PaymentTransaction
 from app.payments.routes.bank_feed_router import router as bank_feed_router
 from app.payments.services.bank_feed_service import bank_feed_service as feed
 from app.payments.services.order_service import payment_order_service as svc
-from app.tests.payments_testkit import (  # noqa: F401  (fixtures are used by name)
+from app.tests.test_payments_testkit import (  # noqa: F401  (fixtures are used by name)
     CLIENT, D, FAKE, cashier, db, engine, events, fake, make_user, manager, pay, view,
 )
 from app.user.utils.token import get_current_user

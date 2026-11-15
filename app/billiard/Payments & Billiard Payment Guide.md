@@ -333,7 +333,7 @@ payable_registry.register(ShopOrderPayable())
 1. Add a `payment_order_id` column to your business table, plus any mirror fields you want for reports (state, method, paid time). A mirror means reports never join the Payments tables.
 2. Write the adapter as above and make sure its module is imported at startup, because importing it registers it. Billiard does this in `app/billiard/routes/__init__.py`.
 3. Pay through `/payments/orders/shop_order/{id}/pay`. If you want friendlier URLs, call `payment_order_service.pay(db, "shop_order", str(id), request, user)` from your own route, as billiard does.
-4. Test the adapter against `app/tests/payments_testkit.py`, which runs the Payments logic against a fake business.
+4. Test the adapter against `app/tests/test_payments_testkit.py`, which runs the Payments logic against a fake business.
 
 ### Rules the adapter protects
 

@@ -1,6 +1,6 @@
 # app/tests/test_payments_shifts.py
 # Cash drawer: shifts, expected cash / counted / variance, pay-in/out, and how voids hit the drawer.
-# Runs against the FAKE business (payments_testkit); no billiard involved.
+# Runs against the FAKE business (test_payments_testkit); no billiard involved.
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -9,7 +9,7 @@ from app.payments import config
 from app.payments.schemas.shift import CashMovementRequest
 from app.payments.services.order_service import payment_order_service as svc
 from app.payments.services.shift_service import shift_service as shifts
-from app.tests.payments_testkit import (  # noqa: F401  (fixtures are used by name)
+from app.tests.test_payments_testkit import (  # noqa: F401  (fixtures are used by name)
     CLIENT, D, FAKE, cashier, db, engine, fake, make_user, manager, pay, view,
 )
 

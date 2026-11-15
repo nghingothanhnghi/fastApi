@@ -1,7 +1,7 @@
 # app/tests/test_payments_orders.py
 # The Payments module on its own: cash (tendered/change), bank transfer (VietQR), split payments,
 # cancel, manager-only void, Stripe gateway, audit trail. Runs against a FAKE business (see
-# payments_testkit.FakePayable) to prove Payments only needs the PayableAdapter contract.
+# test_payments_testkit.FakePayable) to prove Payments only needs the PayableAdapter contract.
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,7 +15,7 @@ from app.payments.models.payment import PaymentStatus, PaymentTransaction
 from app.payments.schemas.order import PayOrderRequest
 from app.payments.services.order_service import payment_order_service as svc
 from app.payments.utils import vietqr
-from app.tests.payments_testkit import (  # noqa: F401  (fixtures are used by name)
+from app.tests.test_payments_testkit import (  # noqa: F401  (fixtures are used by name)
     CLIENT, D, FAKE, cashier, db, engine, events, fake, make_user, manager, pay, view,
 )
 

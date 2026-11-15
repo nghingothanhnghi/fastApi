@@ -1,4 +1,4 @@
-# app/tests/payments_testkit.py
+# app/tests/test_payments_testkit.py
 # Shared helpers for the Payments module tests.
 #
 # The core tests run against a FAKE business (not billiard) to prove the Payments module only

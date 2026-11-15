@@ -32,7 +32,7 @@ from app.payments.routes import bank_feed_router, order_router, payment_router, 
 from app.payments.schemas.order import PayOrderRequest
 from app.payments.services.bank_feed_service import bank_feed_service as feed
 from app.payments.services.payable_registry import payable_registry
-from app.tests.payments_testkit import CLIENT, D, cashier, db, engine, make_user, manager  # noqa: F401
+from app.tests.test_payments_testkit import CLIENT, D, cashier, db, engine, make_user, manager  # noqa: F401
 from app.user.utils.token import get_current_user
 
 
