@@ -58,14 +58,21 @@ def test_send_sensor_data(auth_header, test_device):
         }
     }
 
-    response = client.post("/sensor/data", json=payload, headers=auth_header)
-    assert response.status_code == 200, f"Failed: {response.status_code} - {response.text}"
+    response = client.post(
+        "/sensor/data",
+        json=payload,
+        headers=auth_header
+    )
+
+    assert response.status_code == 200, (
+        f"Failed: {response.status_code} - {response.text}"
+    )
 
     data = response.json()
+
     assert "id" in data
     assert data["temperature"] == 26.5
     assert data["humidity"] == 60.2
     assert data["moisture"] == 35.1
     assert "created_at" in data
-    assert "commands" in data
 

@@ -49,19 +49,19 @@ def override_get_db(monkeypatch, db_session):
 
 # Mock external dependencies
 @pytest.fixture(autouse=True)
-def mock_deps(monkeypatch):
-    monkeypatch.setattr(
-        "app.hydro_system.controllers.hydro_system_controller.sensors.read_sensors",
-        lambda device_id: {"temp": 1}
-    )
-    monkeypatch.setattr(
-        "app.hydro_system.controllers.hydro_system_controller.state_manager.get_state",
-        lambda key: False
-    )
-    monkeypatch.setattr(
-        "app.hydro_system.controllers.hydro_system_controller.check_rules",
-        lambda data, thresholds: {"actions": {}, "alerts": []}
-    )
+# def mock_deps(monkeypatch):
+#     monkeypatch.setattr(
+#         "app.hydro_system.controllers.hydro_system_controller.sensors.read_sensors",
+#         lambda device_id: {"temp": 1}
+#     )
+#     monkeypatch.setattr(
+#         "app.hydro_system.controllers.hydro_system_controller.state_manager.get_state",
+#         lambda key: False
+#     )
+#     monkeypatch.setattr(
+#         "app.hydro_system.controllers.hydro_system_controller.check_rules",
+#         lambda data, thresholds: {"actions": {}, "alerts": []}
+#     )
 
 # 1. Test DeviceService
 

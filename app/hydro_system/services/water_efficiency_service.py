@@ -201,6 +201,17 @@ class WaterEfficiencyService:
         baseline_liters: float,
         difference_percent: float,
     ) -> Optional[WaterEfficiencyAlert]:
+
+        # Normalize named ranges to midnight to prevent duplicate alerts.
+        # Custom ranges preserve their exact timestamps.
+        if range_key in VALID_RANGE_KEYS:
+            period_start = period_start.replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        
         existing = (
             db.query(WaterEfficiencyAlert)
             .filter(
