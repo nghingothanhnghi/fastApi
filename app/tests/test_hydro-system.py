@@ -1,115 +1,109 @@
-
+# app/tests/test_hydro_system.py
+import os, tempfile
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.gettempdir()}/hydro_test_import.db")
+os.environ.setdefault("OPENAI_API_KEY", "test")
+os.environ.setdefault("SECRET_KEY", "test")
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-import sys
-import os
-
-# Add project root to sys.path so 'app' module resolves correctly
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-from main import app
-from app.hydro_system.controllers.system_controller import (
-    get_system_status,
-    control_actuator_by_id as system_control_actuator
-)
-from app.hydro_system.controllers.actuator_controller import (
-    control_actuator as actuator_control
-)
-from app.hydro_system.services.device_service import HydroDeviceService
+import app.init_db  # noqa: F401  registers every model
+from app.database import Base
+from app.hydro_system.controllers import system_controller
+from app.hydro_system.models.actuator import HydroActuator
+from app.hydro_system.models.actuator_log import HydroActuatorLog
 from app.hydro_system.models.device import HydroDevice
 from app.hydro_system.schemas.device import HydroDeviceCreate
-from app.hydro_system.models.actuator import HydroActuator
-from app.database import Base
+from app.hydro_system.services.device_service import HydroDeviceService
 
-# Setup in-memory SQLite for testing
-en_v = "sqlite:///:memory:"
-engine = create_engine(en_v, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@pytest.fixture(scope="module")
-def db_session():
-    Base.metadata.create_all(bind=engine)
-    session = TestingSessionLocal()
-    yield session
-    session.close()
+@pytest.fixture()
+def db():
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine, autoflush=False)()
+    yield s
+    s.close()
 
-@pytest.fixture(autouse=True)
-def override_get_db(monkeypatch, db_session):
-    def _get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-    monkeypatch.setattr("app.database.get_db", _get_db)
 
-# Mock external dependencies
-@pytest.fixture(autouse=True)
-# def mock_deps(monkeypatch):
-#     monkeypatch.setattr(
-#         "app.hydro_system.controllers.hydro_system_controller.sensors.read_sensors",
-#         lambda device_id: {"temp": 1}
-#     )
-#     monkeypatch.setattr(
-#         "app.hydro_system.controllers.hydro_system_controller.state_manager.get_state",
-#         lambda key: False
-#     )
-#     monkeypatch.setattr(
-#         "app.hydro_system.controllers.hydro_system_controller.check_rules",
-#         lambda data, thresholds: {"actions": {}, "alerts": []}
-#     )
+def _device_with_pump(db, user_id=7):
+    dev = HydroDevice(name="D", device_id="x", user_id=user_id)
+    db.add(dev)
+    db.flush()
+    pump = HydroActuator(type="pump", name="P", pin="25", port=1, device_id=dev.id)
+    db.add(pump)
+    db.commit()
+    return dev, pump
 
-# 1. Test DeviceService
 
-def test_device_service_create_and_get(db_session):
+def test_device_service_create_and_get(db):
     svc = HydroDeviceService()
-    create_in = HydroDeviceCreate(name='Device1', device_id='esp1', user_id=42)
-    dev = svc.create_device(db_session, create_in)
+    dev = svc.create_device(db, HydroDeviceCreate(name="Device1", device_id="esp1", user_id=42))
     assert dev.id is not None
-    fetched = svc.get_device(db_session, dev.id)
-    assert fetched.device_id == 'esp1'
+    assert svc.get_device(db, dev.id).device_id == "esp1"
 
-# 2. Test get_system_status (by user)
-def test_get_system_status_user(db_session):
-    dev = HydroDevice(name='D', device_id='x', user_id=7)
-    db_session.add(dev)
-    db_session.commit()
-    status = get_system_status(db_session, user_id=7)
-    assert status['device_id'] == dev.id
-    assert status['sensors'] == {'temp': 1}
-    assert all(val is False for val in status['actuators'].values())
 
-# 3. Test actuator_controller.control_actuator
+def test_duplicate_device_id_is_rejected(db):
+    svc = HydroDeviceService()
+    svc.create_device(db, HydroDeviceCreate(name="A", device_id="esp1", user_id=1))
+    with pytest.raises(HTTPException) as e:
+        svc.create_device(db, HydroDeviceCreate(name="B", device_id="esp1", user_id=1))
+    assert e.value.status_code == 400
 
-def test_actuator_control_logs_and_state(monkeypatch, db_session):
-    # Spy on state_manager.set_state and log_actuator_action
-    set_calls = {}
-    monkeypatch.setattr(
-        'app.hydro_system.controllers.actuator_controller.set_state',
-        lambda key, val: set_calls.setdefault('state', (key, val))
-    )
-    log_calls = {}
-    monkeypatch.setattr(
-        'app.hydro_system.controllers.actuator_controller.log_actuator_action',
-        lambda db, aid, state: log_calls.setdefault('log', (aid, state))
-    )
-    # Call without pre-existing actuator => fallback
-    actuator_control(db_session, 'pump', True, device_id=None)
-    assert set_calls['state'][1] is True
-    assert log_calls['log'][1] is True
 
-# 4. Test system_controller.control_actuator invokes actuator_controller
+def test_get_system_status_user(db, monkeypatch):
+    # read_sensors opens its own SessionLocal (the real DB), so stub it.
+    monkeypatch.setattr(system_controller.sensors, "read_sensors",
+                        lambda device_id=None, **kw: {"temperature": 25.0})
+    dev, pump = _device_with_pump(db)
 
-def test_system_control_integration(monkeypatch, db_session):
-    called = {}
-    monkeypatch.setattr(
-        'app.hydro_system.controllers.hydro_system_controller.actuator_controller.control_actuator',
-        lambda db, typ, on, did: called.update({'type': typ, 'on': on})
-    )
-    system_control_actuator(db_session, 'fan', True, user_id=5, device_id=99)
-    assert called['type'] == 'fan'
-    assert called['on'] is True
+    status = system_controller.get_system_status(db, user_id=7)
+
+    assert isinstance(status, list) and len(status) == 1
+    item = status[0]
+    assert item["device_id"] == dev.id
+    assert item["sensors"]["temperature"] == 25.0
+    assert item["sensors"]["rain_detected_effective"] is False
+    assert [a["id"] for a in item["actuators"]] == [pump.id]
+    assert all(a["current_state"] is False for a in item["actuators"])
+    assert item["growing_batch"] is None
+
+
+def test_get_system_status_unknown_user_is_404(db, monkeypatch):
+    monkeypatch.setattr(system_controller.sensors, "read_sensors", lambda **kw: {})
+    with pytest.raises(HTTPException) as e:
+        system_controller.get_system_status(db, user_id=999)
+    assert e.value.status_code == 404
+
+
+def test_control_actuator_by_id_persists_state_and_logs(db):
+    _, pump = _device_with_pump(db)
+
+    result = system_controller.control_actuator_by_id(db, pump.id, True)
+
+    db.refresh(pump)
+    assert result["new_state"] is True and pump.current_state is True
+    assert pump.last_state_changed_at is not None
+    log = db.query(HydroActuatorLog).one()
+    assert (log.actuator_id, log.action, log.state, log.source) == (pump.id, "on", "ON", "user")
+
+
+def test_control_unknown_actuator_is_404(db):
+    with pytest.raises(HTTPException) as e:
+        system_controller.control_actuator_by_id(db, 9999, True)
+    assert e.value.status_code == 404
+
+
+def test_manual_mode_applies_immediately_and_auto_clears_it(db):
+    _, pump = _device_with_pump(db)
+
+    r = system_controller.set_manual_mode(db, pump.id, True)
+    db.refresh(pump)
+    assert r["mode"] == "manual_on" and pump.manual_state is True and pump.current_state is True
+
+    r = system_controller.set_manual_mode(db, pump.id, None)
+    db.refresh(pump)
+    assert r["mode"] == "auto" and pump.manual_state is None

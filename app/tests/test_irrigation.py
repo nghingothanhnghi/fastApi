@@ -119,13 +119,13 @@ def test_liters_per_m2_and_baseline_comparison(db, device, actuator):
         ZoneBaselineUpdate(area_m2=10.0, baseline_weekly_liters=100.0, efficiency_threshold_percent=20.0),
     )
 
-    # One completed session using 80L this week -> under baseline
+    # One completed session using 70L this week -> under baseline
     session = IrrigationSession(
         actuator_id=actuator.id, device_id=device.id, zone_id=device.id,
         start_time=datetime.now(timezone.utc) - timedelta(days=1),
         end_time=datetime.now(timezone.utc),
         status=IrrigationSessionStatus.completed,
-        actual_volume_liters=80.0, average_flow_lpm=4.0, max_flow_lpm=6.0,
+        actual_volume_liters=70.0, average_flow_lpm=4.0, max_flow_lpm=6.0,
         duration_seconds=1200,
     )
     db.add(session)
@@ -133,11 +133,11 @@ def test_liters_per_m2_and_baseline_comparison(db, device, actuator):
 
     result = water_efficiency_service.get_efficiency(db, zone_id=device.id, range_key="7d")
 
-    assert result["water_usage"]["current_liters"] == pytest.approx(80.0)
+    assert result["water_usage"]["current_liters"] == pytest.approx(70.0)
     assert result["water_usage"]["baseline_liters"] == pytest.approx(100.0)
-    assert result["water_usage"]["saving_liters"] == pytest.approx(20.0)
-    assert result["water_usage"]["saving_percent"] == pytest.approx(20.0)
-    assert result["efficiency"]["liters_per_m2"] == pytest.approx(8.0)
+    assert result["water_usage"]["saving_liters"] == pytest.approx(30.0)
+    assert result["water_usage"]["saving_percent"] == pytest.approx(30.0)
+    assert result["efficiency"]["liters_per_m2"] == pytest.approx(7.0)
     assert result["efficiency"]["status"] == "efficient"
 
 

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -60,7 +61,21 @@ import traceback, logging
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await start_hardware_detection_background_tasks()
+        logger.info("Hardware detection background tasks started")
+    except Exception:
+        logger.exception(
+            "[Startup Error] Failed to start hardware detection background tasks"
+        )
+        raise
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # -----------------------------------------
 # Initialization
@@ -197,21 +212,63 @@ app.mount(
 try:
     start_scheduler()  # Start global scheduler
 
-    start_sensor_job() # Register hydro system sensor job (also registers the batch stage job)
-    # start_batch_stage_job()   <- removed: already started by start_sensor_job()
-    add_job(transform_unprocessed_data, job_id="transform_job", seconds=10) # Register data transformation job
-    # Tue/Thu/Sat at 18:00 local time
-    add_cron_job(draw_job, job_id="jackpot_draw_job", day_of_week="tue,thu,sat", hour=18, minute=0, job_name="Jackpot Draw Job")
-    # CMS: publish any 'scheduled' post whose scheduled_at has passed, checked every minute
-    add_job(publish_scheduled_posts_job, job_id="cms_scheduled_publish_job", seconds=60, job_name="CMS Scheduled Publish Job")
-    # Payments: cancel bank-transfer lines whose QR expired long ago and were never paid
-    add_job(expire_stale_transfer_lines_job, job_id="payments_transfer_expiry_job", minutes=5, job_name="Payments Transfer Expiry Job")
-    # AI Vision: poll for queued image-analysis jobs every 15 seconds
-    add_job(process_queued_inference_jobs, job_id="ai_vision_inference_job", seconds=15, job_name="AI Vision Inference Job")
+    start_sensor_job()  # Register hydro system sensor job
+    # start_batch_stage_job() <- removed: already started by start_sensor_job()
 
-    # Start hardware detection WebSocket background tasks
-    import asyncio
-    asyncio.create_task(start_hardware_detection_background_tasks())
-except Exception as e:
-    import logging
-    logging.error(f"[Startup Error] Failed to start background jobs: {e}")
+    add_job(
+        transform_unprocessed_data,
+        job_id="transform_job",
+        seconds=10
+    )
+
+    # Tue/Thu/Sat at 18:00 local time
+    add_cron_job(
+        draw_job,
+        job_id="jackpot_draw_job",
+        day_of_week="tue,thu,sat",
+        hour=18,
+        minute=0,
+        job_name="Jackpot Draw Job"
+    )
+
+    # CMS: publish scheduled posts every minute
+    add_job(
+        publish_scheduled_posts_job,
+        job_id="cms_scheduled_publish_job",
+        seconds=60,
+        job_name="CMS Scheduled Publish Job"
+    )
+
+    # Payments: expire stale bank-transfer lines
+    add_job(
+        expire_stale_transfer_lines_job,
+        job_id="payments_transfer_expiry_job",
+        minutes=5,
+        job_name="Payments Transfer Expiry Job"
+    )
+
+    # AI Vision: process queued jobs every 15 seconds
+    add_job(
+        process_queued_inference_jobs,
+        job_id="ai_vision_inference_job",
+        seconds=15,
+        job_name="AI Vision Inference Job"
+    )
+
+except Exception:
+    logger.exception("[Startup Error] Failed to register background jobs")
+
+
+# -----------------------------------------
+# Hardware Detection Background Tasks
+# -----------------------------------------
+# @app.on_event("startup")
+# async def _start_detection_tasks():
+#     try:
+#         await start_hardware_detection_background_tasks()
+#         logger.info("Hardware detection background tasks started")
+#     except Exception:
+#         logger.exception(
+#             "[Startup Error] Failed to start hardware detection background tasks"
+#         )
+#         raise    
