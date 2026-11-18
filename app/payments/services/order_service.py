@@ -454,9 +454,24 @@ class PaymentOrderService:
         if line.method != "bank_transfer":
             raise HTTPException(409, "Only bank transfer lines are confirmed this way")
         if line.status == LineStatus.COMPLETED:
-            return order                                    # idempotent
+            return order  # idempotent
+
         if line.status != LineStatus.PENDING:
             raise HTTPException(409, f"Payment line is {line.status.value}")
+
+        # Manual confirmation permissions and audit requirements
+        if config.MANUAL_CONFIRM_REQUIRES_MANAGER and not is_manager(user):
+            raise HTTPException(
+                403,
+                "Only a manager can confirm a transfer manually"
+            )
+
+        if config.MANUAL_CONFIRM_REQUIRES_NOTE and len((note or "").strip()) < 3:
+            raise HTTPException(
+                422,
+                "A note is required to confirm a transfer manually "
+                "(e.g. the bank reference you checked)"
+            )
 
         reference = line.payment_reference
         if reference:

@@ -69,3 +69,11 @@ REQUIRE_OPEN_SHIFT = _flag(_env("PAYMENT_REQUIRE_OPEN_SHIFT", "BILLIARD_REQUIRE_
 SEPAY_WEBHOOK_SECRET = os.getenv("SEPAY_WEBHOOK_SECRET", "")
 SEPAY_API_KEY = os.getenv("SEPAY_API_KEY", "")
 SEPAY_TIMESTAMP_TOLERANCE_SECONDS = int(os.getenv("SEPAY_TIMESTAMP_TOLERANCE_SECONDS", "300"))
+
+# --- Manual confirmation of bank transfers -------------------------------------
+# The "Received" button trusts the cashier. Tighten it with either or both:
+#   MANAGER: only a manager/admin may confirm a transfer by hand (cashiers must call one)
+#   NOTE:    a note (3+ chars) is required, e.g. "checked in Vietcombank app, ref FT123"
+# The SePay auto-confirm and the manager "assign" action are NOT affected.
+MANUAL_CONFIRM_REQUIRES_MANAGER = _flag(_env("PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER", default="false"))
+MANUAL_CONFIRM_REQUIRES_NOTE = _flag(_env("PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE", default="false"))
