@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, contains_eager
 
 from app.billiard import config
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
-from app.billiard.schemas.table import TableCreate
+from app.billiard.schemas.table import TableCreate, TableUpdate
 from app.billiard.services.billing_service import billing_service
 from app.billiard.services.session_lifecycle import open_session
 from app.billiard.utils.billing import as_utc, billable_minutes
@@ -42,6 +42,57 @@ class TableService:
             db.rollback()
             raise HTTPException(409, f"Table '{data.name}' already exists")
         return table
+
+    @staticmethod
+    def update_table(
+        db: Session,
+        table_id: int,
+        data: TableUpdate,
+        user: User,
+    ) -> BilliardTable:
+        stmt = scope_tables(
+            select(BilliardTable)
+            .where(BilliardTable.id == table_id)
+            .with_for_update(),
+            user,
+        )
+
+        table = db.execute(stmt).scalar_one_or_none()
+
+        if not table:
+            raise HTTPException(404, "Billiard table not found")
+
+        update_data = data.model_dump(exclude_unset=True, exclude_none=True)
+
+        # Prevent duplicate table names within the same client.
+        if "name" in update_data:
+            exists = db.execute(
+                select(BilliardTable.id).where(
+                    BilliardTable.client_id == table.client_id,
+                    BilliardTable.name == update_data["name"],
+                    BilliardTable.id != table_id,
+                )
+            ).first()
+
+            if exists:
+                raise HTTPException(
+                    409,
+                    f"Table '{update_data['name']}' already exists",
+                )
+
+        for field, value in update_data.items():
+            setattr(table, field, value)
+
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                409,
+                f"Table '{update_data.get('name', table.name)}' already exists",
+            )
+
+        return table    
 
     @staticmethod
     def list_tables(db: Session, user: User) -> list[BilliardTable]:

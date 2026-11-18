@@ -12,6 +12,16 @@ class TableCreate(BaseModel):
     hourly_rate: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
 
 
+class TableUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    hourly_rate: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+    )    
+
+
 class TableResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

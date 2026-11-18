@@ -8,7 +8,7 @@ from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import StartSessionResponse
-from app.billiard.schemas.table import ActiveTableResponse, TableCreate, TableResponse
+from app.billiard.schemas.table import ActiveTableResponse, TableCreate, TableResponse, TableUpdate
 from app.billiard.services.table_service import table_service
 
 router = APIRouter(prefix="/tables", tags=["Billiard Tables"])
@@ -20,6 +20,20 @@ def create_table(
     current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
 ):
     table = table_service.create_table(db, data, current_user)
+    db.commit()
+    db.refresh(table)
+    return table
+
+@router.patch("/{table_id}", response_model=TableResponse)
+def update_table(
+    table_id: int,
+    data: TableUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)
+    ),
+):
+    table = table_service.update_table(db, table_id, data, current_user)
     db.commit()
     db.refresh(table)
     return table
