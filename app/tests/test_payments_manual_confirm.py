@@ -41,6 +41,7 @@ def test_manager_only_flag_blocks_a_cashier_but_not_a_manager(
 
 @pytest.mark.parametrize("note", [None, "", "  ", "x"])
 def test_note_flag_rejects_missing_or_tiny_notes(db, cashier, fake, monkeypatch, note):
+    monkeypatch.setattr(config, "MANUAL_CONFIRM_REQUIRES_MANAGER", False)
     monkeypatch.setattr(config, "MANUAL_CONFIRM_REQUIRES_NOTE", True)
     bill_id, line_id = _pending_transfer(db, cashier, fake)
     with pytest.raises(HTTPException) as e:
@@ -50,11 +51,19 @@ def test_note_flag_rejects_missing_or_tiny_notes(db, cashier, fake, monkeypatch,
 
 
 def test_note_flag_accepts_a_real_note_and_stores_it(db, cashier, fake, monkeypatch):
+    monkeypatch.setattr(config, "MANUAL_CONFIRM_REQUIRES_MANAGER", False)
     monkeypatch.setattr(config, "MANUAL_CONFIRM_REQUIRES_NOTE", True)
+
     bill_id, line_id = _pending_transfer(db, cashier, fake)
-    svc.confirm_transfer(db, FAKE, bill_id, line_id, cashier, note="VCB app, ref FT26301")
+
+    svc.confirm_transfer(
+        db, FAKE, bill_id, line_id, cashier,
+        note="VCB app, ref FT26301"
+    )
+
     v = view(db, cashier, bill_id)
-    assert v["state"] == "paid" and v["payments"][0]["note"] == "VCB app, ref FT26301"
+    assert v["state"] == "paid"
+    assert v["payments"][0]["note"] == "VCB app, ref FT26301"
 
 
 def test_repeat_confirm_stays_idempotent_even_with_flags_on(db, cashier, fake, monkeypatch):
