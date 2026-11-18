@@ -95,8 +95,53 @@ class TableService:
         return table    
 
     @staticmethod
+    def deactivate_table(
+        db: Session,
+        table_id: int,
+        user: User,
+    ) -> BilliardTable:
+        stmt = scope_tables(
+            select(BilliardTable)
+            .where(BilliardTable.id == table_id)
+            .with_for_update(),
+            user,
+        )
+
+        table = db.execute(stmt).scalar_one_or_none()
+
+        if not table:
+            raise HTTPException(404, "Billiard table not found")
+
+        if not table.is_active:
+            raise HTTPException(409, "Billiard table is already inactive")
+
+        # Check the session record, not just table.status.
+        active_session = db.execute(
+            select(TableSession.id).where(
+                TableSession.table_id == table_id,
+                TableSession.status == SessionStatus.ACTIVE,
+            )
+        ).first()
+
+        if active_session:
+            raise HTTPException(
+                409,
+                "Cannot deactivate a table with an active session",
+            )
+
+        table.is_active = False
+        db.flush()
+
+        return table
+
+    @staticmethod
     def list_tables(db: Session, user: User) -> list[BilliardTable]:
-        stmt = scope_tables(select(BilliardTable).order_by(BilliardTable.name), user)
+        stmt = scope_tables(
+            select(BilliardTable)
+            .where(BilliardTable.is_active.is_(True))
+            .order_by(BilliardTable.name), 
+            user,
+            )
         return list(db.execute(stmt).scalars().all())
 
     @staticmethod

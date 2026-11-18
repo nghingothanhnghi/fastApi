@@ -38,6 +38,21 @@ def update_table(
     db.refresh(table)
     return table
 
+@router.delete("/{table_id}")
+def deactivate_table(
+    table_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)
+    ),
+):
+    table = table_service.deactivate_table(db, table_id, current_user)
+    db.commit()
+    return {
+        "message": "Billiard table deactivated successfully",
+        "id": table.id,
+        "is_active": table.is_active,
+    }
 
 @router.get("", response_model=list[TableResponse])
 def list_tables(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
