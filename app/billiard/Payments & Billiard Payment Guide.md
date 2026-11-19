@@ -1,6 +1,6 @@
 # Payments & Billiard Payment Guide
 
-Oct 21, 2026 · @Someone
+Updated Nov 19, 2026 · @JohnyWalker
 
 ## How payment works
 
@@ -26,13 +26,13 @@ The amount never comes from the client. It is always the session's `grand_total`
 | --- | --- |
 | `pending` | A transfer waiting for the bank feed or the cashier |
 | `completed` | Money received |
-| `cancelled` | A pending line voided before any money arrived |
+| `cancelled` | A pending line voided before any money arrived. A cashier can cancel it, or the system cancels it automatically when a transfer was never received (see "Transfers that never arrive") |
 | `voided` | Money was received, then reversed by a manager |
 | `failed` | The line could not be recorded |
 
 ## Setup
 
-Cash works with no configuration. Bank transfer needs the receiving account, and automatic confirmation needs a SePay webhook. Each `PAYMENT_*` variable falls back to the older `BILLIARD_*` name, so existing deployments keep working.
+Cash works with no configuration. Bank transfer needs the receiving account, and automatic confirmation needs a SePay webhook. Each `PAYMENT_*` variable falls back to the older `BILLIARD_*` name where one existed, so existing deployments keep working.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -42,10 +42,14 @@ Cash works with no configuration. Bank transfer needs the receiving account, and
 | `PAYMENT_BANK_CODE` | empty | Short bank code, e.g. `VCB`, used only for the hosted QR image URL |
 | `PAYMENT_MEMO_PREFIX` | `PAY` | Prefix of the transfer content that identifies a payment line, e.g. `PAY12L34` |
 | `PAYMENT_TRANSFER_EXPIRE_MINUTES` | `15` | How long a transfer QR is shown as valid |
+| `PAYMENT_TRANSFER_AUTO_CANCEL_GRACE_MINUTES` | `60` | A waiting transfer line is cancelled by a background job this many minutes **after** its QR expired. `0` turns the job off |
 | `PAYMENT_BANK_TRANSFER_REQUIRES_CONFIRMATION` | `true` | `false` makes a transfer count as paid immediately, like cash |
+| `PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER` | `false` | `true`: only a manager or admin may press "received" by hand. Cashiers get `403` |
+| `PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE` | `false` | `true`: pressing "received" by hand needs a note of at least 3 characters (e.g. the bank reference). Otherwise `422` |
 | `PAYMENT_REQUIRE_OPEN_SHIFT` | `false` | `true` refuses payments until a cashier has opened a shift |
 | `SEPAY_WEBHOOK_SECRET` | empty | HMAC secret for the SePay webhook (preferred) |
 | `SEPAY_API_KEY` | empty | API key alternative. The webhook answers `503` if neither is set |
+| `SEPAY_TIMESTAMP_TOLERANCE_SECONDS` | `300` | Allowed clock difference for HMAC requests |
 | `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET` | empty | Needed only for Stripe |
 
 ### Steps
@@ -55,6 +59,8 @@ Cash works with no configuration. Bank transfer needs the receiving account, and
 3. In SePay, add a webhook to `https://<your-api>/payments/bank-feed/sepay`. It must be HTTPS on a public domain.
 4. Send one small real transfer and check that the bill settles. The QR format was checked for structure and checksum, not scanned with a real banking app.
 5. Decide whether to set `PAYMENT_REQUIRE_OPEN_SHIFT=true` so every payment lands in a shift.
+6. Decide how strict the manual "received" button should be (`PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER`, `PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE`). Both default to off, which trusts the cashier. The SePay auto-confirm and the manager "assign" action are never affected by these two settings.
+7. Check that the app scheduler is running. The job `payments_transfer_expiry_job` runs every 5 minutes and cancels stale transfer lines (it is registered in `main.py`).
 
 ### Upgrading an existing database
 
@@ -90,10 +96,31 @@ Send either `payment_method` or `payments`, never both. For a split, the line am
 
 1. Show the customer the QR from `payments[].transfer` (`qr_payload` to draw it, or `qr_image_url`). It carries the exact amount and the memo, for example `PAY12L34`.
 2. The customer pays. If the SePay webhook is set up, the bill turns `paid` by itself within seconds; refresh the bill to see it.
-3. If the webhook is not set up or is slow, check your bank app and press received: `POST /sessions/{id}/pay/lines/{line_id}/confirm`.
+3. If the webhook is not set up or is slow, check your bank app and press received: `POST /sessions/{id}/pay/lines/{line_id}/confirm`. Depending on the club's settings this may need a **note** (for example the bank reference you checked) or may be **restricted to a manager**. See "Manual confirmation rules".
 4. If the money never arrives, cancel the line with `POST /sessions/{id}/pay/lines/{line_id}/cancel` and take the balance another way.
 
-The QR expires after 15 minutes by default (`PAYMENT_TRANSFER_EXPIRE_MINUTES`). Cancelling and paying again makes a new QR.
+The QR is shown as valid for 15 minutes by default (`PAYMENT_TRANSFER_EXPIRE_MINUTES`). Cancelling and paying again makes a new QR.
+
+### Transfers that never arrive
+
+A line that stays `pending` is not left forever. Once its QR has expired **and** the grace period has passed (60 minutes by default), the system cancels it by itself:
+
+- The line becomes `cancelled` with the note "Transfer not received in time", and the audit trail records `line_expired` (no actor).
+- The bill goes back to `unpaid`, or stays `pending` if another part was already paid, so the cashier can start over.
+- The grace period exists so a slow bank notification can still match a line whose QR just expired. Until the job runs, "received" still works on an expired line.
+- If the customer's money arrives **after** the line was cancelled, the bank transaction shows as `needs_review` ("Money received for a line that is cancelled"). The manager applies it by paying again with a new transfer line and assigning the transaction to it.
+- A line the bank (or a cashier) confirmed a moment before the job ran is never cancelled: the job re-checks the line under a lock.
+
+### Manual confirmation rules
+
+The "received" button trusts the person pressing it, so it can be tightened:
+
+| Setting | Effect on `POST .../lines/{line_id}/confirm` |
+| --- | --- |
+| `PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER=true` | A cashier gets `403 Only a manager can confirm a transfer manually` |
+| `PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE=true` | A missing, blank or too short (< 3 characters) note gets `422 A note is required to confirm a transfer manually` |
+
+Confirming a line that is already `completed` stays idempotent and is never refused. The note is stored on the payment line and in the audit event.
 
 ### Reading the bill
 
@@ -105,7 +132,7 @@ The QR expires after 15 minutes by default (`PAYMENT_TRANSFER_EXPIRE_MINUTES`). 
 | `payment_method` | `cash`, `bank_transfer`, `stripe`, or `split` |
 | `amount_paid` | Sum of completed lines |
 | `balance_due` | `grand_total` minus `amount_paid` |
-| `payments[]` | Every line: method, amount, status, `cash_tendered`, `change_given`, and `transfer` while a transfer waits |
+| `payments[]` | Every line: method, amount, status, `cash_tendered`, `change_given`, `note`, and `transfer` while a transfer waits |
 | `paid_by` | Empty when the bank feed confirmed the payment automatically |
 
 Amounts arrive as strings such as `"310000.00"`.
@@ -121,24 +148,27 @@ SePay watches the receiving account and calls `POST /payments/bank-feed/sepay` f
 | Result | When | What happens |
 | --- | --- | --- |
 | `matched` | Code found, line still `pending`, amount exactly equal | Line completes, the bill settles, audit event `transfer_auto_confirmed` with no user |
-| `needs_review` | Code found but the amount differs, the line was already paid (possible double transfer), or the line was cancelled or voided | Nothing is confirmed; a manager decides |
+| `needs_review` | Code found but the amount differs, the line was already paid (possible double transfer), or the line was cancelled or voided (including cancelled by the expiry job) | Nothing is confirmed; a manager decides |
 | `unmatched` | No code in the content, or the code matches no line | Kept for a manager |
 | `ignored` | Outgoing transfer, or a different account | Kept for audit |
+
+If the line is settled by someone else between the match and the lock, the transaction becomes `needs_review` ("Could not confirm the line"), so the money is never lost and never counted twice.
 
 ### What the webhook answers
 
 - It answers `{"success": true}` once an authenticated transaction is stored, even if it could not be matched. SePay retries for up to 5 hours on anything else.
 - `401` for a missing or wrong signature or key, `503` if no secret or key is configured, `400` for invalid JSON or a missing id or amount.
-- With a secret set, requests are verified with HMAC-SHA256 over `<X-SePay-Timestamp>.<raw body>` and rejected if the timestamp is more than 5 minutes off. An API-key-only request is then refused.
+- With a secret set, requests are verified with HMAC-SHA256 over `<X-SePay-Timestamp>.<raw body>` and rejected if the timestamp is more than `SEPAY_TIMESTAMP_TOLERANCE_SECONDS` (5 minutes) off. An API-key-only request is then refused.
 
 ### Customer pays the wrong amount
 
 | Situation | What the system does | What the manager does |
 | --- | --- | --- |
-| Customer sends less | `needs_review`, bill stays `pending` | Cancel the waiting transfer line. Pay again as a split: a transfer line for the amount actually received plus cash or another transfer for the rest. Then assign the bank transaction to the new transfer line (exact amount) |
-| Customer sends more | `needs_review`, bill stays `pending` | Refund the extra outside the system. Press received on the line (it completes at the billed amount), then ignore the transaction with a note such as overpaid, refunded 10,000 |
+| Customer sends less | `needs_review`, bill stays `pending` | Cancel the waiting transfer line. Pay again as a split: a transfer line for the amount actually received plus cash or another transfer for the rest. Then assign the bank transaction to the new transfer line (exact amount). The pending-lines list (below) finds that line by amount |
+| Customer sends more | `needs_review`, bill stays `pending` | Refund the extra outside the system. Press received on the line (it completes at the billed amount; add a note if the club requires one), then ignore the transaction with a note such as overpaid, refunded 10,000 |
 | Customer sends twice | Second transfer is `needs_review` (line already paid) | Refund the duplicate, then ignore it |
 | Customer forgets the memo | `unmatched` | Assign it to the right pending line (exact amount only) |
+| Customer pays after the line was cancelled | `needs_review` ("line that is cancelled") | Create a new transfer line for the bill and assign the transaction to it |
 
 ### Limits to know
 
@@ -159,18 +189,19 @@ A void reverses a completed line, for example cash handed back or a transfer ret
 - The void is written to the audit trail with your name and the reason.
 - A cash void counts as money out of the drawer in the shift where the void happens, so a void after close lands in the next shift.
 
-To drop a line that never received money (a transfer that did not arrive), use cancel instead. Any user can do that: `POST /sessions/{id}/pay/lines/{line_id}/cancel`.
+To drop a line that never received money (a transfer that did not arrive), use cancel instead. Any user can do that: `POST /sessions/{id}/pay/lines/{line_id}/cancel`. If nobody does, the system cancels it automatically (see "Transfers that never arrive").
 
 ### Review bank transactions
 
-Open the review list with `GET /payments/bank-feed/transactions?status=needs_review`, and look at `unmatched` too.
+Open the review list with `GET /payments/bank-feed/transactions?status=needs_review`, and look at `unmatched` too. The list is paged with `limit` (1 to 200, default 50) and `offset`.
 
 | Action | Request | Rule |
 | --- | --- | --- |
+| Find the line to assign | `GET /payments/bank-feed/pending-lines?amount=<transaction amount>` | Lists bank-transfer lines still waiting for money, newest first. `amount` keeps only lines of exactly that amount; `limit` (1 to 200) and `offset` page the result. Each row has `line_id`, `order_id`, `source_type`, `source_id` (the session id for billiard), `amount`, `currency`, `order_total`, `transfer_memo`, `created_at`, `expires_at`, `expired` |
 | Link money to a bill | `POST /payments/bank-feed/transactions/{id}/assign` with `{"line_id": 7}` | The line must be a pending bank transfer of the same club, and the amount must match exactly (`422` otherwise) |
 | Dismiss | `POST /payments/bank-feed/transactions/{id}/ignore` with `{"note": "refunded"}` | Use for refunds, duplicates and transfers that are not bill payments. Add a note |
 
-A transaction can be assigned or ignored only while it is `unmatched` or `needs_review` (`409` otherwise).
+A transaction can be assigned or ignored only while it is `unmatched` or `needs_review` (`409` otherwise). A line whose QR expired (`expired: true`) but that is still `pending` can still be assigned, until the expiry job cancels it.
 
 ### Shifts and the cash drawer
 
@@ -182,21 +213,22 @@ Only the person who opened a shift or a manager can close it. At close the syste
 | Variance | Counted cash - expected cash. A negative number means cash is missing |
 | Not in the drawer | Change given back, and bank transfers (reported per method only) |
 
-Use `GET /payments/shifts/current` for live totals while a shift is open, and `GET /payments/shifts` for history. Because the drawer reads from payment lines for the whole club, any business paid through this module shows up in it.
+Use `GET /payments/shifts/current` for live totals while a shift is open, and `GET /payments/shifts` for history. Because the drawer reads from payment lines for the whole club, any business paid through this module shows up in it. A pay-out larger than the cash expected in the drawer is refused with `409`.
 
 ### Audit trail
 
-`GET /sessions/{id}/pay/events` lists every payment action on a bill, oldest first, with who did it. An empty actor means the system, for example the bank feed.
+`GET /sessions/{id}/pay/events` lists every payment action on a bill, oldest first, with who did it. An empty actor means the system, for example the bank feed or the expiry job.
 
 | Event | When |
 | --- | --- |
 | `line_created` | A payment line was added |
 | `cash_received` | A cash line completed |
 | `transfer_awaiting` | A transfer line is waiting for money |
-| `transfer_confirmed` | A cashier pressed received |
+| `transfer_confirmed` | A cashier pressed received (the note, if any, is in the event data) |
 | `transfer_auto_confirmed` | The bank feed matched and confirmed it (no actor) |
 | `transfer_assigned_from_bank` | A manager linked a bank transaction to a line |
-| `line_cancelled` | A pending line was cancelled |
+| `line_cancelled` | A pending line was cancelled by a person |
+| `line_expired` | The expiry job cancelled a transfer that never arrived (no actor) |
 | `line_failed` | A line could not be recorded |
 | `line_voided` | A manager reversed a completed line |
 | `order_paid` | Completed lines now cover the full amount |
@@ -213,7 +245,7 @@ Billiard screens use the `/sessions/{id}/pay...` URLs; every other business, and
 | `POST` | `/sessions/{id}/stop` | any user | Stop and return the bill |
 | `POST` | `/sessions/{id}/pay` | any user | Pay in one go or split |
 | `POST` | `/sessions/{id}/pay/confirm` | any user | Settle a Stripe payment |
-| `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | any user | Cashier confirms a transfer arrived |
+| `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | any user (manager only if `PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER`) | Cashier confirms a transfer arrived. Optional `{"note": "..."}`, required if `PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE` |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/cancel` | any user | Cancel a pending line |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/void` | manager, admin | Reverse a completed line (reason required) |
 | `GET` | `/sessions/{id}/pay/events` | any user | Audit trail |
@@ -227,7 +259,7 @@ The same operations exist for any business under `/payments/orders/{source_type}
 | `GET` | `/payments/orders/{source_type}/{source_id}` | any user of the club | Total, paid, balance and every line |
 | `POST` | `/payments/orders/{source_type}/{source_id}/pay` | any user | Pay in one go or split |
 | `POST` | `/payments/orders/{source_type}/{source_id}/pay/confirm` | any user | Settle a Stripe payment |
-| `POST` | `/payments/orders/{source_type}/{source_id}/lines/{line_id}/confirm` | any user | Confirm a transfer |
+| `POST` | `/payments/orders/{source_type}/{source_id}/lines/{line_id}/confirm` | any user (same manual-confirm rules) | Confirm a transfer |
 | `POST` | `/payments/orders/{source_type}/{source_id}/lines/{line_id}/cancel` | any user | Cancel a pending line |
 | `POST` | `/payments/orders/{source_type}/{source_id}/lines/{line_id}/void` | manager, admin | Reverse a completed line |
 | `GET` | `/payments/orders/{source_type}/{source_id}/events` | any user | Audit trail |
@@ -238,11 +270,14 @@ The same operations exist for any business under `/payments/orders/{source_type}
 | `POST` | `/payments/shifts/{id}/movements` | any user | Pay-in or pay-out with a reason |
 | `POST` | `/payments/shifts/{id}/close` | opener or manager | Close with the counted cash |
 | `POST` | `/payments/bank-feed/sepay` | SePay HMAC or API key | Webhook for incoming transfers |
-| `GET` | `/payments/bank-feed/transactions` | manager | List; filter with `?status=` |
+| `GET` | `/payments/bank-feed/transactions` | manager | List; filter with `?status=`; paged with `limit` and `offset` |
+| `GET` | `/payments/bank-feed/pending-lines` | manager | Transfer lines still waiting for money; `?amount=` filters by exact amount; paged |
 | `POST` | `/payments/bank-feed/transactions/{id}/assign` | manager | Link to a pending transfer line |
 | `POST` | `/payments/bank-feed/transactions/{id}/ignore` | manager | Dismiss |
 
-The older `/payments/` list and create, `/payments/client/{id}`, `/payments/user/{id}` and `/payments/stripe/...` endpoints are unchanged. They work on payment records, below the order layer.
+### Back-office endpoints (administrators only)
+
+`POST /payments/`, `PATCH /payments/{id}` and `/payments/stripe/create|confirm/{ref}|refund/{ref}` work on payment records below the order layer. They require an **admin or super admin**; a cashier or manager gets `403`. (`POST /payments/` and `PATCH /payments/{id}` used to have no login check at all; that is fixed.) `GET /payments/`, `/payments/client/{id}` and `/payments/user/{id}` need a login and are limited to the caller's own scope unless the caller is a super admin. Billiard screens never use any of these.
 
 ### Example: split payment
 
@@ -280,10 +315,10 @@ The bill in the response, trimmed:
 | Code | Typical reason |
 | --- | --- |
 | `401` | SePay webhook with a missing or wrong signature or key |
-| `403` | A non-manager tried to void, assign or ignore a bank transaction, or close someone else's shift |
+| `403` | A non-manager tried to void, assign, ignore or list bank transactions or pending lines, close someone else's shift, or confirm a transfer by hand while that is restricted to managers. A non-admin called a back-office `/payments/` endpoint |
 | `404` | Unknown session or line, or it belongs to another club. Never `403`, so ids are not leaked |
-| `409` | Wrong state: session not stopped, already paid, payment in progress, nothing to pay, shift already open, no open shift when one is required |
-| `422` | Split lines do not add up, cash tendered below the amount, void without a reason, assigned amount differs from the line |
+| `409` | Wrong state: session not stopped, already paid, payment in progress, nothing to pay, shift already open, no open shift when one is required, pay-out above the drawer cash, transaction already handled |
+| `422` | Split lines do not add up, cash tendered below the amount, void without a reason, assigned amount differs from the line, manual confirmation without the required note |
 | `503` | SePay webhook called while no secret or key is configured |
 
 ## Make another module payable
@@ -295,7 +330,7 @@ A new business module gets cash, change, split, VietQR, bank-feed confirmation, 
 | Method | What it must do |
 | --- | --- |
 | `source_type` | A unique name, e.g. `"shop_order"` |
-| `load(db, source_id, user, *, lock=True)` | Return the business object or raise `404`. With a user, enforce the tenant check (`404`, never `403`). With `user=None` (a system caller such as the bank feed) skip it. With `lock=True` take a row lock so payments on the same object are serialized |
+| `load(db, source_id, user, *, lock=True)` | Return the business object or raise `404`. With a user, enforce the tenant check (`404`, never `403`). With `user=None` (a system caller such as the bank feed or the expiry job) skip it. With `lock=True` take a row lock so payments on the same object are serialized |
 | `check_payable(obj)` | Raise `409` if it cannot take a payment yet (billiard: the session must be stopped) |
 | `quote(obj)` | Return `Quote(client_id, currency, total, metadata)`: what to collect, for which club. `metadata` is merged into every payment record so a human can reconcile it, e.g. `{"billiard_session_id": 42}` |
 | `apply_state(db, obj, order)` | Copy the order's state onto the business object. Do not commit |
@@ -340,6 +375,7 @@ payable_registry.register(ShopOrderPayable())
 - The amount always comes from `quote()`, never from the client.
 - Payments commits by itself, because the payment providers do. Your route does not need to wrap it in a transaction.
 - Never use the Payments tables from business code. Read the mirror fields, or call `payment_order_service`.
+- `apply_state` also runs when the system acts without a user (bank feed confirmation, expiry job), so it must not depend on a logged-in user.
 
 ## Troubleshooting
 
@@ -347,7 +383,12 @@ Most problems show up as a status code or a bank transaction that is not `matche
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| Customer paid by transfer but the bill is still `pending` | Webhook not set up, the memo was missing or mistyped, or the amount differs | Open `GET /payments/bank-feed/transactions?status=needs_review` and check `unmatched` too. Assign it to the line, or press received if you can see the money in the bank app |
+| Customer paid by transfer but the bill is still `pending` | Webhook not set up, the memo was missing or mistyped, or the amount differs | Open `GET /payments/bank-feed/transactions?status=needs_review` and check `unmatched` too. Assign it to the line (find it with `pending-lines?amount=`), or press received if you can see the money in the bank app |
+| The transfer line shows `cancelled` ("Transfer not received in time") and the customer says they paid | The expiry job cancelled it before the money arrived | The late transfer is in the review list as `needs_review`. Take payment again with a new transfer line and assign the transaction to it |
+| The bill went back to `unpaid` by itself | The expiry job cancelled the only waiting line | Expected. Pay again. To change or turn off the delay, see `PAYMENT_TRANSFER_AUTO_CANCEL_GRACE_MINUTES` |
+| Expired lines are never cancelled | `PAYMENT_TRANSFER_AUTO_CANCEL_GRACE_MINUTES=0`, or the scheduler is not running | Set a value above 0 and check that `payments_transfer_expiry_job` is registered and running |
+| `403 Only a manager can confirm a transfer manually` | `PAYMENT_MANUAL_CONFIRM_REQUIRES_MANAGER=true` and a cashier pressed received | Ask a manager, or wait for the bank feed |
+| `422 A note is required to confirm a transfer manually` | `PAYMENT_MANUAL_CONFIRM_REQUIRES_NOTE=true` and no note was sent | Send `{"note": "checked in the bank app, ref FT123"}` |
 | SePay webhook returns `401` | Wrong secret or key, a body changed in transit, or the server clock is more than 5 minutes off | Check `SEPAY_WEBHOOK_SECRET` or `SEPAY_API_KEY`, and keep the server clock on NTP. If a secret is set, an API-key-only request is refused |
 | SePay webhook returns `503` | Neither `SEPAY_WEBHOOK_SECRET` nor `SEPAY_API_KEY` is set | Set one |
 | No QR on a transfer line | `PAYMENT_BANK_BIN` or `PAYMENT_BANK_ACCOUNT_NO` is empty | Set both. Until then press received by hand |
@@ -355,7 +396,8 @@ Most problems show up as a status code or a bank transaction that is not `matche
 | `409` Stop the session before paying | The session is still active | Stop it first |
 | `409` about an open shift | `PAYMENT_REQUIRE_OPEN_SHIFT=true` and no shift is open | Open a shift with `POST /payments/shifts/open` |
 | `422` lines do not add up | Split amounts differ from the amount due | After a cancel or void the amount due can be lower than `grand_total`. Use `balance_due` from the bill |
-| `403` on void, assign or ignore | The user is not a manager or admin | Ask a manager, or give the user that role |
+| `403` on void, assign, ignore or pending-lines | The user is not a manager or admin | Ask a manager, or give the user that role |
+| `403` on `POST /payments/` or `PATCH /payments/{id}` | These are back-office routes for admins | Billiard screens never need them. Use the `/sessions/...` URLs |
 | `500` some payment lines could not be recorded | A line failed while saving (for example a database error) | Lines already recorded stay. Read the bill, then pay the balance again |
 | A bill shows `paid` but has no lines | It was paid before the Payments module existed | Expected. Such a bill counts as settled and cannot be paid again |
 | A transfer was waiting when `PAYMENT_MEMO_PREFIX` changed | The matcher no longer knows the old memo | It appears as `unmatched`. Assign it by hand |
@@ -365,4 +407,6 @@ Most problems show up as a status code or a bank transaction that is not `matche
 - Send one small real transfer and one real cash payment, then close the shift and check the variance.
 - Confirm the SePay webhook shows success in SePay's log.
 - Check that a cashier gets `403` on a void and a manager does not.
-- Run the tests: `test_payments_orders.py`, `test_payments_shifts.py`, `test_payments_bank_feed.py` and `test_billiard_payments.py`.
+- Let one test transfer expire and check that the line is cancelled after the grace period and the bill can be paid again.
+- If you set a manual-confirm restriction, check that the cashier sees the expected `403` or `422`.
+- Run the tests: `test_payments_orders.py`, `test_payments_shifts.py`, `test_payments_bank_feed.py`, `test_payments_transfer_expiry.py`, `test_payments_manual_confirm.py` and `test_billiard_payments.py`.
