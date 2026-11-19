@@ -13,7 +13,8 @@ class PaymentService:
 
     def create_payment(self, db: Session, payment_in: PaymentCreate) -> PaymentTransaction:
         try:
-            data = payment_in.dict()
+            # data = payment_in.dict()
+            data = payment_in.model_dump()
 
             # ✅ Auto-generate reference_id if missing
             if not data.get("reference_id"):
@@ -101,7 +102,8 @@ class PaymentService:
         if not payment:
             return None
         try:
-            for field, value in updates.dict(exclude_unset=True).items():
+            # for field, value in updates.dict(exclude_unset=True).items():
+            for field, value in updates.model_dump(exclude_unset=True).items():    
                 setattr(payment, field, value)
             db.commit()
             db.refresh(payment)
