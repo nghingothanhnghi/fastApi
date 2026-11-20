@@ -257,18 +257,3 @@ try:
 
 except Exception:
     logger.exception("[Startup Error] Failed to register background jobs")
-
-
-# -----------------------------------------
-# Hardware Detection Background Tasks
-# -----------------------------------------
-# @app.on_event("startup")
-# async def _start_detection_tasks():
-#     try:
-#         await start_hardware_detection_background_tasks()
-#         logger.info("Hardware detection background tasks started")
-#     except Exception:
-#         logger.exception(
-#             "[Startup Error] Failed to start hardware detection background tasks"
-#         )
-#         raise    
