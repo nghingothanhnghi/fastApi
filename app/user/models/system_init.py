@@ -1,3 +1,4 @@
+# app/user/models/system_init.py
 # new tiny table, used only to make bootstrap atomic across any DB engine
 from sqlalchemy import Column, Integer
 from app.database import Base

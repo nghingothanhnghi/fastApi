@@ -1,3 +1,4 @@
+# app/user/models/password_reset.py
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from app.database import Base
 
