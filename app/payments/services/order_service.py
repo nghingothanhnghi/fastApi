@@ -35,6 +35,7 @@ from app.payments.schemas.order import OrderResponse, PayOrderRequest, PaymentLi
 from app.payments.schemas.payment import PaymentStatus, PaymentUpdate
 from app.payments.services.payable_registry import PayableAdapter, Quote, payable_registry
 from app.payments.services.payment_service import payment_service
+from app.payments.services.bank_account_service import bank_account_service
 from app.payments.services.provider_registry import payment_provider_registry
 from app.payments.services.shift_service import shift_service
 from app.payments.utils.money import CENT, ZERO
@@ -248,6 +249,11 @@ class PaymentOrderService:
         specs = _specs(request, balance)
         _validate_specs(specs, balance)
 
+        bank_account_id = None
+
+        if any(s.method == "bank_transfer" for s in specs):
+            bank_account_id = bank_account_service.active_id(db, quote.client_id)
+
         # --- phase 1: the claim ---------------------------------------------------
         for s in specs:
             tendered = change = None
@@ -255,8 +261,14 @@ class PaymentOrderService:
                 tendered = s.cash_tendered if s.cash_tendered is not None else s.amount
                 change = (tendered - s.amount).quantize(CENT)
             order.lines.append(PaymentLine(
-                method=s.method, amount=s.amount, status=LineStatus.PENDING,
-                cash_tendered=tendered, change_given=change, note=s.note, created_by_id=user.id,
+                method=s.method,
+                amount=s.amount,
+                status=LineStatus.PENDING,
+                cash_tendered=tendered,
+                change_given=change,
+                note=s.note,
+                created_by_id=user.id,
+                bank_account_id=bank_account_id if s.method == "bank_transfer" else None,
             ))
         db.flush()                                   # assign line ids
         for line in order.lines:
@@ -709,7 +721,12 @@ class PaymentOrderService:
     def line_view(line: PaymentLine) -> PaymentLineResponse:
         transfer = None
         if line.method == "bank_transfer" and line.status == LineStatus.PENDING and line.transfer_memo:
-            transfer = build_transfer_instruction(line.amount, line.transfer_memo, line.expires_at)
+            transfer = build_transfer_instruction(
+                line.amount,
+                line.transfer_memo,
+                line.expires_at,
+                account=line.bank_account,
+            )
         return PaymentLineResponse(
             id=line.id, method=line.method, amount=line.amount, status=line.status.value,
             cash_tendered=line.cash_tendered, change_given=line.change_given,

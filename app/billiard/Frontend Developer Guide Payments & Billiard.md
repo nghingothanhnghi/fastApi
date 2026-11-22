@@ -8,6 +8,16 @@ The frontend needs about 30 endpoints to run a billiard table from start to paym
 
 New to the project? Read "The whole process, start to finish" first. It follows one session from the first tap to the receipt, then the screen-by-screen sections explain each part in detail.
 
+### What changed since Nov 20
+
+| Change | What to do in the frontend |
+| --- | --- |
+| Each club saves its own receiving bank account (`/payments/bank-accounts`). The transfer QR is built from it instead of a server setting | New manager screen 11 (bank account set-up). The cashier screens do not change, but read the QR rules in screen 2 |
+| `transfer.bank_code` can now be `null` while the QR still works (the club saved only the bank BIN) | Never require `bank_code`. Draw `qr_payload`; `qr_image_url` is still filled |
+| A transfer to a different account than the one the QR showed lands in the bank inbox as `needs_review` (reason "Received on account ending ...") | Show the reason as it is. No new status |
+| A QR already on screen keeps the account it was created with, even if a manager changes the account afterwards | Nothing to do. Rebuild the QR from the bill, never from a cached account |
+| New errors `413`, `501` (QR image upload) and `409` (account in use) | See "Error handling" and screen 11 |
+
 ### What changed since Nov 13
 
 | Change | What to do in the frontend |
@@ -302,7 +312,7 @@ Show the bill (items, `total_table_fee`, `total_product_fee`, `grand_total`) and
 
 Shown when `payment_state` is `pending` and a line has `method: "bank_transfer"`, `status: "pending"` and a `transfer` object.
 
-- Draw `transfer.qr_payload` as a QR code with a QR library. If it is `null`, use `<img src={transfer.qr_image_url}>`. If both are `null`, show the account number, account name, amount and memo as text so the customer can type the transfer.
+- Draw `transfer.qr_payload` as a QR code with a QR library. If it is `null`, use `<img src={transfer.qr_image_url}>`. If both are `null`, the club has no bank account saved: show the amount and memo and say "Ask a manager to set up the bank account" (managers: link to screen 11). Account number and name are shown as text when present. The account on the QR is the club's saved account at the moment the line was created, so always show `transfer.account_name` next to the QR; the cashier can spot a wrong account before the customer pays.
 - Always show the amount and the memo in large text. The memo (for example `PAY7L2`) is how the bank feed finds the payment.
 - Show a countdown to `transfer.expires_at`. After it passes, say the QR has expired but keep the Received button working, because the customer may have paid already. The server only cancels the line itself after a grace period (60 minutes by default).
 - Buttons: **Received** (`POST /sessions/{id}/pay/lines/{line_id}/confirm`) and **Cancel** (`POST /sessions/{id}/pay/lines/{line_id}/cancel`, optional reason).
@@ -393,6 +403,28 @@ The club's physical scoreboards are run by one central controller (ESP32). A man
 
 Show the `api_key` in a dialog with a copy button and a clear warning that it cannot be shown again, because only a hash is stored. Never keep it in local storage or logs. Show `last_seen` as "x minutes ago" and highlight an `offline` controller, because while it is offline the physical boards keep working but the POS sees changes only after it reconnects and syncs.
 
+### 11. Bank account set-up (manager)
+
+Each club saves the account its transfer QR pays into. Show this screen to managers and admins only (a cashier gets `403` on everything except `GET /payments/bank-accounts/current`).
+
+| Action | Call | Notes |
+| --- | --- | --- |
+| Show the current account | `GET /payments/bank-accounts/current` | `BankAccount` or `null`. Any logged-in user can call it, so a cashier screen can show "Paying to: CLUB A, ****6789" |
+| Read a QR image | `POST /payments/bank-accounts/parse-qr`, multipart form with one field `file` (PNG or JPG, max 5 MB) | Returns `{bank_bin, account_no, amount, memo}`. **Saves nothing.** Prefill the form with it |
+| Save | `POST /payments/bank-accounts` with `{"bank_bin": "970436", "account_no": "0123456789", "account_name": "CLUB A", "bank_code": "VCB"}` | `201`. Replaces the active account; the old one goes to history |
+| Correct the name | `PATCH /payments/bank-accounts/{id}` with `{"account_name": "...", "bank_code": "..."}` | Bank and account number cannot be edited: save a new account instead |
+| Turn off | `POST /payments/bank-accounts/{id}/deactivate` | Transfers then show no QR until a new account is saved. Ask for confirmation first |
+| History | `GET /payments/bank-accounts` and `GET /payments/bank-accounts/events` | Newest first |
+
+Build the form like this:
+
+1. Two ways in: an **Upload QR image** button and the plain fields. Both end at the same form.
+2. After an upload, fill `bank_bin` and `account_no` from the response and leave `account_name` empty. The QR does not carry the holder name, so the manager must type it. Ignore `amount` and `memo`: they are only present when the picture was a payment QR, and they are not saved.
+3. Show a clear summary before saving ("Account 0123456789, bank 970436, holder CLUB A") and say that new transfers will pay this account.
+4. After saving, reload `current` and show the account. Do not store it in local storage.
+
+Handle the errors in the form: `422` for a bad field or a QR that is not an account QR (show the message and keep the typed fields), `409` when the account is already used by another club, `413` for a large image (check the size in the browser first), and `501` when the server cannot read QR images (hide the upload button after the first `501` and keep typing).
+
 ## State to UI rules
 
 Decide what to render from the bill alone: `payment_state`, `payment_method`, `amount_paid`, `balance_due` and `payments[]`. Do not keep your own copy of the payment state; redraw from each response.
@@ -425,10 +457,10 @@ Cash lines are `completed` as soon as they are created, so a pending cash line o
 
 | `status` | Meaning | Actions |
 | --- | --- | --- |
-| `needs_review` | A code was found but the amount differs, the line was already paid, or the line was cancelled or voided. Read `reason` | Assign, Ignore |
+| `needs_review` | A code was found but the amount differs, the line was already paid, the line was cancelled or voided, or the money arrived on a different account than the QR showed. Read `reason` | Assign, Ignore |
 | `unmatched` | No code, or an unknown code | Assign, Ignore |
 | `matched` | It settled a line. `order_id` and `line_id` are set | None |
-| `ignored` | Outgoing transfer, another account, or dismissed. Read `note` | None |
+| `ignored` | Outgoing transfer, an account no club has saved, or dismissed. Read `note` | None |
 
 ### Who sees which buttons
 
@@ -440,6 +472,8 @@ Cash lines are `completed` as soon as they are created, so a pending cash line o
 | Price quote, list pricing rules | Any logged-in user of the club |
 | Void a line | Manager or admin |
 | List, assign or ignore bank transactions, list pending transfer lines | Manager or admin |
+| Save, correct or turn off the club's bank account, read its history, upload a QR image | Manager or admin |
+| Read the current bank account | Any logged-in user of the club |
 | Create, edit or deactivate a table, create, change or delete a pricing rule, table usage report | Manager or admin |
 | List, register controller devices | Manager or admin |
 | Close a shift | The user who opened it, or a manager |
@@ -469,12 +503,12 @@ type LineMethod = "cash" | "bank_transfer";
 type LineStatus = "pending" | "completed" | "cancelled" | "voided" | "failed";
 
 interface TransferInstruction {      // only on a pending bank_transfer line
-  bank_code: string | null;
+  bank_code: string | null;          // can be null even when the QR works (the club saved only the BIN)
   account_no: string | null;
   account_name: string | null;
   amount: Money;
   memo: string;                      // e.g. "PAY7L2"
-  qr_payload: string | null;         // draw as a QR code; null if no bank account is configured
+  qr_payload: string | null;         // draw as a QR code; null if the club has no bank account saved
   qr_image_url: string | null;       // hosted QR image fallback
   expires_at: ISODate | null;
 }
@@ -837,6 +871,46 @@ interface MovementRequest { type: "pay_in" | "pay_out"; amount: number; reason: 
 interface CloseShiftRequest { counted_cash: number; note?: string }       // >= 0
 ```
 
+### Bank account
+
+```ts
+interface BankAccount {              // GET /payments/bank-accounts/current (or null)
+  id: number;
+  client_id: number;
+  bank_bin: string;                  // 6 digits
+  bank_code: string | null;          // e.g. "VCB"
+  account_no: string;
+  account_name: string;
+  is_active: boolean;
+  created_at: ISODate;
+}
+
+interface BankAccountCreate {        // POST /payments/bank-accounts
+  bank_bin: string;                  // exactly 6 digits
+  account_no: string;                // 4 to 32 letters or digits
+  account_name: string;              // 2 to 100 characters
+  bank_code?: string | null;         // max 20
+}
+
+interface BankAccountRename { account_name: string; bank_code?: string | null }
+
+interface ParsedBankQr {             // POST /payments/bank-accounts/parse-qr (nothing is saved)
+  bank_bin: string;
+  account_no: string;
+  amount: number | null;             // only when the picture was a payment QR; ignore it
+  memo: string | null;
+}
+
+interface BankAccountEvent {         // GET /payments/bank-accounts/events (managers)
+  id: number;
+  account_id: number | null;
+  event_type: "account_created" | "account_replaced" | "account_renamed" | "account_deactivated";
+  actor_id: number | null;
+  data: Record<string, unknown> | null;
+  created_at: ISODate;
+}
+```
+
 ### Bank feed
 
 ```ts
@@ -994,6 +1068,31 @@ export const api = {
     if (status) q.set("status", status);
     return request<BankTransaction[]>("GET", `/payments/bank-feed/transactions?${q}`);
   },
+  // Bank account of the club
+  bankAccount:        () => request<BankAccount | null>("GET", "/payments/bank-accounts/current"),
+  bankAccounts:       () => request<BankAccount[]>("GET", "/payments/bank-accounts"),              // manager
+  bankAccountEvents:  () => request<BankAccountEvent[]>("GET", "/payments/bank-accounts/events"),  // manager
+  saveBankAccount:    (b: BankAccountCreate) => request<BankAccount>("POST", "/payments/bank-accounts", b),
+  renameBankAccount:  (id: number, b: BankAccountRename) =>
+    request<BankAccount>("PATCH", `/payments/bank-accounts/${id}`, b),
+  deactivateBankAccount: (id: number) =>
+    request<BankAccount>("POST", `/payments/bank-accounts/${id}/deactivate`),
+  // multipart upload: request() always sends JSON, so this call uses fetch directly.
+  // Do not set Content-Type yourself; the browser adds the boundary.
+  parseBankQr: async (file: File): Promise<ParsedBankQr> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(BASE + "/payments/bank-accounts/parse-qr", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, typeof err.detail === "string" ? err.detail : res.statusText);
+    }
+    return res.json();
+  },
   pendingLines: (amount?: number | string, limit = 50, offset = 0) => {    // manager only
     const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (amount !== undefined) q.set("amount", String(amount));
@@ -1086,13 +1185,15 @@ The server's `detail` text is readable, but it is English and not a stable code.
 | `400` | Adding an item that cannot be sold (`Product is not available`, `Variant does not belong to this product`) | Show the message and refresh the menu |
 | `403` | Not a manager (void, bank inbox, pending lines, create/edit/deactivate table, pricing rules, usage report, controller devices), or closing someone else's shift, or confirming a transfer by hand when the club limits that to managers (`Only a manager can confirm a transfer manually`) | "Only a manager can do this" |
 | `404` | Unknown id, or it belongs to another club | "Not found". Go back to the list |
-| `409` | Wrong state. Table: `Table is playing` / `Table is reserved` / `Table is maintenance` / `Table is inactive` / `Table already has an active session` (start); `Table '<name>' already exists` (create or rename); `Cannot deactivate a table with an active session` / `Billiard table is already inactive` (deactivate). Session: "Items can only be added to an active session", "Session is already completed", "Stop the session before paying". Payment: "Already paid", "A payment is already in progress", "This order already has cash/transfer payments; pay the balance with those methods" (card after part payment). Shift: "Open a shift before taking payments", "A shift is already open", a pay-out larger than the drawer. Scoreboard: "Session is not active", "Game is not active", "Games can only be started in an active session", "Session already has an active game", "Score cannot go below 0". Controller: `Device '<id>' is already registered` | Reload the bill, the board or the shift and redraw. The screen was out of date |
-| `422` | Split lines do not add up, cash tendered is below the amount, a void or movement reason is too short, the amount differs on assign, or a manual confirmation needs a note (`A note is required to confirm a transfer manually`) | Show the message next to the form. Validate the same rules in the browser first |
+| `409` | Wrong state. Table: `Table is playing` / `Table is reserved` / `Table is maintenance` / `Table is inactive` / `Table already has an active session` (start); `Table '<name>' already exists` (create or rename); `Cannot deactivate a table with an active session` / `Billiard table is already inactive` (deactivate). Session: "Items can only be added to an active session", "Session is already completed", "Stop the session before paying". Payment: "Already paid", "A payment is already in progress", "This order already has cash/transfer payments; pay the balance with those methods" (card after part payment). Shift: "Open a shift before taking payments", "A shift is already open", a pay-out larger than the drawer. Scoreboard: "Session is not active", "Game is not active", "Games can only be started in an active session", "Session already has an active game", "Score cannot go below 0". Controller: `Device '<id>' is already registered`. Bank account: `This bank account is already in use` | Reload the bill, the board or the shift and redraw. The screen was out of date |
+| `422` | Split lines do not add up, cash tendered is below the amount, a void or movement reason is too short, the amount differs on assign, or a manual confirmation needs a note (`A note is required to confirm a transfer manually`), or a bank account field is invalid or the picture is not an account QR | Show the message next to the form. Validate the same rules in the browser first |
+| `413` / `501` | Bank-account QR upload: the image is over 5 MB (`413`), or the server has no QR reader installed (`501`) | Check the size before sending. On `501` hide the upload button and let the manager type the account |
 | `500` on pay | Some lines could not be recorded | Reload the bill. Show which lines failed and offer to pay `balance_due` again |
 
 ### Edge cases
 
 - **Double click.** Disable the pay button while a request is running. A second pay call returns `409`, which you treat as "reload the bill".
+- **Account changed while a QR is waiting.** The waiting line keeps the account its QR showed, and the money still matches. Only new lines use the new account. Never redraw an old QR from `GET /payments/bank-accounts/current`; always draw it from the line's `transfer` object.
 - **Page reload during a transfer.** The QR data is on the bill (`GET /sessions/{id}`), so rebuild the waiting screen from it. Do not store the QR yourself.
 - **QR expired.** `transfer.expires_at` only says when to stop showing the QR as valid. The line stays `pending` for a grace period (60 minutes by default) so a slow bank notification can still match it, so keep both buttons. To start over, cancel and pay again for a new QR.
 - **Line cancelled by the server.** After the grace period a background job cancels the line itself: its `status` becomes `cancelled`, its `note` is "Transfer not received in time", and the bill goes back to `unpaid` (or stays `pending` if another part was already paid). If the screen is polling, treat that like any cancelled line and show the pay buttons again. If the customer pays after that, the money appears in the manager inbox as `needs_review` ("Money received for a line that is cancelled"); to apply it, pay again with a new transfer line and assign the transaction to it.
@@ -1160,6 +1261,13 @@ Run these on a development backend before release. Use a stopped session with a 
 | 40 | Turn on manual-confirm "manager only" and press Received as a cashier | `403` is shown, the line stays `pending`, and polling continues. A manager can confirm |
 | 41 | Open the controller screen as a manager and register a controller | The `api_key` is shown once. Registering the same id again returns `409` |
 | 42 | Stop sending requests from the controller for over 90 seconds | `GET /billiard/controller/status` shows it `offline` |
+| 43 | As a manager, save a bank account by typing the fields | `201`; `GET /payments/bank-accounts/current` shows it; the next transfer QR shows that account name |
+| 44 | Upload a screenshot of a bank account QR | The form is prefilled with the BIN and account number, nothing is saved until you type the holder name and press Save |
+| 45 | Upload a photo of something that is not a bank QR, or a card QR | `422` message is shown and the typed fields stay |
+| 46 | Save the same account in a second club | `409 This bank account is already in use` |
+| 47 | Log in as a cashier and open the bank account screen | Save, history and upload are hidden or answer `403`; `current` still works |
+| 48 | Change the account while a transfer QR is waiting, then pay that line | The old QR still settles the bill; a new transfer line shows the new account |
+| 49 | Send a webhook to an account that no club has saved | The transaction is `ignored` |
 
 ### Simulating the bank webhook in development
 
@@ -1169,7 +1277,7 @@ Ask the backend developer to set `SEPAY_API_KEY` on the dev server, then post a 
 curl -X POST https://<api>/payments/bank-feed/sepay \
   -H "Authorization: Apikey $SEPAY_API_KEY" -H "Content-Type: application/json" \
   -d '{"id": 900001, "gateway": "Vietcombank", "transactionDate": "2026-10-21 18:00:00",
-       "accountNumber": "<PAYMENT_BANK_ACCOUNT_NO>", "code": null,
+       "accountNumber": "<account number shown on the QR>", "code": null,
        "content": "chuyen tien PAY7L2", "transferType": "in", "transferAmount": 110000,
        "accumulated": 0, "referenceCode": "FT1", "description": ""}'
 ```
@@ -1180,6 +1288,7 @@ It answers `{"success": true}` even when the transfer is not matched, so check t
 
 - `GET /products` needs no login and is not limited to the user's club. Scoping it to the club would stop a cashier seeing another club's menu.
 - No endpoint says whether Stripe is configured, so the Card button has to be switched on in the frontend.
+- No endpoint says whether the club's bank account is set before a transfer is started: a missing account shows up as a transfer line with no QR. Call `GET /payments/bank-accounts/current` on the pay screen if you want to warn the cashier first.
 - No endpoint says whether manual confirmation needs a note or a manager, so the Received button has to react to the `403` and `422` responses.
 - No WebSocket yet: the board and the scoreboard have to poll. Real-time updates are on the backend roadmap.
 - A deactivated table cannot be reactivated, and a table cannot be put into `reserved` or `maintenance` from the API yet.

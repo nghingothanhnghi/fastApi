@@ -341,7 +341,7 @@ Grand total:     310,000
 | `BILLIARD_MAX_CLOCK_AHEAD_SECONDS` | `120` | How far ahead of the server a controller timestamp may be before the event is rejected |
 | `BILLIARD_MAX_OFFLINE_HOURS` | `48` | Controller timestamps older than this are rejected (too old to bill from the device clock) |
 
-Payment settings (bank account, QR, SePay, shifts, transfer expiry, manual-confirm rules) are in the Payments module: see [`app/payments/README.md`](../payments/README.md#8-configuration).
+Payment settings (SePay, shifts, transfer expiry, manual-confirm rules) are in the Payments module. The club's **receiving bank account is no longer an environment value**: each club saves its own in the app (`/payments/bank-accounts`), and the old `PAYMENT_BANK_*` variables are only a fallback. See [`app/payments/README.md`](../payments/README.md#8-configuration).
 
 Changing these only affects **new** sessions because each session snapshots its own rate and rule.
 
@@ -402,6 +402,7 @@ lines); the Payments URLs return the order view. Request bodies are the same, fo
 - The table is freed at Stop, so payment can happen later (see 5.3).
 - A bank-transfer line that nobody confirms is **cancelled automatically** by a background job some time after its QR expires (default 60 minutes of grace). The bill then goes back to `unpaid` (or stays part paid) so the cashier can start over. Money that arrives later is kept for a manager.
 - A cashier's manual "Received" tick can be restricted to managers and/or require a note, by configuration in the Payments module.
+- The QR on a transfer line pays the **club's own saved bank account** (`payment_bank_accounts`, one active per club). The line remembers the account its QR showed, so changing the account later does not break a QR that is already on screen. Billiard code does nothing for this: `table.client_id` decides the club and the Payments module picks the account. A manager saves the account by typing it or by uploading the bank's QR image (`/payments/bank-accounts`).
 
 ---
 
@@ -515,7 +516,7 @@ See [section 8](#8-controller-esp32-and-offline-sync).
 
 ### Shifts, bank feed and generic orders
 
-Moved to the Payments module: `/payments/shifts/*`, `/payments/bank-feed/*`, `/payments/orders/*`.
+Moved to the Payments module: `/payments/shifts/*`, `/payments/bank-feed/*`, `/payments/bank-accounts/*` (the club's receiving account), `/payments/orders/*`.
 See [`app/payments/README.md`](../payments/README.md#9-api-reference).
 
 ### Reports
@@ -577,10 +578,10 @@ curl -X POST http://localhost:8000/sessions/1/pay/lines/2/confirm -H "Authorizat
 |------|----------------|
 | `400` | Product inactive, or variant doesn't belong to the product |
 | `401` | Missing/expired token, or wrong controller key |
-| `403` | Voiding a payment without a manager role; manager-only table, rule, report or controller actions; confirming a transfer by hand when that is restricted to managers |
+| `403` | Voiding a payment without a manager role; manager-only table, rule, report or controller actions; confirming a transfer by hand when that is restricted to managers; saving the club's bank account as a non-manager |
 | `404` | Table/session/game/rule/product not found, or belongs to another tenant |
 | `409` | Wrong state: table busy or inactive, session already stopped, game not active, score below 0, already paid, payment in progress, nothing to pay |
-| `422` | Split lines don't add up to the amount due, cash tendered is less than the cash amount, invalid rule fields, a required manual-confirm note is missing |
+| `422` | Split lines don't add up to the amount due, cash tendered is less than the cash amount, invalid rule fields, a required manual-confirm note is missing, a bank account with invalid fields or an unreadable QR image |
 
 ---
 
@@ -627,7 +628,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 | `test_event_service.py` | Device score wins, duplicates, ordering by `device_seq`, rejected vs duplicate, contiguous cursor, authentication |
 | `test_event_sessions.py` | Session/game start and stop from the controller, adopt existing sessions, clock rules, full offline replay, HTTP endpoints |
 | `test_billiard_payments.py` | Billiard's side of payments: adapter rules, state mirror, legacy sessions, URLs |
-| `test_payments_*.py`, `test_stripe_provider.py` | The Payments module itself (see its README) |
+| `test_payments_*.py`, `test_stripe_provider.py` | The Payments module itself, including per-club bank accounts and the QR image reader (see its README) |
 
 ---
 
@@ -645,3 +646,4 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 10. **Adding a new payment method?** Add it to `PAYMENT_METHODS` in `app/payments/config.py` and to the `Literal` in `PayOrderRequest` (`app/payments/schemas/order.py`). The provider must already exist in `payment_provider_registry`.
 11. **Adding a new pricing rule type?** Add it to `PricingRuleType`, to `calculate_fee` in `utils/billing.py`, and to `normalize_params` in `schemas/pricing.py`, then add a test in `test_pricing_sessions.py`.
 12. **Changing a table schema?** Add a migration for deployed databases. `python -m app.init_db` only creates *missing* tables; it does not alter existing ones.
+13. **Where does the transfer QR get its bank account?** From the club's active `PaymentBankAccount`, chosen in the Payments module when the line is created and stored on the payment line. Never read `PAYMENT_BANK_*` in billiard code, and never put a bank account on a billiard table or session.

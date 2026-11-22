@@ -1,6 +1,11 @@
 # app/payments/utils/vietqr.py
 # VietQR (NAPAS 247, EMVCo merchant-presented QR) payload builder. Pure functions,
 # no network: the frontend renders `payload` as a QR code.
+#
+# CHANGED vs. the previous version: build_image_url and build_transfer_instruction take an
+# optional `account` (a PaymentBankAccount row of the club). When it is None they fall back to the
+# old config.BANK_* env values, so nothing breaks while clubs are being set up.
+# crc16_ccitt, _tlv, make_memo and build_payload are unchanged.
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 from typing import Optional
@@ -60,32 +65,54 @@ def build_payload(bank_bin: str, account_no: str, amount: Decimal, memo: str) ->
     return body + crc16_ccitt(body)
 
 
-def build_image_url(amount: Decimal, memo: str) -> Optional[str]:
+def _receiving_account(account=None) -> dict:
+    """The account to show: the club's PaymentBankAccount if given, else the old env values."""
+    if account is not None:
+        return {
+            "bank_bin": account.bank_bin,
+            "bank_code": account.bank_code,
+            "account_no": account.account_no,
+            "account_name": account.account_name,
+        }
+    return {
+        "bank_bin": config.BANK_BIN,
+        "bank_code": config.BANK_CODE,
+        "account_no": config.BANK_ACCOUNT_NO,
+        "account_name": config.BANK_ACCOUNT_NAME,
+    }
+
+
+def build_image_url(amount: Decimal, memo: str, account=None) -> Optional[str]:
     """Hosted QR image (img.vietqr.io) for UIs that cannot draw a QR themselves."""
-    if not (config.BANK_CODE and config.BANK_ACCOUNT_NO):
+    acc = _receiving_account(account)
+    bank = acc["bank_code"] or acc["bank_bin"]  # img.vietqr.io accepts a short code or a BIN
+    if not (bank and acc["account_no"]):
         return None
     whole = int(Decimal(amount).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     url = (
-        f"https://img.vietqr.io/image/{config.BANK_CODE}-{config.BANK_ACCOUNT_NO}-compact2.png"
+        f"https://img.vietqr.io/image/{bank}-{acc['account_no']}-compact2.png"
         f"?amount={whole}&addInfo={quote(memo)}"
     )
-    if config.BANK_ACCOUNT_NAME:
-        url += f"&accountName={quote(config.BANK_ACCOUNT_NAME)}"
+    if acc["account_name"]:
+        url += f"&accountName={quote(acc['account_name'])}"
     return url
 
 
-def build_transfer_instruction(amount: Decimal, memo: str, expires_at: Optional[datetime]) -> dict:
+def build_transfer_instruction(
+    amount: Decimal, memo: str, expires_at: Optional[datetime], account=None
+) -> dict:
     """What the cashier screen / customer display needs to take a transfer."""
+    acc = _receiving_account(account)
     payload = None
-    if config.BANK_BIN and config.BANK_ACCOUNT_NO:
-        payload = build_payload(config.BANK_BIN, config.BANK_ACCOUNT_NO, amount, memo)
+    if acc["bank_bin"] and acc["account_no"]:
+        payload = build_payload(acc["bank_bin"], acc["account_no"], amount, memo)
     return {
-        "bank_code": config.BANK_CODE or None,
-        "account_no": config.BANK_ACCOUNT_NO or None,
-        "account_name": config.BANK_ACCOUNT_NAME or None,
+        "bank_code": acc["bank_code"] or None,
+        "account_no": acc["account_no"] or None,
+        "account_name": acc["account_name"] or None,
         "amount": amount,
         "memo": memo,
         "qr_payload": payload,
-        "qr_image_url": build_image_url(amount, memo),
+        "qr_image_url": build_image_url(amount, memo, account),
         "expires_at": expires_at,
     }

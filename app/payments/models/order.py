@@ -102,6 +102,9 @@ class PaymentLine(Base):
 
     order = relationship("PaymentOrder", back_populates="lines")
 
+    bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("payment_bank_accounts.id", ondelete="SET NULL"), nullable=True)
+    bank_account = relationship("PaymentBankAccount", lazy="joined")
+
 
 class PaymentEvent(Base):
     """Append-only audit trail: who did what to an order's payments, and when."""

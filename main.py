@@ -18,7 +18,13 @@ from app.hydro_system.routes import ( system_router, sensor_router, actuator_rou
 
 
 
-from app.payments.routes import payment_router, order_router as payment_order_router, shift_router as payment_shift_router, bank_feed_router as payment_bank_feed_router
+from app.payments.routes import (
+    payment_router,
+    order_router as payment_order_router,
+    shift_router as payment_shift_router,
+    bank_feed_router as payment_bank_feed_router,
+    bank_account_router,
+)
 
 from app.jackpot.routes import jackpot_router
 
@@ -142,6 +148,7 @@ app.include_router(payment_router.router)  # Handles /payments/ endpoints
 app.include_router(payment_order_router.router)       # /payments/orders/*     pay, split, void for any registered business
 app.include_router(payment_shift_router.router)       # /payments/shifts/*     cash drawer
 app.include_router(payment_bank_feed_router.router)   # /payments/bank-feed/*  SePay webhook + manager tools
+app.include_router(bank_account_router.router)  # /payments/bank-accounts/*
 
 app.include_router(jackpot_router.router)  # Handles /jackpot/ endpoints
 

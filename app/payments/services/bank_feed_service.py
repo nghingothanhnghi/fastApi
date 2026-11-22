@@ -9,19 +9,21 @@
 #     no code) is kept for a manager to resolve; money is never silently absorbed or invented.
 import logging
 import re
+import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.payments import config
 from app.payments.models.bank_transaction import BankTransaction, BankTxStatus
 from app.payments.models.order import PaymentLine, PaymentLineStatus, PaymentOrder
+from app.payments.models.bank_account import PaymentBankAccount
 from app.payments.services.order_service import payment_order_service
 from app.payments.utils.money import CENT
 from app.payments.utils.permissions import is_manager
@@ -123,13 +125,53 @@ class BankFeedService:
         db.commit()
 
     @staticmethod
+    def _account_known(db: Session, account_number: Optional[str]) -> bool:
+        """Check whether a receiving account belongs to our configured accounts."""
+
+        env_no = (config.BANK_ACCOUNT_NO or "").strip()
+
+        any_rows = db.scalar(
+            select(PaymentBankAccount.id).limit(1)
+        ) is not None
+
+        if not env_no and not any_rows:
+            return True  # Legacy permissive behaviour
+
+        if env_no and account_number == env_no:
+            return True
+
+        return db.scalar(
+            select(PaymentBankAccount.id).where(
+                PaymentBankAccount.account_no == (account_number or "")
+            )
+        ) is not None
+
+    @staticmethod
+    def _line_account_no(db: Session, line: PaymentLine) -> Optional[str]:
+        """Get the bank account originally assigned to this payment line."""
+
+        acc = (
+            db.get(PaymentBankAccount, line.bank_account_id)
+            if line.bank_account_id
+            else None
+        )
+
+        return acc.account_no if acc else None        
+
+    @staticmethod
     def _match(db: Session, tx_id: int) -> None:
         tx = db.get(BankTransaction, tx_id)
 
         if tx.transfer_type != "in":
             return BankFeedService._set(db, tx, BankTxStatus.IGNORED, "Outgoing transfer")
-        if config.BANK_ACCOUNT_NO and (tx.account_number or "") != config.BANK_ACCOUNT_NO:
-            return BankFeedService._set(db, tx, BankTxStatus.IGNORED, "Received on a different account")
+  
+        if not BankFeedService._account_known(db, tx.account_number):
+            return BankFeedService._set(
+                db,
+                tx,
+                BankTxStatus.IGNORED,
+                "Received on a different account",
+            )
 
         memos = _memos(tx.content, tx.code)
         if not memos:
@@ -148,10 +190,26 @@ class BankFeedService:
             return BankFeedService._set(
                 db, tx, BankTxStatus.NEEDS_REVIEW,
                 "This payment line was already paid: possible duplicate transfer (refund the customer?)", line)
+        
         if line.status != PaymentLineStatus.PENDING:
             return BankFeedService._set(
                 db, tx, BankTxStatus.NEEDS_REVIEW,
                 f"Money received for a line that is {line.status.value}", line)
+
+        expected = BankFeedService._line_account_no(db, line)
+
+        if expected and (tx.account_number or "") != expected:
+            return BankFeedService._set(
+                db,
+                tx,
+                BankTxStatus.NEEDS_REVIEW,
+                (
+                    f"Received on account ending {(tx.account_number or '')[-4:]}, "
+                    f"but the QR showed account ending {expected[-4:]}"
+                ),
+                line,
+            )   
+
         if tx.amount != line.amount:
             return BankFeedService._set(
                 db, tx, BankTxStatus.NEEDS_REVIEW,
