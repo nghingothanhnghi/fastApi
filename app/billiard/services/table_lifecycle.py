@@ -20,6 +20,33 @@ def mark_available(table: BilliardTable) -> None:
     table.status = TableStatus.AVAILABLE
 
 
+def _require_free(table: BilliardTable) -> None:
+    """Same guard as mark_playing: only an active, AVAILABLE table can change state."""
+    if table.is_active is False:
+        raise ValueError("Table is inactive")
+    if table.status != TableStatus.AVAILABLE:
+        raise ValueError(f"Table is {table.status.value}")
+
+
+def mark_reserved(table: BilliardTable) -> None:
+    _require_free(table)
+    table.status = TableStatus.RESERVED
+
+
+def mark_maintenance(table: BilliardTable) -> None:
+    _require_free(table)
+    table.status = TableStatus.MAINTENANCE
+
+
+def release(table: BilliardTable) -> None:
+    """RESERVED / MAINTENANCE -> AVAILABLE. A playing or already free table is refused."""
+    if table.is_active is False:
+        raise ValueError("Table is inactive")
+    if table.status not in (TableStatus.RESERVED, TableStatus.MAINTENANCE):
+        raise ValueError(f"Table is {table.status.value}, only a reserved or maintenance table can be released")
+    table.status = TableStatus.AVAILABLE
+
+
 def find_inconsistencies(db: Session) -> list[str]:
     """Drift between table.status and session.status. Empty list = invariant holds."""
     problems: list[str] = []

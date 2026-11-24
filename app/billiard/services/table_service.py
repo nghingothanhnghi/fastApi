@@ -10,6 +10,7 @@ from app.billiard import config
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate, TableUpdate
 from app.billiard.services.billing_service import billing_service
+from app.billiard.services import table_lifecycle
 from app.billiard.services.session_lifecycle import open_session
 from app.billiard.utils.billing import as_utc, billable_minutes
 from app.user.models.user import User
@@ -132,6 +133,39 @@ class TableService:
         table.is_active = False
         db.flush()
 
+        return table
+
+    # action -> lifecycle function. The service never writes table.status itself.
+    _STATUS_ACTIONS = {
+        "reserve": table_lifecycle.mark_reserved,
+        "maintenance": table_lifecycle.mark_maintenance,
+        "release": table_lifecycle.release,
+    }
+
+    @staticmethod
+    def set_status(db: Session, table_id: int, action: str, user: User) -> BilliardTable:
+        """Reserve a table, put it in maintenance, or release it. Status only:
+        no reservation data is stored (see ROADMAP_PLAN.md, section 5 #1)."""
+        change = TableService._STATUS_ACTIONS[action]
+        table = db.execute(
+            scope_tables(select(BilliardTable).where(BilliardTable.id == table_id).with_for_update(), user)
+        ).scalar_one_or_none()
+        if not table:
+            raise HTTPException(404, "Billiard table not found")
+
+        # Check the session record too, not only table.status (same rule as deactivate_table).
+        if db.execute(
+            select(TableSession.id).where(
+                TableSession.table_id == table_id, TableSession.status == SessionStatus.ACTIVE
+            )
+        ).first():
+            raise HTTPException(409, "Table has an active session")
+
+        try:
+            change(table)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        db.flush()
         return table
 
     @staticmethod
