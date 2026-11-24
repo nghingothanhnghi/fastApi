@@ -38,7 +38,7 @@ Ordered by dependency and by value to the cashier. Sizes: **S** under 1 day, **M
 | **2. Time and packages** | D Timed play (M), E Package CRUD (M), F Packages in billing (L) | D creates the `ends_at` logic that packages reuse |
 | **3. Device events** | G More device events (M) | Needs A (`table_status`) and D (`time_extend`) |
 | **4. Operations** | H Offline heartbeat job (S), I WebSocket POS updates (L) | Independent. I is easiest once phases 1 to 3 have settled the event names |
-| **5. Needs a decision** | J Split bills across rate windows (L), K RS485 firmware (spec only here) | Product decision / hardware, see open questions |
+| **5. Needs a decision** | J Split bills across rate windows (L), K RS485 firmware (spec only here) | J waits for the spike (section 5, #8). K is spec and simulator only (section 5, #9) |
 
 ```text
 P0 ──► C Discounts ──┐
@@ -63,7 +63,7 @@ Each plan lists the tasks, then the test cases. Test names follow the existing `
 | A1 | `mark_reserved(table)`, `mark_maintenance(table)`, `release(table)`. Allowed only from `AVAILABLE` (release from `RESERVED` / `MAINTENANCE`). Raise `ValueError` like `mark_playing` | `services/table_lifecycle.py` |
 | A2 | `table_service.set_status(db, table_id, action, user)`: lock table with `scope_tables(...).with_for_update()`, check an active session record (same check as `deactivate_table`), call the lifecycle function, map `ValueError` to `409` | `services/table_service.py` |
 | A3 | Routes `POST /tables/{id}/reserve`, `POST /tables/{id}/maintenance`, `POST /tables/{id}/release`. ADMIN, MANAGER | `routes/table_router.py` |
-| A4 | Schema: optional `note` (max 200). No new column: keep it out of the table row. Record who/when only if audit is wanted (see open question 1) | `schemas/table.py` |
+| A4 | Schema: optional `note` (max 200). No new column: keep it out of the table row. Status only (decision 1): no reservation data is stored. A full reservation feature is a later, separate item (section 5, Follow-up) | `schemas/table.py` |
 | A5 | README: section 4 note, section 9 table, remove the roadmap row | `README.md` |
 
 No migration (columns already exist).
@@ -88,7 +88,7 @@ No migration (columns already exist).
 
 `SessionStatus.CANCELLED` exists. Cancel means "opened by mistake": no bill, no payment, the table is freed.
 
-**Decision (default, see open question 2):** only ADMIN/MANAGER, only `ACTIVE` sessions, reason required. A `COMPLETED` session is never cancelled (that is a payment void, which already exists).
+**Decision (section 5, #2):** only ADMIN/MANAGER, only `ACTIVE` sessions, reason required. A `COMPLETED` session is never cancelled (that is a payment void, which already exists).
 
 **Tasks**
 
@@ -125,7 +125,7 @@ No migration (columns already exist).
 
 Column `discount` exists; `grand_total` ignores it. `payment_adapter.py:55` reads `grand_total` when the payment order is created, so the discount must be set **before** an order exists.
 
-**Decisions (defaults, see open question 3):** fixed amount or percent of the **table fee + products**; set by ADMIN/MANAGER; allowed while the session is `ACTIVE` or `COMPLETED` with `payment_order_id IS NULL`; capped so `grand_total` never goes below 0.
+**Decisions (section 5, #3):** fixed amount or percent of the **table fee + products**; set by ADMIN/MANAGER; allowed while the session is `ACTIVE` or `COMPLETED` with `payment_order_id IS NULL`; capped so `grand_total` never goes below 0.
 
 **Tasks**
 
@@ -166,7 +166,7 @@ Column `discount` exists; `grand_total` ignores it. `payment_adapter.py:55` read
 
 `ends_at` exists and the controller state already sends it (`session_ends_at`). Nothing sets it. **Billing is not changed**: the fee still comes from real start/stop times. `ends_at` is a countdown and an overtime flag only.
 
-**Decision (default, see open question 4):** the server never auto-stops a session. It flags overtime; staff or the controller stops it.
+**Decision (section 5, #4):** the server never auto-stops a session. It flags overtime; staff or the controller stops it.
 
 **Tasks**
 
@@ -231,7 +231,7 @@ No migration. Package edits never change old sessions (see F: the session stores
 
 ### F. Packages in billing (L)
 
-**Billing rule (default, see open question 5):** the package price covers the first `duration_minutes` of table time. Time beyond that is billed with the session's own pricing rule (rate, rule type, params).
+**Billing rule (section 5, #5 and #6):** the package price covers the first `duration_minutes` of **table time only**. Products and additional services are charged separately. Time beyond the package duration is billed with the pricing rule assigned to the session (rate, rule type, params). Any package can be used on any active table: there is **no** table or zone restriction, so `BilliardPackage` gets no `table_id`.
 
 ```text
 table_fee = package_price + calculate_fee(rule_type, hourly_rate, max(0, minutes - package_duration), params)
@@ -404,15 +404,17 @@ Today one rule is chosen at Start (`billing_service` header comment). A 20:00 to
 
 ### K. RS485 firmware (spec and test harness only in this repo)
 
-Firmware is outside FastAPI. What the backend repo can own:
+Firmware and hardware deployment are **out of scope** (section 5, #9). The architecture is STM32 → RS485 → ESP32-WROOM → Wi-Fi → FastAPI, so there are **two protocols**: the RS485/UART link between the STM32 and the ESP32 (documented here, implemented by the firmware team later), and the existing HTTP event contract between the ESP32 and FastAPI (already built). What the backend repo can own:
 
 | # | Task |
 |---|------|
-| K1 | `docs/controller_protocol.md`: RS485 frame format, button codes, display fields, mapping of each button to the **event names already supported**. This is the contract the firmware follows |
+| K0 | `docs/hardware_spec.md`: block diagram from section 5 (STM32, RS485 transceiver, RS485-to-UART transceiver, ESP32-WROOM with CH340), signal and pin list, baud rate and bus settings (to be agreed), power, termination and biasing notes |
+| K1 | `docs/controller_protocol.md`: RS485/UART frame format between STM32 and ESP32 (start byte, address, command, length, payload, CRC), button codes, display fields, and how the **ESP32 translates each frame into the event names already supported**. The STM32 never talks to FastAPI: the ESP32 adds `event_id`, `device_seq`, timestamps and the offline queue |
 | K2 | `app/tests/device_simulator.py`: a script/class that replays a scripted offline day through `/billiard/controller/sync` (events with `device_seq`, `clock_synced`, local ids) |
 | K3 | Contract tests (`test_controller_contract.py`): one JSON fixture per event type that the firmware team can reuse; assert accepted, duplicate, reject and ordering results |
+| K4 | Optional frame fixtures (`app/tests/fixtures/rs485_frames.json`): example RS485 frames with their expected backend event, so the ESP32 firmware can be tested against the same table (the frame parser itself is firmware, not backend) |
 
-**Test cases:** `test_every_documented_event_has_a_fixture`, `test_fixtures_validate_against_DeviceEventIn`, `test_simulated_offline_day_replays_to_same_totals_as_pos_path`, `test_replay_after_reboot_resumes_from_server_state_version`.
+**Test cases:** `test_every_documented_event_has_a_fixture`, `test_every_documented_frame_maps_to_a_supported_event`, `test_fixtures_validate_against_DeviceEventIn`, `test_simulated_offline_day_replays_to_same_totals_as_pos_path`, `test_replay_after_reboot_resumes_from_server_state_version`.
 
 ---
 
@@ -442,19 +444,41 @@ Run command (same as the README): `python -m pytest app/tests/test_<file>.py -v`
 
 ---
 
-## 5. Open questions (answer before the item starts)
+## 5. Open questions (decided)
 
-| # | Item | Question | Default used above |
-|---|------|----------|--------------------|
-| 1 | A | Do reservations need who/when/for-whom (name, phone, time)? If yes it is a real reservation feature (new table), not only a status | Status only |
-| 2 | B | Who may cancel, and until when? Any cashier within N minutes, or manager only? | Manager only, active sessions only |
-| 3 | C | Percent or fixed amount? On table fee, products, or both? Manager approval? | Both allowed, applied to table + products, manager only |
-| 4 | D | When `ends_at` passes: only flag overtime, or auto-stop and bill? | Flag only, never auto-stop |
-| 5 | F | Does the package price cover the table time only? What is billed after the package time ends? Can one package be used on any table? | Table time only, overtime at the session's rule, any table |
-| 6 | F | Included products: free units counted per session, or a fixed free bundle added at start? | Counted per session as staff add them |
-| 7 | I | One API worker or several in production (Render)? Several needs Redis pub/sub | Single worker, interface ready for Redis |
-| 8 | J | For `hourly`, `block`, `minimum_hour`: how should rounding work across segments? | Spike first, `per_minute` only |
-| 9 | K | Who owns the firmware and which MCU/transceiver? | Spec and simulator only |
+All nine questions are answered. The answers below are the **decisions the plan is built on**. If one changes, the item it belongs to must be re-planned first.
+
+| # | Item | Question | Decision |
+|---|------|----------|----------|
+| 1 | A | Do reservations need who/when/for-whom (name, phone, time)? | **Status only** (kept as the default). A full reservation feature (name, phone, time, new table) is wanted later, but it is **not** part of item A. See "Follow-up" below |
+| 2 | B | Who may cancel, and until when? | **Manager only, active sessions only** |
+| 3 | C | Percent or fixed amount? On table fee, products, or both? Manager approval? | **Both allowed (percent or fixed), applied to table + products, manager only** |
+| 4 | D | When `ends_at` passes: only flag overtime, or auto-stop and bill? | **Flag only, never auto-stop** |
+| 5 | F | Does the package price cover table time only? What is billed after the package time ends? Can one package be used on any table? | **The package price covers table time only.** Products and additional services are charged separately. When the package duration expires, overtime is billed according to the pricing rule assigned to the session. **Any package can be used on any active billiard table**, without table or zone restrictions |
+| 6 | F | Included products: free units counted per session, or a fixed free bundle added at start? | **Counted per session as staff add them** |
+| 7 | I | One API worker or several in production (Render)? | **Single worker, interface ready for Redis** (several workers need Redis pub/sub) |
+| 8 | J | For `hourly`, `block`, `minimum_hour`: how should rounding work across segments? | **Default kept:** design spike first, `per_minute` only until the spike is agreed |
+| 9 | K | Who owns the firmware and which MCU/transceiver? | **Spec and simulator only.** Hardware architecture below. Physical firmware development and hardware deployment are excluded from the current scope |
+
+### Hardware architecture (decision 9)
+
+```text
+STM32 MCU --(UART)--> RS485 transceiver ==(RS485 differential pair)==> RS485-to-UART transceiver --(UART)--> ESP32-WROOM --(Wi-Fi)--> FastAPI backend
+                                                                                                     (CH340 USB-to-UART interface)
+```
+
+| Part | Role |
+|------|------|
+| **STM32 MCU** | Table side: buttons, display, local scores. Talks RS485 through an external transceiver |
+| **RS485 (differential)** | The wired link between the STM32 side and the ESP32 side |
+| **RS485-to-UART transceiver** | External transceiver on the ESP32 side, converts the bus to UART |
+| **ESP32-WROOM** (CH340 USB-to-UART interface) | The "controller" the backend already knows: reads the serial data and sends the events to FastAPI over Wi-Fi (`/billiard/controller/events`, `/sync`) |
+
+**Current project scope for K:** hardware specifications, communication protocol documentation, and the simulator only. The backend contract does not change: the ESP32 keeps the device headers, `device_seq`, `event_id` and offline queue described in README section 8.
+
+### Follow-up (not scheduled): full reservations
+
+Decision 1 keeps item A as a status change. The wanted reservation feature (customer name, phone, date/time, hold period, which table) is a **separate, later item** with its own table, endpoints and tests. When it is planned it will reuse item A's lifecycle functions (`mark_reserved`, `release`) and must handle: overlapping reservations on one table, a no-show timeout that releases the table, and starting a session from a reservation. It is listed here so item A's design does not block it: item A stores no reservation data and adds no column, so nothing has to be undone.
 
 ---
 
