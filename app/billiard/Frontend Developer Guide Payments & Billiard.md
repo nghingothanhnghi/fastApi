@@ -876,7 +876,7 @@ interface CloseShiftRequest { counted_cash: number; note?: string }       // >= 
 ```ts
 interface BankAccount {              // GET /payments/bank-accounts/current (or null)
   id: number;
-  client_id: number;
+  client_id: string;                 // UUID string
   bank_bin: string;                  // 6 digits
   bank_code: string | null;          // e.g. "VCB"
   account_no: string;

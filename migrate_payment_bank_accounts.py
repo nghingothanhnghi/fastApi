@@ -17,6 +17,22 @@ from app.payments import config  # same source the app uses (.env is loaded ther
 from app.payments.models.bank_account import PaymentBankAccount, PaymentBankAccountEvent  # noqa: F401
 
 
+def _fix_client_id_type(conn, insp):
+    """client_id is a UUID string, but the first version declared it INTEGER.
+
+    PostgreSQL rejects UUID strings in an INTEGER column, so convert it to VARCHAR.
+    SQLite is dynamically typed (TEXT values are stored fine in the old column) and
+    cannot ALTER a column type, so it is left as is; new databases get VARCHAR.
+    """
+    if engine.url.get_backend_name() != "postgresql":
+        return
+    for table in ("payment_bank_accounts", "payment_bank_account_events"):
+        col = next((c for c in insp.get_columns(table) if c["name"] == "client_id"), None)
+        if col is not None and "INT" in str(col["type"]).upper():
+            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN client_id TYPE VARCHAR USING client_id::text"))
+            print(f"converted {table}.client_id to VARCHAR")
+
+
 def main():
     if engine.url.get_backend_name() == "sqlite" and engine.url.database and os.path.exists(engine.url.database):
         backup = f"{engine.url.database}.bak-{datetime.now():%Y%m%d%H%M%S}"
@@ -31,6 +47,8 @@ def main():
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("payment_lines")}
     with engine.begin() as conn:
+        _fix_client_id_type(conn, insp)
+
         if "bank_account_id" not in cols:
             conn.execute(text("ALTER TABLE payment_lines ADD COLUMN bank_account_id INTEGER"))
             print("added payment_lines.bank_account_id")
