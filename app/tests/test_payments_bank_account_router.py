@@ -17,7 +17,7 @@ from app.tests.test_payments_bank_qr_parser import make_qr
 
 def _user(role="manager", uid=1):
     # same surface as app.user.models.user.User that payments.utils.permissions.is_manager uses
-    return SimpleNamespace(id=uid, client_id=1, is_admin=lambda: False, has_role=lambda r: r == role)
+    return SimpleNamespace(id=uid, client_id="club-1", is_admin=lambda: False, has_role=lambda r: r == role)
 
 
 USER = {"u": _user()}

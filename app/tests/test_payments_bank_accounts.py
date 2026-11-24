@@ -26,42 +26,50 @@ def body(no="0123456789", bin_="970436"):
 
 
 def test_create_first_account(db):
-    acc = svc.create(db, 1, body(), actor_id=9)
-    assert acc.is_active and svc.get_active(db, 1).id == acc.id
+    acc = svc.create(db, "club-1", body(), actor_id=9)
+    assert acc.is_active and svc.get_active(db, "club-1").id == acc.id
 
 
 def test_new_account_replaces_old_and_keeps_history(db):
-    a = svc.create(db, 1, body("1111"), 9)
-    b = svc.create(db, 1, body("2222"), 9)
-    assert svc.get_active(db, 1).id == b.id
+    a = svc.create(db, "club-1", body("1111"), 9)
+    b = svc.create(db, "club-1", body("2222"), 9)
+    assert svc.get_active(db, "club-1").id == b.id
     assert a.is_active is False
-    assert len(svc.list_accounts(db, 1)) == 2
-    assert [e.event_type for e in svc.list_events(db, 1)] == ["account_replaced", "account_created"]
+    assert len(svc.list_accounts(db, "club-1")) == 2
+    assert [e.event_type for e in svc.list_events(db, "club-1")] == ["account_replaced", "account_created"]
 
 
 def test_same_account_in_other_club_is_409(db):
-    svc.create(db, 1, body(), 9)
+    svc.create(db, "club-1", body(), 9)
     with pytest.raises(HTTPException) as e:
-        svc.create(db, 2, body(), 9)
+        svc.create(db, "club-2", body(), 9)
     assert e.value.status_code == 409
 
 
 def test_clubs_are_isolated(db):
-    svc.create(db, 1, body("1111"), 9)
-    assert svc.get_active(db, 2) is None
-    a = svc.get_active(db, 1)
+    svc.create(db, "club-1", body("1111"), 9)
+    assert svc.get_active(db, "club-2") is None
+    a = svc.get_active(db, "club-1")
     with pytest.raises(HTTPException) as e:
-        svc.rename(db, 2, a.id, BankAccountRename(account_name="HACK"), 9)
+        svc.rename(db, "club-2", a.id, BankAccountRename(account_name="HACK"), 9)
     assert e.value.status_code == 404
 
 
 def test_deactivate_then_none_active(db):
-    a = svc.create(db, 1, body(), 9)
-    svc.deactivate(db, 1, a.id, 9)
-    assert svc.get_active(db, 1) is None
+    a = svc.create(db, "club-1", body(), 9)
+    svc.deactivate(db, "club-1", a.id, 9)
+    assert svc.get_active(db, "club-1") is None
 
 
 def test_old_account_number_can_be_reused_after_deactivation(db):
-    a = svc.create(db, 1, body(), 9)
-    svc.deactivate(db, 1, a.id, 9)
-    assert svc.create(db, 2, body(), 9).client_id == 2
+    a = svc.create(db, "club-1", body(), 9)
+    svc.deactivate(db, "club-1", a.id, 9)
+    assert svc.create(db, "club-2", body(), 9).client_id == "club-2"
+
+def test_uuid_client_id_serializes_in_response_schema(db):
+    """Regression: BankAccountOut.client_id was `int`, so UUID tenants caused a 500."""
+    from app.payments.schemas.bank_account import BankAccountOut
+
+    cid = "aa28aad5-1188-4c5e-9f0a-1d2b3c4d5e6f"
+    acc = svc.create(db, cid, body(), 9)
+    assert BankAccountOut.model_validate(acc).client_id == cid

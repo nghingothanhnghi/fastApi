@@ -28,7 +28,7 @@ class PaymentBankAccount(Base):
     __tablename__ = "payment_bank_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
 
     bank_bin: Mapped[str] = mapped_column(String(10), nullable=False)
     bank_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -65,7 +65,7 @@ class PaymentBankAccountEvent(Base):
     __tablename__ = "payment_bank_account_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
     account_id: Mapped[int | None] = mapped_column(
         ForeignKey("payment_bank_accounts.id", ondelete="SET NULL"), nullable=True
     )

@@ -13,7 +13,7 @@ from app.payments.utils.vietqr_parser import ParsedBankQr, parse_vietqr
 class BankAccountService:
     # ---- reads -------------------------------------------------------------
     @staticmethod
-    def get_active(db: Session, client_id: int) -> PaymentBankAccount | None:
+    def get_active(db: Session, client_id: str) -> PaymentBankAccount | None:
         return db.scalar(
             select(PaymentBankAccount).where(
                 PaymentBankAccount.client_id == client_id, PaymentBankAccount.is_active.is_(True)
@@ -21,12 +21,12 @@ class BankAccountService:
         )
 
     @staticmethod
-    def active_id(db: Session, client_id: int) -> int | None:
+    def active_id(db: Session, client_id: str) -> int | None:
         acc = BankAccountService.get_active(db, client_id)
         return acc.id if acc else None
 
     @staticmethod
-    def list_accounts(db: Session, client_id: int) -> list[PaymentBankAccount]:
+    def list_accounts(db: Session, client_id: str) -> list[PaymentBankAccount]:
         return list(
             db.scalars(
                 select(PaymentBankAccount)
@@ -36,14 +36,14 @@ class BankAccountService:
         )
 
     @staticmethod
-    def _get(db: Session, client_id: int, account_id: int) -> PaymentBankAccount:
+    def _get(db: Session, client_id: str, account_id: int) -> PaymentBankAccount:
         acc = db.get(PaymentBankAccount, account_id)
         if not acc or acc.client_id != client_id:  # 404, never 403, for other tenants
             raise HTTPException(404, "Bank account not found")
         return acc
 
     @staticmethod
-    def list_events(db: Session, client_id: int, limit: int = 100) -> list[PaymentBankAccountEvent]:
+    def list_events(db: Session, client_id: str, limit: int = 100) -> list[PaymentBankAccountEvent]:
         return list(
             db.scalars(
                 select(PaymentBankAccountEvent)
@@ -55,7 +55,7 @@ class BankAccountService:
 
     # ---- writes ------------------------------------------------------------
     @staticmethod
-    def _log(db: Session, client_id: int, account_id: int | None, event: str, actor_id: int | None, data=None):
+    def _log(db: Session, client_id: str, account_id: int | None, event: str, actor_id: int | None, data=None):
         db.add(
             PaymentBankAccountEvent(
                 client_id=client_id, account_id=account_id, event_type=event, actor_id=actor_id, data=data
@@ -63,7 +63,7 @@ class BankAccountService:
         )
 
     @staticmethod
-    def create(db: Session, client_id: int, body: BankAccountCreate, actor_id: int | None) -> PaymentBankAccount:
+    def create(db: Session, client_id: str, body: BankAccountCreate, actor_id: int | None) -> PaymentBankAccount:
         duplicate = db.scalar(
             select(PaymentBankAccount).where(
                 PaymentBankAccount.bank_bin == body.bank_bin,
@@ -101,7 +101,7 @@ class BankAccountService:
         return acc
 
     @staticmethod
-    def rename(db: Session, client_id: int, account_id: int, body: BankAccountRename, actor_id: int | None):
+    def rename(db: Session, client_id: str, account_id: int, body: BankAccountRename, actor_id: int | None):
         acc = BankAccountService._get(db, client_id, account_id)
         before = {"account_name": acc.account_name, "bank_code": acc.bank_code}
         acc.account_name = body.account_name
@@ -112,7 +112,7 @@ class BankAccountService:
         return acc
 
     @staticmethod
-    def deactivate(db: Session, client_id: int, account_id: int, actor_id: int | None):
+    def deactivate(db: Session, client_id: str, account_id: int, actor_id: int | None):
         acc = BankAccountService._get(db, client_id, account_id)
         if acc.is_active:
             acc.is_active = False

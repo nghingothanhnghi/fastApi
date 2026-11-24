@@ -25,7 +25,7 @@ class BankAccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    client_id: int
+    client_id: str  # tenant id is a UUID string, same as PaymentOrder.client_id
     bank_bin: str
     bank_code: str | None = None
     account_no: str
