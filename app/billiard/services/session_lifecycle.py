@@ -33,6 +33,16 @@ def resolve_time(at: Optional[datetime], floor: Optional[datetime] = None) -> tu
     return value, source
 
 
+def recompute_totals(session: TableSession) -> None:
+    """The ONE place that derives product fee and grand total from the session's
+    own parts: grand_total = max(table_fee + product_fee - discount, 0).
+    Call it after anything that changes the table fee, the items or the discount.
+    With discount = 0 the result is exactly table_fee + product_fee (old behaviour)."""
+    session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
+    discount = session.discount or Decimal("0")
+    session.grand_total = max(session.total_table_fee + session.total_product_fee - discount, Decimal("0"))
+
+
 def open_session(
     db: Session, table: BilliardTable, opened_by_id: Optional[int], at: Optional[datetime] = None
 ) -> TableSession:
@@ -74,8 +84,7 @@ def finalize_stop(
     session.status = SessionStatus.COMPLETED
     session.duration_minutes = minutes
     session.total_table_fee = fee
-    session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
-    session.grand_total = fee + session.total_product_fee
+    recompute_totals(session)
     session.stopped_by_id = stopped_by_id
 
     close_active_game(db, session, end)    # a stopped session must not leave a game running

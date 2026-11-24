@@ -63,8 +63,7 @@ class SessionService:
             added_by_id=user.id,
         )
         session.items.append(item)
-        session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
-        session.grand_total = session.total_table_fee + session.total_product_fee
+        session_lifecycle.recompute_totals(session)
         db.flush()
         return item
 
