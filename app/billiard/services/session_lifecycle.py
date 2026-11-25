@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.billiard.models import BilliardTable, SessionStatus, TableSession
 from app.billiard.services.billing_service import billing_service
-from app.billiard.services.game_lifecycle import close_active_game
+from app.billiard.services.game_lifecycle import cancel_active_game, close_active_game
 from app.billiard.services.table_lifecycle import mark_available, mark_playing
 from app.billiard.utils.billing import as_utc, billable_minutes
 
@@ -89,5 +89,30 @@ def finalize_stop(
 
     close_active_game(db, session, end)    # a stopped session must not leave a game running
     mark_available(table)                  # bill is generated at STOP, not at payment
+    db.flush()
+    return session
+
+
+def cancel_session(
+    db: Session, session: TableSession, table: BilliardTable,
+    cancelled_by_id: Optional[int], reason: str, at: Optional[datetime] = None,
+) -> TableSession:
+    """Cancel an ACTIVE session (opened by mistake): no bill, no payment. Keeps the rows
+    (items, games, who/why/when) for audit, zeroes every total, ends the running game as
+    CANCELLED and frees the table. Caller must have checked status == ACTIVE and the role."""
+    end, source = resolve_time(at, floor=session.start_time)
+
+    session.status = SessionStatus.CANCELLED
+    session.end_time = end
+    session.end_time_source = source
+    session.cancelled_at = end
+    session.cancelled_by_id = cancelled_by_id
+    session.cancel_reason = reason
+    session.total_table_fee = Decimal("0")
+    session.total_product_fee = Decimal("0")
+    session.grand_total = Decimal("0")      # nothing to charge; not via recompute_totals (items are kept)
+
+    cancel_active_game(db, session, end)
+    mark_available(table)
     db.flush()
     return session

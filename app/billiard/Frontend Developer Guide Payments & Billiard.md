@@ -168,6 +168,8 @@ Errors: `404 Product not found`, `400 Product is not available`, `400 Variant do
 
 `POST /sessions/{id}/stop` ends the clock, closes the running game (if any), frees the table and returns the bill. A second stop returns `409 Session is already completed`, so on that error just load the bill with `GET /sessions/{id}`.
 
+`POST /sessions/{id}/cancel` (managers only) cancels a session that was opened by mistake. Send `{"reason": "Opened on the wrong table"}` (3 to 255 characters, required: ask the manager for it). It frees the table, ends the running game as cancelled and returns the same `Bill` with `status: "cancelled"`, `cancel_reason`, `cancelled_by` and `cancelled_at`, and every total `0`. Only an **active** session can be cancelled: `409` for a completed or already cancelled one (a paid session is reversed with a payment void, not a cancel). Ask for confirmation first, drop the session from the board afterwards, and never show a Pay button for `status: "cancelled"` (`POST /pay` returns `409`).
+
 ```json
 {
   "session_id": 42,
@@ -738,6 +740,7 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   table_id: number;
   table_name: string;
   currency: string;                  // "VND"
+  status: "active" | "completed" | "cancelled";
   start_time: ISODate;
   end_time: ISODate | null;
   duration_minutes: number | null;
@@ -759,6 +762,9 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   opened_by: string | null;          // null when the table controller started the session
   stopped_by: string | null;         // null when the table controller stopped it
   paid_by: string | null;            // null = confirmed by the bank feed (or not paid)
+  cancelled_at: ISODate | null;      // only when status = "cancelled"
+  cancelled_by: string | null;
+  cancel_reason: string | null;
 }
 
 interface PayResponse extends Bill {  // POST /sessions/{id}/pay

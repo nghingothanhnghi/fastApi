@@ -70,12 +70,29 @@ class SessionService:
     @staticmethod
     def stop_session(db: Session, session_id: int, user: User) -> TableSession:
         session = SessionService.get_locked_session(db, session_id, user)
+        if session.status == SessionStatus.CANCELLED:
+            raise HTTPException(409, "Session was cancelled")
         if session.status != SessionStatus.ACTIVE:
             raise HTTPException(409, "Session is already completed")
         table = db.execute(
             select(BilliardTable).where(BilliardTable.id == session.table_id).with_for_update()
         ).scalar_one()
         session_lifecycle.finalize_stop(db, session, table, user.id)
+        return session
+
+    @staticmethod
+    def cancel_session(db: Session, session_id: int, reason: str, user: User) -> TableSession:
+        """Cancel a session opened by mistake. The route restricts this to ADMIN/MANAGER;
+        only ACTIVE sessions can be cancelled (a completed one is a payment void, not a cancel)."""
+        session = SessionService.get_locked_session(db, session_id, user)
+        if session.status == SessionStatus.CANCELLED:
+            raise HTTPException(409, "Session is already cancelled")
+        if session.status != SessionStatus.ACTIVE:
+            raise HTTPException(409, "Only an active session can be cancelled")
+        table = db.execute(
+            select(BilliardTable).where(BilliardTable.id == session.table_id).with_for_update()
+        ).scalar_one()
+        session_lifecycle.cancel_session(db, session, table, user.id, reason)
         return session
 
     @staticmethod
@@ -99,6 +116,7 @@ class SessionService:
             table_id=session.table_id,
             table_name=session.table.name,
             currency=config.CURRENCY,
+            status=session.status.value,
             start_time=session.start_time,
             end_time=session.end_time,
             duration_minutes=session.duration_minutes,
@@ -126,6 +144,9 @@ class SessionService:
             opened_by=session.opened_by.username if session.opened_by else None,
             stopped_by=session.stopped_by.username if session.stopped_by else None,
             paid_by=session.paid_by.username if session.paid_by else None,
+            cancelled_at=session.cancelled_at,
+            cancelled_by=session.cancelled_by.username if session.cancelled_by else None,
+            cancel_reason=session.cancel_reason,
         ).model_dump()
 
 

@@ -8,7 +8,7 @@ from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
-    AddSessionItemRequest, BillResponse, PayResponse, SessionItemResponse,
+    AddSessionItemRequest, BillResponse, CancelSessionRequest, PayResponse, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
@@ -45,6 +45,19 @@ def add_item(
 @router.post("/{session_id}/stop", response_model=BillResponse)
 def stop_session(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = session_service.stop_session(db, session_id, current_user)
+    db.commit()
+    db.refresh(session)
+    return session_service.build_bill(session)
+
+
+@router.post("/{session_id}/cancel", response_model=BillResponse)
+def cancel_session(
+    session_id: int, request: CancelSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    """Manager only. Cancel an ACTIVE session opened by mistake: no bill, table freed, reason audited."""
+    session = session_service.cancel_session(db, session_id, request.reason, current_user)
     db.commit()
     db.refresh(session)
     return session_service.build_bill(session)
