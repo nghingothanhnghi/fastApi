@@ -82,6 +82,11 @@ class TableSession(Base):
     stopped_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     paid_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Discount audit. `discount` (above) is the AMOUNT applied; the intended percent/fixed value
+    # lives in pricing_snapshot["discount"] so it can follow the final fee at Stop.
+    discount_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    discounted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Cancel = "opened by mistake": no bill, no payment. Set only by session_lifecycle.cancel_session.
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -101,6 +106,7 @@ class TableSession(Base):
     stopped_by = relationship("User", foreign_keys=[stopped_by_id])
     paid_by = relationship("User", foreign_keys=[paid_by_id])
     cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
+    discounted_by = relationship("User", foreign_keys=[discounted_by_id])
 
     __table_args__ = (
         Index(

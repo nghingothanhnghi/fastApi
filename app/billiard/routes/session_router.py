@@ -8,7 +8,7 @@ from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
-    AddSessionItemRequest, BillResponse, CancelSessionRequest, PayResponse, SessionItemResponse,
+    AddSessionItemRequest, BillResponse, CancelSessionRequest, DiscountRequest, PayResponse, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
@@ -45,6 +45,22 @@ def add_item(
 @router.post("/{session_id}/stop", response_model=BillResponse)
 def stop_session(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = session_service.stop_session(db, session_id, current_user)
+    db.commit()
+    db.refresh(session)
+    return session_service.build_bill(session)
+
+
+@router.post("/{session_id}/discount", response_model=BillResponse)
+def set_discount(
+    session_id: int, request: DiscountRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    """Manager only. Fixed amount or percent off (table fee + products); amount 0 removes it.
+    `409` once a payment was started, because the payment total is then fixed."""
+    session = session_service.set_discount(
+        db, session_id, request.amount, request.percent, request.reason, current_user
+    )
     db.commit()
     db.refresh(session)
     return session_service.build_bill(session)

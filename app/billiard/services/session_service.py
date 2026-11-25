@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.billiard import config
 from app.billiard.config import BillingPolicy
 from app.billiard.models import (
-    BilliardTable, TableSession, SessionItem, SessionStatus,
+    BilliardTable, PaymentState, TableSession, SessionItem, SessionStatus,
 )
 from app.billiard.schemas.session import BillResponse, SessionItemResponse
 from app.billiard.services import session_lifecycle
@@ -18,6 +18,12 @@ from app.billiard.utils.billing import CENT
 from app.payments.services.order_service import payment_order_service
 from app.product.models.product import Product, ProductVariant
 from app.user.models.user import User
+
+
+def _discount_percent(session: TableSession):
+    """The percent when the discount was given as a percent (None for a fixed amount)."""
+    spec = session_lifecycle.discount_spec(session)
+    return Decimal(str(spec["value"])) if spec and spec["type"] == "percent" else None
 
 
 class SessionService:
@@ -81,6 +87,27 @@ class SessionService:
         return session
 
     @staticmethod
+    def set_discount(
+        db: Session, session_id: int, amount, percent, reason: str | None, user: User,
+    ) -> TableSession:
+        """Give, change or remove (amount 0) a discount. The route restricts this to ADMIN/MANAGER.
+        Allowed on an ACTIVE session, or a COMPLETED one that has no payment order yet:
+        once a payment order exists its total is fixed and the discount can no longer change."""
+        session = SessionService.get_locked_session(db, session_id, user)
+        if session.status == SessionStatus.CANCELLED:
+            raise HTTPException(409, "Session was cancelled")
+        if session.status == SessionStatus.COMPLETED and (
+            session.payment_order_id is not None or session.payment_state != PaymentState.UNPAID
+        ):
+            raise HTTPException(409, "A payment was already started for this session, the discount can no longer change")
+        try:
+            session_lifecycle.apply_discount(session, amount=amount, percent=percent, reason=reason, by_id=user.id)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        db.flush()
+        return session
+
+    @staticmethod
     def cancel_session(db: Session, session_id: int, reason: str, user: User) -> TableSession:
         """Cancel a session opened by mistake. The route restricts this to ADMIN/MANAGER;
         only ACTIVE sessions can be cancelled (a completed one is a payment void, not a cancel)."""
@@ -126,6 +153,10 @@ class SessionService:
             pricing_params=snap.get("params") or {},
             total_table_fee=session.total_table_fee,
             total_product_fee=session.total_product_fee,
+            discount=session.discount or Decimal("0"),
+            discount_percent=_discount_percent(session),
+            discount_reason=session.discount_reason,
+            discounted_by=session.discounted_by.username if session.discounted_by else None,
             grand_total=session.grand_total,
             items=[
                 SessionItemResponse(

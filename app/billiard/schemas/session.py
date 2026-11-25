@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.payments.schemas.order import PaymentLineResponse
 
@@ -32,6 +32,25 @@ class CancelSessionRequest(BaseModel):
         if len(v) < 3:
             raise ValueError("reason must be at least 3 characters")
         return v
+
+
+class DiscountRequest(BaseModel):
+    """Exactly one of amount (fixed, currency units) or percent. amount = 0 removes the discount.
+    A reason is required when a discount is applied (audit)."""
+    amount: Optional[Decimal] = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    percent: Optional[Decimal] = Field(default=None, gt=0, le=100, max_digits=5, decimal_places=2)
+    reason: Optional[str] = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if (self.amount is None) == (self.percent is None):
+            raise ValueError("Give either amount or percent, not both")
+        if self.reason is not None:
+            self.reason = self.reason.strip() or None
+        removing = self.amount is not None and self.amount == 0
+        if not removing and (self.reason is None or len(self.reason) < 3):
+            raise ValueError("reason is required (at least 3 characters) when applying a discount")
+        return self
 
 
 class SessionItemResponse(BaseModel):
@@ -64,7 +83,11 @@ class BillResponse(BaseModel):
 
     total_table_fee: Decimal
     total_product_fee: Decimal
-    grand_total: Decimal
+    discount: Decimal = Decimal("0")          # amount taken off (table fee + products)
+    discount_percent: Optional[Decimal] = None  # set when the discount was given as a percent
+    discount_reason: Optional[str] = None
+    discounted_by: Optional[str] = None
+    grand_total: Decimal                      # table fee + products - discount
     items: list[SessionItemResponse]
 
     payment_state: str

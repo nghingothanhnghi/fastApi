@@ -132,6 +132,7 @@ A shift is the cash drawer for the club: one open shift per club, not per cashie
     "hourly_rate": "100000.00",
     "current_table_fee": "225000.00",
     "current_product_fee": "85000.00",
+    "current_discount": "0.00",
     "current_total": "310000.00"
   }
 ]
@@ -168,6 +169,8 @@ Errors: `404 Product not found`, `400 Product is not available`, `400 Variant do
 
 `POST /sessions/{id}/stop` ends the clock, closes the running game (if any), frees the table and returns the bill. A second stop returns `409 Session is already completed`, so on that error just load the bill with `GET /sessions/{id}`.
 
+`POST /sessions/{id}/discount` (managers only) gives a discount on the table fee plus products. Send **either** `{"amount": 5000, "reason": "Regular customer"}` **or** `{"percent": 10, "reason": "Birthday"}` (never both; the reason is required, 3 to 255 characters) and show the returned `Bill`: `discount`, `grand_total` and, for a percent, `discount_percent`. `{"amount": 0}` removes it. It works while the session is playing (the board's `current_total` already includes it) and after Stop, but only until a payment is started: then it returns `409 A payment was already started...`, so hide the button once the bill has payment lines or is `pending` or `paid`. A percent follows the total as items are added and at Stop; a fixed amount never makes the total negative. Always show `discount` as its own line above `grand_total`, and charge `grand_total` (the server already subtracts the discount).
+
 `POST /sessions/{id}/cancel` (managers only) cancels a session that was opened by mistake. Send `{"reason": "Opened on the wrong table"}` (3 to 255 characters, required: ask the manager for it). It frees the table, ends the running game as cancelled and returns the same `Bill` with `status: "cancelled"`, `cancel_reason`, `cancelled_by` and `cancelled_at`, and every total `0`. Only an **active** session can be cancelled: `409` for a completed or already cancelled one (a paid session is reversed with a payment void, not a cancel). Ask for confirmation first, drop the session from the board afterwards, and never show a Pay button for `status: "cancelled"` (`POST /pay` returns `409`).
 
 ```json
@@ -185,6 +188,10 @@ Errors: `404 Product not found`, `400 Product is not available`, `400 Variant do
   "pricing_params": {},
   "total_table_fee": "225000.00",
   "total_product_fee": "85000.00",
+  "discount": "0.00",
+  "discount_percent": null,
+  "discount_reason": null,
+  "discounted_by": null,
   "grand_total": "310000.00",
   "items": [
     { "id": 7, "product_id": 5, "variant_id": null, "product_name": "Coca Cola", "quantity": 2, "unit_price": "15000.00", "total_price": "30000.00" },
@@ -392,7 +399,7 @@ The table fee on the bill comes from the pricing rules; the bill shows the rule 
 - `PATCH /tables/{id}` with `{"name": "T05 VIP"}` and/or `{"hourly_rate": 120000}` edits a table (managers only). Send only the fields you change. `409` if the new name is taken. A new rate applies to **new** sessions only; a running session and old bills keep the rate they started with.
 - `DELETE /tables/{id}` **deactivates** a table (managers only); it does not erase it, so history and reports stay. It returns `{"message": "Billiard table deactivated successfully", "id": 5, "is_active": false}`. `409` if the table has a running session (stop it first) or is already inactive. Ask for confirmation before you call it, and drop the table from the board afterwards. There is no endpoint to reactivate a table yet.
 - `POST /tables/{id}/reserve`, `POST /tables/{id}/maintenance` and `POST /tables/{id}/release` (managers only, no body) change a free table's status and return the `Table`. Rules: `reserve` works only on an `available` table, `maintenance` on an `available` or `reserved` one (a broken reserved table can go straight to maintenance), and `release` only on a `reserved` or `maintenance` one. A `playing` table is always `409` ("Table is playing, stop its session first"); any other wrong status is `409` too (the message says the current status). It is a status only: the table shows `reserved` or `maintenance` on the board and cannot be started until it is released.
-- `GET /reports/tables/usage?start_date=...&end_date=...` returns one row per table and a `totals` row. The dates filter on the session's end time and are read in the club's time zone; a date-only `end_date` includes that whole day. Revenue columns count paid sessions only, and `unpaid_total` is money for sessions that were stopped but not yet paid.
+- `GET /reports/tables/usage?start_date=...&end_date=...` returns one row per table and a `totals` row. The dates filter on the session's end time and are read in the club's time zone; a date-only `end_date` includes that whole day. Revenue columns count paid sessions only, `discount_total` is the discounts on those paid sessions (`table_revenue + product_revenue - discount_total = total_revenue`), and `unpaid_total` is money for sessions that were stopped but not yet paid.
 
 ### 10. Controller devices (manager)
 
@@ -572,7 +579,8 @@ interface ActiveTable {              // GET /tables/active (only tables being pl
   hourly_rate: Money;
   current_table_fee: Money;          // running estimate, for display only
   current_product_fee: Money;
-  current_total: Money;
+  current_discount: Money;           // 0 when there is no discount
+  current_total: Money;              // table fee + products - discount
 }
 
 interface StartSessionResponse {     // POST /tables/{id}/start
@@ -683,6 +691,7 @@ interface TableUsageRow {
   product_revenue: Money;            // paid sessions only
   total_revenue: Money;              // paid sessions only
   unpaid_total: Money;               // stopped but not yet paid
+  discount_total: Money;             // discounts on paid sessions; table_revenue + product_revenue - discount_total = total_revenue
 }
 interface TableUsageReport {         // GET /reports/tables/usage
   period_start: ISODate | null;
@@ -751,7 +760,11 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   pricing_params: Record<string, unknown>;
   total_table_fee: Money;
   total_product_fee: Money;
-  grand_total: Money;
+  discount: Money;                   // amount taken off (table fee + products); 0 = none
+  discount_percent: Money | null;    // set when it was given as a percent
+  discount_reason: string | null;
+  discounted_by: string | null;
+  grand_total: Money;                // table fee + products - discount
   items: SessionItem[];
   payment_state: PaymentState;
   payment_method: BillPaymentMethod | null;

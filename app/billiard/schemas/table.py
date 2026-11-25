@@ -40,4 +40,5 @@ class ActiveTableResponse(BaseModel):
     hourly_rate: Decimal
     current_table_fee: Decimal
     current_product_fee: Decimal
-    current_total: Decimal
+    current_discount: Decimal = Decimal("0")
+    current_total: Decimal                      # table fee + products - discount

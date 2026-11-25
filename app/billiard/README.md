@@ -164,8 +164,9 @@ erDiagram
 | `duration_minutes` | Filled at Stop |
 | `total_table_fee` | Filled at Stop |
 | `total_product_fee` | Sum of items, updated whenever an item is added |
-| `discount` | Column exists, **not applied yet**: `grand_total` ignores it |
-| `grand_total` | `total_table_fee + total_product_fee` |
+| `discount` | The discount **amount** taken off (table fee + products), recomputed with every total. The intended value (fixed or percent) is kept in `pricing_snapshot["discount"]` so a percent follows the final fee at Stop |
+| `discount_reason`, `discounted_by_id` | Why and who gave the discount (audit) |
+| `grand_total` | `max(total_table_fee + total_product_fee - discount, 0)` |
 | `payment_order_id` | The bill in the Payments module (lines, transfers, audit live there) |
 | `payment_state` | `unpaid` → `pending` → `paid`. **A mirror** of the order, written by the Payments module, so reports never join its tables |
 | `payment_method` | Mirror: `cash`, `bank_transfer`, `stripe`, or `split` |
@@ -311,10 +312,19 @@ Then the fee is rounded to `FEE_ROUNDING_UNIT` (for VND you may want `1000`) and
 ### Step 4: grand total
 
 ```text
-grand_total = total_table_fee + total_product_fee
+grand_total = max(total_table_fee + total_product_fee - discount, 0)
 ```
 
-(`discount` is not subtracted yet.)
+The formula is written once, in `session_lifecycle.recompute_totals`, and used by Stop, add item and set discount.
+
+**Discount rules**
+
+- Set by ADMIN or MANAGER with `POST /sessions/{id}/discount`: a fixed `amount` **or** a `percent` (not both) of **table fee + products**. A reason is required (3 to 255 characters); `amount: 0` removes the discount.
+- A **fixed** discount never exceeds the total (it is clamped, `grand_total` never goes below 0). Set before there is anything to charge, it starts to apply once the fee or items exist.
+- A **percent** discount is recalculated whenever the total changes: when items are added and at Stop, with the final table fee.
+- Allowed on an **active** session, or on a **completed** one that has no payment order yet. Once a payment is started its total is fixed, so the discount is `409`. A cancelled session cannot be discounted.
+- The device cannot give a discount. A discount set during play survives `session_stop`.
+- Payments always collect `grand_total`, so the discounted amount is what the customer pays.
 
 ### Live total and price preview
 
@@ -486,6 +496,7 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
 | `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
 | `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed or cancelled |
+| `POST` | `/sessions/{id}/discount` | **ADMIN, MANAGER.** Body `{"amount": 5000, "reason": "..."}` or `{"percent": 10, "reason": "..."}`, exactly one of the two. `{"amount": 0}` removes it. Returns the bill with `discount`, `discount_percent`, `discount_reason`, `discounted_by` and the new `grand_total`. `409` after a payment was started or for a cancelled session, `422` for a bad value (negative, percent over 100, both or neither, missing reason), `404` for another club |
 | `POST` | `/sessions/{id}/cancel` | **ADMIN, MANAGER.** Cancel an **active** session opened by mistake. Body `{"reason": "..."}` (3 to 255 chars, required). Frees the table, ends the running game as `cancelled`, zeroes the totals and returns the bill with `status: "cancelled"`. `409` if the session is completed or already cancelled, `422` without a reason, `404` for another club. A completed session is never cancelled: reverse its payment with a void instead. The device cannot cancel: a `session_stop` for a cancelled session is a conflict and is not billed |
 | `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7). Delegates to the Payments module |
 | `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway (Stripe) payment |
@@ -536,7 +547,8 @@ Report notes:
 - Dates are read in the club's time zone. A date-only `end_date` (00:00:00) includes that whole day; the upper bound is exclusive internally so nothing is missed.
 - Tables with zero sessions still appear (the filter is in the JOIN).
 - `table_revenue`, `product_revenue`, `total_revenue` count **paid** sessions only.
-- `unpaid_total` = completed sessions that are not yet paid.
+- `unpaid_total` = completed sessions that are not yet paid (already net of the discount).
+- `discount_total` = discounts on **paid** sessions. `table_revenue + product_revenue - discount_total = total_revenue`.
 
 ### Request examples
 
@@ -612,7 +624,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
 | **Packages** | The tables and session columns exist. Missing: package CRUD, package selection at session start, included-item consumption, package billing |
-| **Discounts** | The `discount` column exists but `grand_total` ignores it |
 | **Timed play** | `ends_at` exists and is sent to the controller, but nothing sets it |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
@@ -626,6 +637,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 
 | File | What it covers |
 |------|----------------|
+| `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |
 | `test_game_service.py` | Game numbering, one active game, scores up/down/never negative, new game keeps billing, tenant 404, clamped device clock, stop closes the game |
