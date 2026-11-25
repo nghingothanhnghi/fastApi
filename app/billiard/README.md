@@ -146,7 +146,7 @@ erDiagram
 | `is_active` | bool | `false` = retired table. Hidden from `GET /tables`, history is kept (sessions use `RESTRICT`) |
 | `created_at`, `updated_at` | datetime | |
 
-> `reserved` and `maintenance` exist in the enum, but no endpoint sets them yet. A table in either state cannot be started (`409`).
+> A manager sets `reserved` or `maintenance` with `POST /tables/{id}/reserve` and `/maintenance`, and clears it with `/release`. A **reserved** table can go straight to `maintenance` (it broke before the guest came), which ends the reservation. A **playing** table cannot: stop its session first. It is a **status only** change: no customer name, phone or time is stored. A table in either state cannot be started (`409`).
 
 ### `table_sessions`
 
@@ -474,6 +474,9 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `PATCH` | `/tables/{table_id}` | ADMIN, MANAGER | Change `name` and/or `hourly_rate`. `409` if the name is taken. The new rate applies to new sessions only |
 | `DELETE` | `/tables/{table_id}` | ADMIN, MANAGER | **Deactivate** (not delete): `is_active=false`. `409` if the table has an active session or is already inactive. History is kept |
 | `GET` | `/tables/active` | any user | Tables being played now, with live elapsed time and running total |
+| `POST` | `/tables/{table_id}/reserve` | ADMIN, MANAGER | Mark an **available** table `reserved`. `409` if it is playing, already reserved, in maintenance or inactive, or has an active session |
+| `POST` | `/tables/{table_id}/maintenance` | ADMIN, MANAGER | Put an **available or reserved** table in `maintenance` (this ends a reservation). `409` if it is playing (stop the session first), already in maintenance, inactive, or has an active session |
+| `POST` | `/tables/{table_id}/release` | ADMIN, MANAGER | `reserved` or `maintenance` back to `available`. `409` for a playing or already available table |
 | `POST` | `/tables/{table_id}/start` | any user | Start a session. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
 
 ### Sessions
@@ -609,7 +612,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
 | **Packages** | The tables and session columns exist. Missing: package CRUD, package selection at session start, included-item consumption, package billing |
-| **Reservations / maintenance** | Endpoints to set a table to `reserved` or `maintenance` (the statuses exist, nothing sets them) |
 | **Discounts** | The `discount` column exists but `grand_total` ignores it |
 | **Timed play** | `ends_at` exists and is sent to the controller, but nothing sets it |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
@@ -625,6 +627,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 | File | What it covers |
 |------|----------------|
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
+| `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |
 | `test_game_service.py` | Game numbering, one active game, scores up/down/never negative, new game keeps billing, tenant 404, clamped device clock, stop closes the game |
 | `test_pricing_sessions.py` | Rule selection, happy hour, day windows, block pricing, snapshots survive rule edits, live total, bill rule name |
 | `test_event_service.py` | Device score wins, duplicates, ordering by `device_seq`, rejected vs duplicate, contiguous cursor, authentication |

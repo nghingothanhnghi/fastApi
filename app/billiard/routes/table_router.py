@@ -54,6 +54,39 @@ def deactivate_table(
         "is_active": table.is_active,
     }
 
+@router.post("/{table_id}/reserve", response_model=TableResponse)
+def reserve_table(
+    table_id: int, db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    table = table_service.set_status(db, table_id, "reserve", current_user)
+    db.commit()
+    db.refresh(table)
+    return table
+
+
+@router.post("/{table_id}/maintenance", response_model=TableResponse)
+def maintenance_table(
+    table_id: int, db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    table = table_service.set_status(db, table_id, "maintenance", current_user)
+    db.commit()
+    db.refresh(table)
+    return table
+
+
+@router.post("/{table_id}/release", response_model=TableResponse)
+def release_table(
+    table_id: int, db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.ADMIN, RoleEnum.MANAGER)),
+):
+    table = table_service.set_status(db, table_id, "release", current_user)
+    db.commit()
+    db.refresh(table)
+    return table
+
+
 @router.get("", response_model=list[TableResponse])
 def list_tables(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return table_service.list_tables(db, current_user)
