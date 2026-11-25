@@ -25,7 +25,13 @@ def _require_free(table: BilliardTable) -> None:
     if table.is_active is False:
         raise ValueError("Table is inactive")
     if table.status != TableStatus.AVAILABLE:
-        raise ValueError(f"Table is {table.status.value}")
+        raise ValueError(_blocked_message(table))
+
+
+def _blocked_message(table: BilliardTable) -> str:
+    if table.status == TableStatus.PLAYING:
+        return "Table is playing, stop its session first"
+    return f"Table is {table.status.value}"
 
 
 def mark_reserved(table: BilliardTable) -> None:
@@ -34,7 +40,16 @@ def mark_reserved(table: BilliardTable) -> None:
 
 
 def mark_maintenance(table: BilliardTable) -> None:
-    _require_free(table)
+    """AVAILABLE or RESERVED -> MAINTENANCE.
+
+    A reserved table may go straight to maintenance (it broke before the guest came):
+    the reservation is status-only, so leaving RESERVED is what ends it. A PLAYING table
+    is never taken over: its session must be stopped first. MAINTENANCE blocks
+    mark_playing, so no session can start until release()."""
+    if table.status != TableStatus.RESERVED:
+        _require_free(table)
+    elif table.is_active is False:
+        raise ValueError("Table is inactive")
     table.status = TableStatus.MAINTENANCE
 
 

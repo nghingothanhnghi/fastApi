@@ -159,7 +159,7 @@ class TableService:
                 TableSession.table_id == table_id, TableSession.status == SessionStatus.ACTIVE
             )
         ).first():
-            raise HTTPException(409, "Table has an active session")
+            raise HTTPException(409, "Table has an active session, stop its session first")
 
         try:
             change(table)
