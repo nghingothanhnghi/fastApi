@@ -8,10 +8,20 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.payments.schemas.order import PaymentLineResponse
 
 
+class StartSessionRequest(BaseModel):
+    """Optional body of POST /tables/{id}/start. No body (or no planned_minutes) = open play."""
+    planned_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+
+
+class ExtendSessionRequest(BaseModel):
+    minutes: int = Field(..., ge=1, le=480)
+
+
 class StartSessionResponse(BaseModel):
     session_id: int
     table_id: int
     start_time: datetime
+    ends_at: Optional[datetime] = None        # set when planned_minutes was sent
     opened_by: str
 
 
@@ -73,6 +83,7 @@ class BillResponse(BaseModel):
 
     start_time: datetime
     end_time: Optional[datetime] = None
+    ends_at: Optional[datetime] = None        # timed play countdown target; billing does not use it
     duration_minutes: Optional[int] = None
     hourly_rate: Decimal
     billing_policy: str

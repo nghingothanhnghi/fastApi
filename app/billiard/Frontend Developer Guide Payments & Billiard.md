@@ -132,6 +132,9 @@ A shift is the cash drawer for the club: one open shift per club, not per cashie
     "hourly_rate": "100000.00",
     "current_table_fee": "225000.00",
     "current_product_fee": "85000.00",
+    "ends_at": null,
+    "remaining_seconds": null,
+    "is_overtime": false,
     "current_discount": "0.00",
     "current_total": "310000.00"
   }
@@ -142,10 +145,10 @@ Keep `session_id` on the tile. Every later call uses it. `current_total` is a ru
 
 ### Step 4. Start a session
 
-`POST /tables/{id}/start` has no body. It returns the new session:
+`POST /tables/{id}/start` takes an optional body `{"planned_minutes": 90}` (1 to 1440) for timed play; send no body for open play. It returns the new session:
 
 ```json
-{ "session_id": 42, "table_id": 1, "start_time": "2026-10-24T02:00:00", "opened_by": "cashier1" }
+{ "session_id": 42, "table_id": 1, "start_time": "2026-10-24T02:00:00", "ends_at": "2026-10-24T03:30:00", "opened_by": "cashier1" }
 ```
 
 If the table cannot be started the server answers `409` with the reason: `Table is playing` (somebody else started it first), `Table is reserved`, `Table is maintenance`, `Table is inactive`, or, if two people start it at the same instant, `Table already has an active session`. Reload the board and open the running session if there is one.
@@ -579,6 +582,9 @@ interface ActiveTable {              // GET /tables/active (only tables being pl
   hourly_rate: Money;
   current_table_fee: Money;          // running estimate, for display only
   current_product_fee: Money;
+  ends_at: ISODate | null;           // timed play only
+  remaining_seconds: number | null;  // negative once past ends_at; null for open play
+  is_overtime: boolean;              // flag only: the server never stops a session by itself
   current_discount: Money;           // 0 when there is no discount
   current_total: Money;              // table fee + products - discount
 }
@@ -587,6 +593,7 @@ interface StartSessionResponse {     // POST /tables/{id}/start
   session_id: number;
   table_id: number;
   start_time: ISODate;
+  ends_at: ISODate | null;           // null for open play
   opened_by: string;
 }
 
@@ -752,6 +759,7 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   currency: string;                  // "VND"
   status: "active" | "completed" | "cancelled";
   start_time: ISODate;
+  ends_at: ISODate | null;           // timed play countdown target
   end_time: ISODate | null;
   duration_minutes: number | null;
   hourly_rate: Money;
@@ -1027,7 +1035,9 @@ export async function login(username: string, password: string) {
 export const api = {
   tables:       () => request<Table[]>("GET", "/tables"),
   activeTables: () => request<ActiveTable[]>("GET", "/tables/active"),
-  startTable:   (tableId: number) => request<StartSessionResponse>("POST", `/tables/${tableId}/start`),
+  startTable:   (tableId: number, plannedMinutes?: number) =>
+    request<StartSessionResponse>("POST", `/tables/${tableId}/start`, plannedMinutes ? { planned_minutes: plannedMinutes } : undefined),
+  extendSession: (id: number, minutes: number) => request<Bill>("POST", `/sessions/${id}/extend`, { minutes }),
   products:     () => request<Product[]>("GET", "/products"),
   addItem:      (id: number, b: AddItemRequest) => request<SessionItem>("POST", `/sessions/${id}/items`, b),
 

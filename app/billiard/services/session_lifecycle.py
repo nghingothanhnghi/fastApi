@@ -6,7 +6,7 @@
 # No imports from other services (same rule as table_lifecycle / game_lifecycle),
 # except billing_service, which is read-only and imports no lifecycle module.
 # Never commits or locks; the caller holds the row locks.
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
@@ -92,11 +92,25 @@ def apply_discount(
     recompute_totals(session)
 
 
+MAX_PLANNED_MINUTES = 1440      # 24 h
+
+
+def _check_minutes(minutes: int) -> None:
+    if not isinstance(minutes, int) or not (1 <= minutes <= MAX_PLANNED_MINUTES):
+        raise ValueError(f"minutes must be between 1 and {MAX_PLANNED_MINUTES}")
+
+
 def open_session(
-    db: Session, table: BilliardTable, opened_by_id: Optional[int], at: Optional[datetime] = None
+    db: Session, table: BilliardTable, opened_by_id: Optional[int], at: Optional[datetime] = None,
+    planned_minutes: Optional[int] = None,
 ) -> TableSession:
     """Start a session on a locked table. Raises ValueError if the table can't start one.
-    May raise IntegrityError from the flush (uq_one_active_session_per_table)."""
+    May raise IntegrityError from the flush (uq_one_active_session_per_table).
+
+    planned_minutes sets ends_at = start + planned_minutes (timed play). It is a countdown
+    and an overtime flag only: the bill is still computed from the real start and stop."""
+    if planned_minutes is not None:
+        _check_minutes(planned_minutes)
     mark_playing(table)
     start, source = resolve_time(at)
     # The rule is chosen once, by the start time, and frozen into the session
@@ -112,9 +126,24 @@ def open_session(
         billing_policy=quote.rule_type,                # snapshot
         pricing_snapshot=quote.snapshot(start),        # snapshot (rule id/name/params)
         opened_by_id=opened_by_id,
+        ends_at=start + timedelta(minutes=planned_minutes) if planned_minutes else None,
     )
     db.add(session)
     db.flush()
+    return session
+
+
+def extend_session(session: TableSession, minutes: int, now: Optional[datetime] = None) -> TableSession:
+    """Move ends_at forward by `minutes` (ACTIVE sessions only). The base is the current
+    ends_at, or the present moment when there is none or it has already passed, so an
+    extension always gives the customer the full `minutes` from now. Billing is unchanged."""
+    if session.status != SessionStatus.ACTIVE:
+        raise ValueError("Only an active session can be extended")
+    _check_minutes(minutes)
+    now = as_utc(now) if now else datetime.now(timezone.utc)
+    current = as_utc(session.ends_at) if session.ends_at else None
+    base = current if current and current > now else now
+    session.ends_at = base + timedelta(minutes=minutes)
     return session
 
 
