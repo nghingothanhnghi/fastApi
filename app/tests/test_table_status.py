@@ -84,12 +84,53 @@ def test_reserve_twice_is_409(db):
     assert e.value.status_code == 409
 
 
-def test_cannot_go_from_reserved_to_maintenance_directly(db):
+def test_reserved_table_can_go_straight_to_maintenance(db):
     user, table = _setup(db)
     table_service.set_status(db, table.id, "reserve", user)
+    assert table_service.set_status(db, table.id, "maintenance", user).status == TableStatus.MAINTENANCE
+
+
+def test_reserved_to_maintenance_ends_the_reservation_and_blocks_start(db):
+    user, table = _setup(db)
+    table_service.set_status(db, table.id, "reserve", user)
+    table_service.set_status(db, table.id, "maintenance", user)
+    with pytest.raises(HTTPException) as e:
+        table_service.start_session(db, table.id, user)
+    assert e.value.status_code == 409 and "maintenance" in e.value.detail
+    # leaving maintenance gives a free table, not a reserved one
+    assert table_service.set_status(db, table.id, "release", user).status == TableStatus.AVAILABLE
+
+
+def test_maintenance_twice_is_409(db):
+    user, table = _setup(db)
+    table_service.set_status(db, table.id, "maintenance", user)
     with pytest.raises(HTTPException) as e:
         table_service.set_status(db, table.id, "maintenance", user)
     assert e.value.status_code == 409
+
+
+def test_playing_table_cannot_enter_maintenance_until_session_is_stopped(db):
+    user, table = _setup(db)
+    s = table_service.start_session(db, table.id, user)
+    db.commit()
+    with pytest.raises(HTTPException) as e:
+        table_service.set_status(db, table.id, "maintenance", user)
+    assert e.value.status_code == 409
+    db.refresh(table)
+    assert table.status == TableStatus.PLAYING        # unchanged
+    session_service.stop_session(db, s.id, user)
+    db.commit()
+    assert table_service.set_status(db, table.id, "maintenance", user).status == TableStatus.MAINTENANCE
+
+
+def test_inactive_reserved_table_cannot_enter_maintenance(db):
+    user, table = _setup(db)
+    table_service.set_status(db, table.id, "reserve", user)
+    table.is_active = False                           # e.g. changed outside this service
+    db.flush()
+    with pytest.raises(HTTPException) as e:
+        table_service.set_status(db, table.id, "maintenance", user)
+    assert e.value.status_code == 409 and "inactive" in e.value.detail
 
 
 def test_release_available_table_is_409(db):
@@ -189,6 +230,22 @@ def test_http_reserve_maintenance_release_roundtrip(client):
     assert client.post(f"/tables/{t}/release").json()["status"] == "available"
     assert client.post(f"/tables/{t}/maintenance").json()["status"] == "maintenance"
     assert client.post(f"/tables/{t}/release").json()["status"] == "available"
+
+
+def test_http_reserved_to_maintenance_allowed_for_manager_not_staff(client):
+    t = client.table_id
+    client.post(f"/tables/{t}/reserve")
+    client.holder["u"] = _http_user("staff")
+    assert client.post(f"/tables/{t}/maintenance").status_code == 403
+    client.holder["u"] = _http_user("manager")
+    assert client.post(f"/tables/{t}/maintenance").json()["status"] == "maintenance"
+
+
+def test_http_playing_table_maintenance_message_says_stop_session(client):
+    t = client.table_id
+    client.post(f"/tables/{t}/start")
+    r = client.post(f"/tables/{t}/maintenance")
+    assert r.status_code == 409 and "stop its session" in r.json()["detail"]
 
 
 def test_http_conflict_is_409(client):

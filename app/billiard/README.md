@@ -146,7 +146,7 @@ erDiagram
 | `is_active` | bool | `false` = retired table. Hidden from `GET /tables`, history is kept (sessions use `RESTRICT`) |
 | `created_at`, `updated_at` | datetime | |
 
-> A manager sets `reserved` or `maintenance` with `POST /tables/{id}/reserve` and `/maintenance`, and clears it with `/release`. It is a **status only** change: no customer name, phone or time is stored. A table in either state cannot be started (`409`).
+> A manager sets `reserved` or `maintenance` with `POST /tables/{id}/reserve` and `/maintenance`, and clears it with `/release`. A **reserved** table can go straight to `maintenance` (it broke before the guest came), which ends the reservation. A **playing** table cannot: stop its session first. It is a **status only** change: no customer name, phone or time is stored. A table in either state cannot be started (`409`).
 
 ### `table_sessions`
 
@@ -474,7 +474,7 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `DELETE` | `/tables/{table_id}` | ADMIN, MANAGER | **Deactivate** (not delete): `is_active=false`. `409` if the table has an active session or is already inactive. History is kept |
 | `GET` | `/tables/active` | any user | Tables being played now, with live elapsed time and running total |
 | `POST` | `/tables/{table_id}/reserve` | ADMIN, MANAGER | Mark an **available** table `reserved`. `409` if it is playing, already reserved, in maintenance or inactive, or has an active session |
-| `POST` | `/tables/{table_id}/maintenance` | ADMIN, MANAGER | Put an **available** table in `maintenance`. Same `409` rules |
+| `POST` | `/tables/{table_id}/maintenance` | ADMIN, MANAGER | Put an **available or reserved** table in `maintenance` (this ends a reservation). `409` if it is playing (stop the session first), already in maintenance, inactive, or has an active session |
 | `POST` | `/tables/{table_id}/release` | ADMIN, MANAGER | `reserved` or `maintenance` back to `available`. `409` for a playing or already available table |
 | `POST` | `/tables/{table_id}/start` | any user | Start a session. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
 
