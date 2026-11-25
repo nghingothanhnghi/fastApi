@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.payments.schemas.order import PaymentLineResponse
 
@@ -19,6 +19,19 @@ class AddSessionItemRequest(BaseModel):
     product_id: int
     variant_id: Optional[int] = None
     quantity: int = Field(..., gt=0, le=1000)
+
+
+class CancelSessionRequest(BaseModel):
+    """Why the session is cancelled. Required and kept for audit."""
+    reason: str = Field(..., min_length=3, max_length=255)
+
+    @field_validator("reason")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("reason must be at least 3 characters")
+        return v
 
 
 class SessionItemResponse(BaseModel):
@@ -37,6 +50,7 @@ class BillResponse(BaseModel):
     table_id: int
     table_name: str
     currency: str
+    status: str = "completed"                 # active | completed | cancelled
 
     start_time: datetime
     end_time: Optional[datetime] = None
@@ -64,6 +78,11 @@ class BillResponse(BaseModel):
     opened_by: Optional[str] = None
     stopped_by: Optional[str] = None
     paid_by: Optional[str] = None
+
+    # Only for a cancelled session
+    cancelled_at: Optional[datetime] = None
+    cancelled_by: Optional[str] = None
+    cancel_reason: Optional[str] = None
 
 
 class PayResponse(BillResponse):

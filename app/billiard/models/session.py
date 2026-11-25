@@ -82,6 +82,11 @@ class TableSession(Base):
     stopped_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     paid_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Cancel = "opened by mistake": no bill, no payment. Set only by session_lifecycle.cancel_session.
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     table = relationship("BilliardTable", back_populates="sessions")
     items = relationship(
         "SessionItem", back_populates="session", cascade="all, delete-orphan",
@@ -95,6 +100,7 @@ class TableSession(Base):
     opened_by = relationship("User", foreign_keys=[opened_by_id])
     stopped_by = relationship("User", foreign_keys=[stopped_by_id])
     paid_by = relationship("User", foreign_keys=[paid_by_id])
+    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
 
     __table_args__ = (
         Index(

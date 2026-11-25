@@ -156,7 +156,7 @@ erDiagram
 | `start_time`, `end_time` | UTC. `end_time` is empty while active |
 | `start_time_source`, `end_time_source` | `server` or `device` (who produced the timestamp) |
 | `ends_at` | Countdown target for timed play. Column and controller state exist, but nothing sets it yet |
-| `status` | `active`, `completed` or `cancelled` (nothing sets `cancelled` yet) |
+| `status` | `active`, `completed` or `cancelled` (a manager cancels an active session with `POST /sessions/{id}/cancel`) |
 | `hourly_rate` | **Snapshot** of the rate used for this session (the table rate, or the matched rule's rate) |
 | `billing_policy` | **Snapshot** of the rule type used (`per_minute`, `hourly`, `block`, `minimum_hour`; old rows may hold `rounded_hour`) |
 | `pricing_snapshot` | **Snapshot** (JSON) of the rule: `rule_id`, `rule_name`, `rule_type`, `hourly_rate`, `params`, `priced_at`. Empty on old sessions |
@@ -172,6 +172,7 @@ erDiagram
 | `payment_id`, `payment_reference` | Mirror: link to the first completed payment |
 | `paid_at`, `paid_by_id` | Mirror: when and by whom (empty `paid_by_id` = confirmed automatically by the bank feed) |
 | `opened_by_id`, `stopped_by_id` | Who did each action (audit). Empty when the controller did it |
+| `cancelled_at`, `cancelled_by_id`, `cancel_reason` | Set only when the session is cancelled: when, who and why (audit). A cancelled session has no bill: `end_time` is set and all totals are `0`; its items and games stay as rows for audit |
 
 A partial unique index (`uq_one_active_session_per_table`) allows only one `active` session per table.
 
@@ -484,7 +485,8 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 |--------|------|-------------|
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
 | `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
-| `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed |
+| `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed or cancelled |
+| `POST` | `/sessions/{id}/cancel` | **ADMIN, MANAGER.** Cancel an **active** session opened by mistake. Body `{"reason": "..."}` (3 to 255 chars, required). Frees the table, ends the running game as `cancelled`, zeroes the totals and returns the bill with `status: "cancelled"`. `409` if the session is completed or already cancelled, `422` without a reason, `404` for another club. A completed session is never cancelled: reverse its payment with a void instead. The device cannot cancel: a `session_stop` for a cancelled session is a conflict and is not billed |
 | `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7). Delegates to the Payments module |
 | `POST` | `/sessions/{id}/pay/confirm` | Settle a gateway (Stripe) payment |
 | `POST` | `/sessions/{id}/pay/lines/{line_id}/confirm` | Cashier confirms a bank transfer line was received (may need a note or a manager, by configuration) |
@@ -611,7 +613,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
 | **Packages** | The tables and session columns exist. Missing: package CRUD, package selection at session start, included-item consumption, package billing |
 | **Discounts** | The `discount` column exists but `grand_total` ignores it |
-| **Cancelled sessions** | The `cancelled` status exists, but no endpoint cancels a session |
 | **Timed play** | `ends_at` exists and is sent to the controller, but nothing sets it |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
@@ -625,6 +626,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 
 | File | What it covers |
 |------|----------------|
+| `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |
 | `test_game_service.py` | Game numbering, one active game, scores up/down/never negative, new game keeps billing, tenant 404, clamped device clock, stop closes the game |
 | `test_pricing_sessions.py` | Rule selection, happy hour, day windows, block pricing, snapshots survive rule edits, live total, bill rule name |

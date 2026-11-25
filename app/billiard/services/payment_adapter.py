@@ -42,6 +42,8 @@ class BilliardSessionPayable:
         return session
 
     def check_payable(self, session: TableSession) -> None:
+        if session.status == SessionStatus.CANCELLED:
+            raise HTTPException(409, "Session was cancelled, there is nothing to pay")
         if session.status != SessionStatus.COMPLETED:
             raise HTTPException(409, "Stop the session before paying")
         # Sessions paid before the Payments module kept the bill have no order: they are settled.

@@ -84,6 +84,16 @@ def close_active_game(
     return close_game(db, game, at)
 
 
+def cancel_active_game(
+    db: Session, session: TableSession, at: Optional[datetime] = None
+) -> Optional[TableGame]:
+    """Used by cancel_session: the running game ends as CANCELLED (scores are kept for audit)."""
+    game = get_active_game(db, session.id)
+    if game is None:
+        return None
+    return close_game(db, game, at, status=GameStatus.CANCELLED)
+
+
 def set_scores(db: Session, game: TableGame, a: int, b: int) -> tuple[int, int]:
     """Force both scores (device-wins reconciliation). Returns the previous (a, b)."""
     if a < 0 or b < 0:
