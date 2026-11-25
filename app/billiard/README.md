@@ -155,7 +155,7 @@ erDiagram
 | `table_id` | Which table |
 | `start_time`, `end_time` | UTC. `end_time` is empty while active |
 | `start_time_source`, `end_time_source` | `server` or `device` (who produced the timestamp) |
-| `ends_at` | Countdown target for timed play. Column and controller state exist, but nothing sets it yet |
+| `ends_at` | Countdown target for timed play, set by `planned_minutes` at start or by `/extend`. A flag only: billing uses the real start and stop, and the server never stops a session by itself |
 | `status` | `active`, `completed` or `cancelled` (a manager cancels an active session with `POST /sessions/{id}/cancel`) |
 | `hourly_rate` | **Snapshot** of the rate used for this session (the table rate, or the matched rule's rate) |
 | `billing_policy` | **Snapshot** of the rule type used (`per_minute`, `hourly`, `block`, `minimum_hour`; old rows may hold `rounded_hour`) |
@@ -487,7 +487,7 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `POST` | `/tables/{table_id}/reserve` | ADMIN, MANAGER | Mark an **available** table `reserved`. `409` if it is playing, already reserved, in maintenance or inactive, or has an active session |
 | `POST` | `/tables/{table_id}/maintenance` | ADMIN, MANAGER | Put an **available or reserved** table in `maintenance` (this ends a reservation). `409` if it is playing (stop the session first), already in maintenance, inactive, or has an active session |
 | `POST` | `/tables/{table_id}/release` | ADMIN, MANAGER | `reserved` or `maintenance` back to `available`. `409` for a playing or already available table |
-| `POST` | `/tables/{table_id}/start` | any user | Start a session. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
+| `POST` | `/tables/{table_id}/start` | any user | Start a session. Optional body `{"planned_minutes": 90}` (1 to 1440) sets `ends_at` for timed play; no body means open play. `422` for a bad value. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
 
 ### Sessions
 
@@ -496,6 +496,7 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
 | `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
 | `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed or cancelled |
+| `POST` | `/sessions/{id}/extend` | any user | Body `{"minutes": 30}` (1 to 480). Moves `ends_at` forward: the base is the current `ends_at`, or now if it is empty or already passed, so the customer always gets the full `minutes` from now. Returns the bill. `409` if the session is not active, `422` for a bad value. Billing is unchanged |
 | `POST` | `/sessions/{id}/discount` | **ADMIN, MANAGER.** Body `{"amount": 5000, "reason": "..."}` or `{"percent": 10, "reason": "..."}`, exactly one of the two. `{"amount": 0}` removes it. Returns the bill with `discount`, `discount_percent`, `discount_reason`, `discounted_by` and the new `grand_total`. `409` after a payment was started or for a cancelled session, `422` for a bad value (negative, percent over 100, both or neither, missing reason), `404` for another club |
 | `POST` | `/sessions/{id}/cancel` | **ADMIN, MANAGER.** Cancel an **active** session opened by mistake. Body `{"reason": "..."}` (3 to 255 chars, required). Frees the table, ends the running game as `cancelled`, zeroes the totals and returns the bill with `status: "cancelled"`. `409` if the session is completed or already cancelled, `422` without a reason, `404` for another club. A completed session is never cancelled: reverse its payment with a void instead. The device cannot cancel: a `session_stop` for a cancelled session is a conflict and is not billed |
 | `POST` | `/sessions/{id}/pay` | Pay: single method or split lines (see section 7). Delegates to the Payments module |
@@ -624,7 +625,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
 | **Packages** | The tables and session columns exist. Missing: package CRUD, package selection at session start, included-item consumption, package billing |
-| **Timed play** | `ends_at` exists and is sent to the controller, but nothing sets it |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
@@ -637,6 +637,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 
 | File | What it covers |
 |------|----------------|
+| `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |

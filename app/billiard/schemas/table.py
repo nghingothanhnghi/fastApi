@@ -1,6 +1,7 @@
 # app/billiard/schemas/table.py
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,5 +41,8 @@ class ActiveTableResponse(BaseModel):
     hourly_rate: Decimal
     current_table_fee: Decimal
     current_product_fee: Decimal
+    ends_at: Optional[datetime] = None          # timed play: when the planned time is up
+    remaining_seconds: Optional[int] = None     # negative once past ends_at; None for open play
+    is_overtime: bool = False                   # flag only: the server never stops a session by itself
     current_discount: Decimal = Decimal("0")
     current_total: Decimal                      # table fee + products - discount

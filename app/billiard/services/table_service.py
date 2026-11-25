@@ -179,7 +179,9 @@ class TableService:
         return list(db.execute(stmt).scalars().all())
 
     @staticmethod
-    def start_session(db: Session, table_id: int, user: User) -> TableSession:
+    def start_session(
+        db: Session, table_id: int, user: User, planned_minutes: int | None = None,
+    ) -> TableSession:
         # Row lock serializes concurrent starts on the same table (PostgreSQL);
         # the partial unique index is the backstop on every engine.
         stmt = scope_tables(
@@ -192,8 +194,8 @@ class TableService:
         # Single owner of table.status transitions (see table_lifecycle).
         # Raises ValueError if the table is inactive or not AVAILABLE.
         try:
-            session = open_session(db, table, user.id)   # mark_playing + rate/policy snapshot
-        except ValueError as e:                          # inactive / not AVAILABLE
+            session = open_session(db, table, user.id, planned_minutes=planned_minutes)  # mark_playing + snapshot
+        except ValueError as e:                          # inactive / not AVAILABLE / bad planned_minutes
             raise HTTPException(409, str(e))
         except IntegrityError:
             db.rollback()
@@ -218,6 +220,8 @@ class TableService:
             table_fee = billing_service.table_fee(s, minutes)   # same function as the final bill
             product_fee = s.total_product_fee
             discount = session_lifecycle.discount_amount(s, table_fee + product_fee)
+            ends_at = as_utc(s.ends_at) if s.ends_at else None
+            remaining = int((ends_at - now).total_seconds()) if ends_at else None
             out.append({
                 "id": s.table.id,
                 "name": s.table.name,
@@ -228,6 +232,9 @@ class TableService:
                 "hourly_rate": s.hourly_rate,
                 "current_table_fee": table_fee,
                 "current_product_fee": product_fee,
+                "ends_at": ends_at,
+                "remaining_seconds": remaining,
+                "is_overtime": bool(ends_at and now > ends_at),
                 "current_discount": discount,
                 "current_total": table_fee + product_fee - discount,
             })

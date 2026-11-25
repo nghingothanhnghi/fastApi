@@ -7,7 +7,7 @@ from app.user.enums.role_enum import RoleEnum
 from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
-from app.billiard.schemas.session import StartSessionResponse
+from app.billiard.schemas.session import StartSessionRequest, StartSessionResponse
 from app.billiard.schemas.table import ActiveTableResponse, TableCreate, TableResponse, TableUpdate
 from app.billiard.services.table_service import table_service
 
@@ -98,10 +98,15 @@ def active_tables(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 
 @router.post("/{table_id}/start", response_model=StartSessionResponse)
-def start_table(table_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = table_service.start_session(db, table_id, current_user)
+def start_table(
+    table_id: int,
+    request: StartSessionRequest | None = None,      # optional body: {"planned_minutes": 60}
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    planned = request.planned_minutes if request else None
+    session = table_service.start_session(db, table_id, current_user, planned_minutes=planned)
     db.commit()
     return StartSessionResponse(
         session_id=session.id, table_id=session.table_id,
-        start_time=session.start_time, opened_by=current_user.username,
+        start_time=session.start_time, ends_at=session.ends_at, opened_by=current_user.username,
     )

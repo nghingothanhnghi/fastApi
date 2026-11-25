@@ -87,6 +87,20 @@ class SessionService:
         return session
 
     @staticmethod
+    def extend_session(db: Session, session_id: int, minutes: int, user: User) -> TableSession:
+        """Add time to the countdown of a timed (or open) ACTIVE session. Any staff may do it.
+        Only moves ends_at: the bill still comes from the real start and stop."""
+        session = SessionService.get_locked_session(db, session_id, user)
+        if session.status != SessionStatus.ACTIVE:
+            raise HTTPException(409, "Only an active session can be extended")
+        try:
+            session_lifecycle.extend_session(session, minutes)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        db.flush()
+        return session
+
+    @staticmethod
     def set_discount(
         db: Session, session_id: int, amount, percent, reason: str | None, user: User,
     ) -> TableSession:
@@ -146,6 +160,7 @@ class SessionService:
             status=session.status.value,
             start_time=session.start_time,
             end_time=session.end_time,
+            ends_at=session.ends_at,
             duration_minutes=session.duration_minutes,
             hourly_rate=session.hourly_rate,
             billing_policy=session.billing_policy,
