@@ -60,7 +60,7 @@ Each plan lists the tasks, then the test cases. Test names follow the existing `
 
 | # | Task | File |
 |---|------|------|
-| A1 | `mark_reserved(table)`, `mark_maintenance(table)`, `release(table)`. `reserve` only from `AVAILABLE`; `maintenance` from `AVAILABLE` **or `RESERVED`** (a broken reserved table goes straight to maintenance; the status-only reservation ends with the change); `release` from `RESERVED` / `MAINTENANCE`. A `PLAYING` table is never taken over: stop its session first. Raise `ValueError` like `mark_playing` | `services/table_lifecycle.py` |
+| A1 | `mark_reserved(table)`, `mark_maintenance(table)`, `release(table)`. Allowed only from `AVAILABLE` (release from `RESERVED` / `MAINTENANCE`). Raise `ValueError` like `mark_playing` | `services/table_lifecycle.py` |
 | A2 | `table_service.set_status(db, table_id, action, user)`: lock table with `scope_tables(...).with_for_update()`, check an active session record (same check as `deactivate_table`), call the lifecycle function, map `ValueError` to `409` | `services/table_service.py` |
 | A3 | Routes `POST /tables/{id}/reserve`, `POST /tables/{id}/maintenance`, `POST /tables/{id}/release`. ADMIN, MANAGER | `routes/table_router.py` |
 | A4 | Schema: optional `note` (max 200). No new column: keep it out of the table row. Status only (decision 1): no reservation data is stored. A full reservation feature is a later, separate item (section 5, Follow-up) | `schemas/table.py` |
@@ -77,8 +77,6 @@ No migration (columns already exist).
 | `test_cannot_reserve_playing_table` | `409`, status unchanged |
 | `test_cannot_set_status_on_inactive_table` | `409` |
 | `test_reserve_twice_is_409` | second call refused |
-| `test_reserved_table_can_go_straight_to_maintenance` | `reserved` → `maintenance`, then start is `409`, release gives `available` |
-| `test_playing_table_cannot_enter_maintenance_until_session_is_stopped` | `409` while playing, allowed after Stop |
 | `test_release_available_table_is_409` | nothing to release |
 | `test_other_tenant_gets_404` | tenant isolation |
 | `test_staff_role_cannot_change_status` | `403` (router test, same `dependency_overrides` pattern as `test_payments_bank_account_router.py`) |
@@ -480,7 +478,7 @@ STM32 MCU --(UART)--> RS485 transceiver ==(RS485 differential pair)==> RS485-to-
 
 ### Follow-up (not scheduled): full reservations
 
-Decision 1 keeps item A as a status change. The wanted reservation feature (customer name, phone, date/time, hold period, which table) is a **separate, later item** with its own table, endpoints and tests. When it is planned it will reuse item A's lifecycle functions (`mark_reserved`, `release`) and must handle: **cancelling the reservation record when its table goes to maintenance** (today that transition simply ends the status-only reservation), overlapping reservations on one table, a no-show timeout that releases the table, and starting a session from a reservation. It is listed here so item A's design does not block it: item A stores no reservation data and adds no column, so nothing has to be undone.
+Decision 1 keeps item A as a status change. The wanted reservation feature (customer name, phone, date/time, hold period, which table) is a **separate, later item** with its own table, endpoints and tests. When it is planned it will reuse item A's lifecycle functions (`mark_reserved`, `release`) and must handle: overlapping reservations on one table, a no-show timeout that releases the table, and starting a session from a reservation. It is listed here so item A's design does not block it: item A stores no reservation data and adds no column, so nothing has to be undone.
 
 ---
 
