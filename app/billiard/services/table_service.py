@@ -10,7 +10,7 @@ from app.billiard import config
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate, TableUpdate
 from app.billiard.services.billing_service import billing_service
-from app.billiard.services import table_lifecycle
+from app.billiard.services import session_lifecycle, table_lifecycle
 from app.billiard.services.session_lifecycle import open_session
 from app.billiard.utils.billing import as_utc, billable_minutes
 from app.user.models.user import User
@@ -217,6 +217,7 @@ class TableService:
             minutes = billable_minutes(as_utc(s.start_time), now)
             table_fee = billing_service.table_fee(s, minutes)   # same function as the final bill
             product_fee = s.total_product_fee
+            discount = session_lifecycle.discount_amount(s, table_fee + product_fee)
             out.append({
                 "id": s.table.id,
                 "name": s.table.name,
@@ -227,7 +228,8 @@ class TableService:
                 "hourly_rate": s.hourly_rate,
                 "current_table_fee": table_fee,
                 "current_product_fee": product_fee,
-                "current_total": table_fee + product_fee,
+                "current_discount": discount,
+                "current_total": table_fee + product_fee - discount,
             })
         return out
 

@@ -86,6 +86,7 @@ class ReportService:
                 paid_sum(TableSession.total_product_fee),
                 paid_sum(TableSession.grand_total),
                 func.coalesce(func.sum(case((paid, 0), else_=TableSession.grand_total)), 0),
+                paid_sum(TableSession.discount),
             )
             .select_from(BilliardTable)
             .outerjoin(TableSession, and_(*cond))
@@ -96,7 +97,7 @@ class ReportService:
             TableUsageRow(
                 table_id=r[0], table_name=r[1], times_played=int(r[2]), total_minutes=int(r[3]),
                 table_revenue=_d(r[4]), product_revenue=_d(r[5]),
-                total_revenue=_d(r[6]), unpaid_total=_d(r[7]),
+                total_revenue=_d(r[6]), unpaid_total=_d(r[7]), discount_total=_d(r[8]),
             )
             for r in db.execute(scope_tables(stmt, user)).all()
         ]
@@ -108,6 +109,7 @@ class ReportService:
             product_revenue=sum((r.product_revenue for r in rows), Decimal("0")),
             total_revenue=sum((r.total_revenue for r in rows), Decimal("0")),
             unpaid_total=sum((r.unpaid_total for r in rows), Decimal("0")),
+            discount_total=sum((r.discount_total for r in rows), Decimal("0")),
         )
         return TableUsageReport(
             period_start=start_date,

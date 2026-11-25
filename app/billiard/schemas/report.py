@@ -15,6 +15,7 @@ class TableUsageRow(BaseModel):
     product_revenue: Decimal    # paid sessions only
     total_revenue: Decimal      # paid sessions only
     unpaid_total: Decimal       # stopped but not yet paid
+    discount_total: Decimal = Decimal("0")   # paid sessions only; table_revenue + product_revenue - discount_total = total_revenue
 
 
 class TableUsageReport(BaseModel):

@@ -7,7 +7,7 @@
 # except billing_service, which is read-only and imports no lifecycle module.
 # Never commits or locks; the caller holds the row locks.
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.billiard.models import BilliardTable, SessionStatus, TableSession
 from app.billiard.services.billing_service import billing_service
 from app.billiard.services.game_lifecycle import cancel_active_game, close_active_game
 from app.billiard.services.table_lifecycle import mark_available, mark_playing
-from app.billiard.utils.billing import as_utc, billable_minutes
+from app.billiard.utils.billing import CENT, as_utc, billable_minutes
 
 
 def resolve_time(at: Optional[datetime], floor: Optional[datetime] = None) -> tuple[datetime, str]:
@@ -33,14 +33,63 @@ def resolve_time(at: Optional[datetime], floor: Optional[datetime] = None) -> tu
     return value, source
 
 
+def discount_spec(session: TableSession) -> Optional[dict]:
+    """The intended discount, {"type": "percent" | "fixed", "value": "10"}, or None.
+    Kept in the pricing snapshot so a percent follows the table fee that is final only at Stop."""
+    spec = (session.pricing_snapshot or {}).get("discount")
+    return spec if isinstance(spec, dict) and spec.get("type") in ("percent", "fixed") else None
+
+
+def discount_amount(session: TableSession, subtotal: Decimal) -> Decimal:
+    """Amount taken off `subtotal` (table fee + products), never below 0 or above the subtotal.
+    percent: value % of the subtotal. fixed: the value. No spec: the stored `discount`
+    column as a fixed amount (sessions discounted before specs existed)."""
+    spec = discount_spec(session)
+    if spec and spec["type"] == "percent":
+        amount = (subtotal * Decimal(str(spec["value"])) / Decimal("100")).quantize(CENT, rounding=ROUND_HALF_UP)
+    elif spec:
+        amount = Decimal(str(spec["value"]))
+    else:
+        amount = session.discount or Decimal("0")
+    return max(min(amount, subtotal), Decimal("0"))
+
+
 def recompute_totals(session: TableSession) -> None:
-    """The ONE place that derives product fee and grand total from the session's
+    """The ONE place that derives product fee, discount and grand total from the session's
     own parts: grand_total = max(table_fee + product_fee - discount, 0).
     Call it after anything that changes the table fee, the items or the discount.
-    With discount = 0 the result is exactly table_fee + product_fee (old behaviour)."""
+    With no discount the result is exactly table_fee + product_fee (old behaviour)."""
     session.total_product_fee = sum((i.total_price for i in session.items), Decimal("0"))
-    discount = session.discount or Decimal("0")
-    session.grand_total = max(session.total_table_fee + session.total_product_fee - discount, Decimal("0"))
+    subtotal = session.total_table_fee + session.total_product_fee
+    session.discount = discount_amount(session, subtotal)
+    session.grand_total = max(subtotal - session.discount, Decimal("0"))
+
+
+def apply_discount(
+    session: TableSession, *, amount: Optional[Decimal] = None, percent: Optional[Decimal] = None,
+    reason: Optional[str] = None, by_id: Optional[int] = None,
+) -> None:
+    """Set (or, with amount == 0, remove) the discount and recompute. Exactly one of
+    amount / percent. The caller has checked the session state, the role and that no
+    payment order exists. The spec is stored; session.discount becomes the applied amount."""
+    if (amount is None) == (percent is None):
+        raise ValueError("Give either amount or percent")
+    snap = dict(session.pricing_snapshot or {})        # new dict so the JSON change is saved
+    if percent is not None:
+        if not (Decimal("0") < percent <= Decimal("100")):
+            raise ValueError("percent must be greater than 0 and at most 100")
+        snap["discount"] = {"type": "percent", "value": str(percent)}
+    elif amount < 0:
+        raise ValueError("amount cannot be negative")
+    elif amount == 0:
+        snap.pop("discount", None)
+        session.discount = Decimal("0")
+    else:
+        snap["discount"] = {"type": "fixed", "value": str(amount)}
+    session.pricing_snapshot = snap
+    session.discount_reason = reason if (percent is not None or amount) else None
+    session.discounted_by_id = by_id
+    recompute_totals(session)
 
 
 def open_session(
