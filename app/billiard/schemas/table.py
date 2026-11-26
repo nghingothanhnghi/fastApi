@@ -46,5 +46,8 @@ class ActiveTableResponse(BaseModel):
     is_overtime: bool = False                   # flag only: the server never stops a session by itself
     package_name: Optional[str] = None          # session started with a package
     overtime_minutes: Optional[int] = None      # minutes beyond the package so far; None without a package
+    needs_billing_review: bool = False          # device asked for a package the server could not apply: block payment
+    requested_package_id: Optional[int] = None
+    billing_review_reason: Optional[str] = None
     current_discount: Decimal = Decimal("0")
     current_total: Decimal                      # table fee + products - discount

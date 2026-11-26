@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, contains_eager
 
 from app.billiard import config
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
+from app.billiard.models.session import BILLING_REVIEW_REQUIRED
 from app.billiard.schemas.table import TableCreate, TableUpdate
 from app.billiard.services.billing_service import billing_service, package_overtime_minutes
 from app.billiard.services.package_service import package_service
@@ -248,6 +249,9 @@ class TableService:
                 "is_overtime": bool(ends_at and now > ends_at),
                 "package_name": pkg["name"] if pkg else None,
                 "overtime_minutes": package_overtime_minutes(pkg, minutes) if pkg else None,
+                "needs_billing_review": s.billing_review_state == BILLING_REVIEW_REQUIRED,
+                "requested_package_id": s.requested_package_id,
+                "billing_review_reason": s.billing_review_reason,
                 "current_discount": discount,
                 "current_total": table_fee + product_fee - discount,
             })

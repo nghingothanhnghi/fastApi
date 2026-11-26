@@ -254,14 +254,21 @@ def _h_session_start(db, device_pk, client_id, ev):
         _map_local(db, device_pk, "session", ev.local_session_id, active.id)
         return {"adopted_session_id": active.id}
 
-    package, note = None, None
+    package, review_reason = None, None
     package_id = (ev.data or {}).get("package_id")
     if package_id is not None:
-        # The device already started playing, so an unusable package must not lose the session:
-        # open it as a normal timed-by-rule session and say so in the event note.
-        package = package_service.find_for_club(db, package_id, client_id) if isinstance(package_id, int) else None
-        if package is None or not package.is_active:
-            note = {"package_ignored": f"package {package_id} not found or not available"}
+        # The device already started playing, so the event is accepted and the real session is opened. If the
+        # package cannot be applied the session is flagged for BILLING REVIEW (payment blocked until a cashier
+        # assigns a package or confirms normal pricing) instead of silently billing at the normal rate.
+        valid_type = isinstance(package_id, int) and not isinstance(package_id, bool)
+        package = package_service.find_for_club(db, package_id, client_id) if valid_type else None
+        if not valid_type:
+            review_reason = "Invalid package_id"
+        elif package is None:                       # unknown and other club's look the same: never leak other clubs
+            review_reason = "Package not found"
+        elif not package.is_active:
+            review_reason = "Package is not available"
+        if review_reason:
             package = None
 
     try:
@@ -269,7 +276,10 @@ def _h_session_start(db, device_pk, client_id, ev):
     except ValueError as e:                      # maintenance / inactive / reserved table
         raise EventConflict(str(e))
     _map_local(db, device_pk, "session", ev.local_session_id, session.id)
-    return note
+    if review_reason:
+        session_lifecycle.flag_billing_review(session, package_id, review_reason)
+        return {"billing_review_required": review_reason, "requested_package_id": session.requested_package_id}
+    return None
 
 
 def _h_session_stop(db, device_pk, client_id, ev):

@@ -16,6 +16,14 @@ class SessionStatus(str, enum.Enum):
     CANCELLED = "cancelled"   # NEW
 
 
+# Billing review: a device asked for a package the server could not apply. The session is real and billed
+# as played, but payment is blocked until someone assigns a valid package or confirms normal pricing.
+BILLING_REVIEW_REQUIRED = "required"
+BILLING_REVIEW_RESOLVED = "resolved"
+REVIEW_ASSIGN_PACKAGE = "assign_package"
+REVIEW_CONFIRM_NORMAL = "confirm_normal_pricing"
+
+
 class PaymentState(str, enum.Enum):
     UNPAID = "unpaid"
     PENDING = "pending"
@@ -57,6 +65,17 @@ class TableSession(Base):
     # Everything billing needs from the package, frozen at start (editing the package later changes nothing):
     # {package_id, name, price, duration_minutes, items: [{product_id, included_quantity}]}. None = no package.
     package_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Billing review (see BILLING_REVIEW_* above). requested_package_id is what the DEVICE asked for: kept as a plain
+    # number, never a foreign key, because it may be unknown or another club's. It is separate from package_snapshot
+    # (what the customer was actually sold) so a device event can never overwrite the purchased terms.
+    billing_review_state: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    requested_package_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    billing_review_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    billing_review_resolution: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    billing_review_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    billing_reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    billing_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_table_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
@@ -110,6 +129,7 @@ class TableSession(Base):
     paid_by = relationship("User", foreign_keys=[paid_by_id])
     cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
     discounted_by = relationship("User", foreign_keys=[discounted_by_id])
+    billing_reviewed_by = relationship("User", foreign_keys=[billing_reviewed_by_id])
 
     __table_args__ = (
         Index(

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.billiard import config
 from app.billiard.models import PaymentState, SessionStatus, TableSession
+from app.billiard.models.session import BILLING_REVIEW_REQUIRED
 from app.payments.models.order import PaymentOrder
 from app.payments.services.payable_registry import Quote, payable_registry
 from app.user.models.user import User
@@ -46,6 +47,13 @@ class BilliardSessionPayable:
             raise HTTPException(409, "Session was cancelled, there is nothing to pay")
         if session.status != SessionStatus.COMPLETED:
             raise HTTPException(409, "Stop the session before paying")
+        if session.billing_review_state == BILLING_REVIEW_REQUIRED:
+            # The device asked for a package the server could not apply: the amount may be wrong.
+            raise HTTPException(
+                409,
+                "Billing review required before payment: assign the correct package or confirm normal pricing "
+                f"(POST /sessions/{session.id}/billing-review). Reason: {session.billing_review_reason}",
+            )
         # Sessions paid before the Payments module kept the bill have no order: they are settled.
         if session.payment_order_id is None and session.payment_state == PaymentState.PAID:
             raise HTTPException(409, "Session is already paid")

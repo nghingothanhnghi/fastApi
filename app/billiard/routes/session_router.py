@@ -8,8 +8,8 @@ from app.user.models.user import User
 from app.user.utils.role_requirements import require_roles
 from app.user.utils.token import get_current_user
 from app.billiard.schemas.session import (
-    AddSessionItemRequest, BillResponse, CancelSessionRequest, DiscountRequest, ExtendSessionRequest,
-    PayResponse, SessionItemResponse,
+    AddItemResponse, AddSessionItemRequest, BillingReviewItem, BillingReviewRequest, BillResponse, CancelSessionRequest,
+    DiscountRequest, ExtendSessionRequest, PayResponse, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
 from app.billiard.services.session_service import session_service
@@ -21,26 +21,50 @@ from app.payments.schemas.order import (
 router = APIRouter(prefix="/sessions", tags=["Billiard Sessions"])
 
 
+@router.get("/billing-review", response_model=list[BillingReviewItem])
+def list_billing_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Sessions that need a cashier decision before they can be paid. Declared before /{session_id}."""
+    return session_service.list_billing_reviews(db, current_user)
+
+
 @router.get("/{session_id}", response_model=BillResponse)
 def get_bill(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Re-print a bill / receipt at any time (built from snapshots)."""
     return session_service.build_bill(session_service.get_session(db, session_id, current_user))
 
 
-@router.post("/{session_id}/items", response_model=SessionItemResponse, status_code=201)
+@router.post("/{session_id}/items", response_model=AddItemResponse, status_code=201)
 def add_item(
     session_id: int, request: AddSessionItemRequest,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    item = session_service.add_item(
+    lines = session_service.add_item_lines(
         db, session_id, request.product_id, request.quantity, request.variant_id, current_user
     )
     db.commit()
-    return SessionItemResponse(
-        id=item.id, product_id=item.product_id, variant_id=item.variant_id,
-        product_name=item.product_name, quantity=item.quantity,
-        unit_price=item.unit_price, total_price=item.total_price, from_package=item.from_package,
+    views = [
+        SessionItemResponse(
+            id=i.id, product_id=i.product_id, variant_id=i.variant_id,
+            product_name=i.product_name, quantity=i.quantity,
+            unit_price=i.unit_price, total_price=i.total_price, from_package=i.from_package,
+        ) for i in lines
+    ]
+    return AddItemResponse(**views[-1].model_dump(), lines=views)    # top level = paid line if any, as before
+
+
+@router.post("/{session_id}/billing-review", response_model=BillResponse)
+def resolve_billing_review(
+    session_id: int, request: BillingReviewRequest,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Resolve a flagged session: assign a valid package, or confirm normal pricing (note required).
+    The decision is recorded (who, when, what, note) and unblocks payment."""
+    session = session_service.resolve_billing_review(
+        db, session_id, request.action, request.package_id, request.note, current_user
     )
+    db.commit()
+    db.refresh(session)
+    return session_service.build_bill(session)
 
 
 @router.post("/{session_id}/stop", response_model=BillResponse)

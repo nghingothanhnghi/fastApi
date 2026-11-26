@@ -12,6 +12,9 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 
 | Change | What to do in the frontend |
 | --- | --- |
+| A table started from the controller with a package the server cannot apply now opens the session and is flagged for **billing review**. New fields on the board (`needs_billing_review`, `requested_package_id`, `billing_review_reason`) and on the bill (those plus `billing_review_resolution`, `billing_review_note`, `billing_reviewed_by`, `billing_reviewed_at`). New `GET /sessions/billing-review` and `POST /sessions/{id}/billing-review`. Payment returns `409` until it is resolved | Show a warning badge on the board tile and a "Needs billing review" list. On the bill, hide Pay while `needs_billing_review` is true and show a Resolve button (see screen 13) |
+| `POST /sessions/{id}/items` also returns `lines` (every line created, free first). The old top-level fields are unchanged | Optional: use `lines` instead of reloading the bill. Reloading still works |
+| `minimum_hour` overtime on a package is prorated (no second minimum) | None. The totals come from the server |
 | New package endpoints `/billiard/packages` (list, get, create, change, deactivate) | New manager screen 12 (packages). The POS picker lists them with `GET /billiard/packages` and starts a session with `package_id` (see Step 4) |
 | Sessions can start with a package: `POST /tables/{id}/start` accepts `package_id`; the bill gets `package_name`, `package_price`, `package_minutes`, `overtime_minutes`; items have `from_package`; the board has `package_name` and `overtime_minutes`; the quote accepts `package_id` | Add a package picker to Start (next to the timed-play choice). On the bill show the package as the table-time line and `overtime_minutes` as extra time. Show free items with their `(package)` name and a price of 0. After `POST /items` reload the bill, because one call can create two lines |
 
@@ -174,7 +177,7 @@ A package must be active (`400 Package is not available`) and belong to the club
 }
 ```
 
-If the session was started with a package that includes this product, the first units are free: the call can create **two** lines, a free one (`from_package: true`, `unit_price` `"0.00"`, name ending in `(package)`) and a paid one for the rest. The response is the paid line when there is one, otherwise the free line, so always reload `GET /sessions/{id}` to draw the list.
+If the session was started with a package that includes this product, the first units are free: the call can create **two** lines, a free one (`from_package: true`, `unit_price` `"0.00"`, name ending in `(package)`) and a paid one for the rest. The response's own fields are the paid line when there is one (otherwise the free line), and `lines` lists every line this call created, free first. You can draw from `lines` or reload `GET /sessions/{id}`; both work.
 
 Errors: `404 Product not found`, `400 Product is not available`, `400 Variant does not belong to this product`, and `409 Items can only be added to an active session` once the session is stopped. To show the current list, call `GET /sessions/{id}`: `items` is the full list and `grand_total` is up to date.
 
@@ -458,6 +461,21 @@ A package is a fixed price for a number of minutes of table time, with some prod
 - Errors: `409` name already used in this club (inactive packages keep their name), `400` a product is missing or inactive (reload the menu), `422` a bad value, `403` for staff.
 - "Delete" calls `DELETE`, which only deactivates. Old bills are not affected.
 
+### 13. Billing review (cashier)
+
+When a controller starts a table with a package the server cannot apply, the session still opens (the game is real) and is flagged. Show it in three places:
+
+- **Board:** a badge on tiles with `needs_billing_review: true` and the reason (`billing_review_reason`). Poll `GET /tables/active` as usual; there is no push yet.
+- **List:** `GET /sessions/billing-review` returns the sessions that still need a decision (`session_id`, `table_name`, `requested_package_id`, `reason`, `grand_total`).
+- **Bill:** while `needs_billing_review` is true, hide Pay (the server answers `409 Billing review required before payment`) and show **Resolve**.
+
+Resolve offers two choices, both through `POST /sessions/{id}/billing-review`:
+
+1. **Assign a package:** pick from `GET /billiard/packages` and send `{"action": "assign_package", "package_id": 3}`. The server applies the package, turns the units of included products that were already added into free ones, recomputes the fee if the session is stopped, and returns the new `Bill`. Redraw from it.
+2. **Confirm normal pricing:** send `{"action": "confirm_normal_pricing", "note": "Customer did not buy a package"}`. The note is required (3 to 255 characters) and is kept for audit. Amounts do not change.
+
+Any logged-in user of the club can resolve it. After it is resolved show who decided and when (`billing_reviewed_by`, `billing_reviewed_at`, `billing_review_resolution`, `billing_review_note`) and keep `requested_package_id` visible as history. Errors: `409` already resolved, payment already started, or the session was cancelled; `400` the package is inactive; `404` the package or session is not found; `422` a missing package id or note.
+
 ## State to UI rules
 
 Decide what to render from the bill alone: `payment_state`, `payment_method`, `amount_paid`, `balance_due` and `payments[]`. Do not keep your own copy of the payment state; redraw from each response.
@@ -609,6 +627,9 @@ interface ActiveTable {              // GET /tables/active (only tables being pl
   is_overtime: boolean;              // flag only: the server never stops a session by itself
   package_name: string | null;       // session started with a package
   overtime_minutes: number | null;   // minutes beyond the package so far
+  needs_billing_review: boolean;     // controller asked for a package the server could not apply
+  requested_package_id: number | null;
+  billing_review_reason: string | null;
   current_discount: Money;           // 0 when there is no discount
   current_total: Money;              // table fee + products - discount
 }
@@ -793,6 +814,10 @@ interface RegisterControllerResponse extends ControllerDevice {
 ### Billiard bill
 
 ```ts
+interface AddItemResponse extends SessionItem {   // POST /sessions/{id}/items
+  lines: SessionItem[];              // every line this call created: one, or two (free first, then paid)
+}
+
 interface SessionItem {
   id: number;
   product_id: number | null;
@@ -803,6 +828,14 @@ interface SessionItem {
   total_price: Money;
   from_package: boolean;             // free units included by the package (unit_price 0)
 }
+
+interface BillingReviewItem {        // GET /sessions/billing-review
+  session_id: number; table_id: number; table_name: string; status: string; start_time: ISODate;
+  requested_package_id: number | null; reason: string | null; grand_total: Money;
+}
+type BillingReviewRequest =          // POST /sessions/{id}/billing-review
+  | { action: "assign_package"; package_id: number }
+  | { action: "confirm_normal_pricing"; note: string };   // note: 3 to 255 characters
 
 interface Bill {                     // GET /sessions/{id}, /stop, and every /pay... response
   session_id: number;
@@ -822,6 +855,13 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   package_price: Money | null;
   package_minutes: number | null;
   overtime_minutes: number | null;   // beyond the package, billed by the rule; null until stopped
+  needs_billing_review: boolean;     // true: payment is blocked until resolved
+  requested_package_id: number | null;   // what the controller asked for (history, never overwritten)
+  billing_review_reason: string | null;
+  billing_review_resolution: "assign_package" | "confirm_normal_pricing" | null;
+  billing_review_note: string | null;
+  billing_reviewed_by: string | null;
+  billing_reviewed_at: ISODate | null;
   total_table_fee: Money;
   total_product_fee: Money;
   discount: Money;                   // amount taken off (table fee + products); 0 = none
@@ -1095,7 +1135,9 @@ export const api = {
     request<StartSessionResponse>("POST", `/tables/${tableId}/start`, opts),
   extendSession: (id: number, minutes: number) => request<Bill>("POST", `/sessions/${id}/extend`, { minutes }),
   products:     () => request<Product[]>("GET", "/products"),
-  addItem:      (id: number, b: AddItemRequest) => request<SessionItem>("POST", `/sessions/${id}/items`, b),
+  addItem:      (id: number, b: AddItemRequest) => request<AddItemResponse>("POST", `/sessions/${id}/items`, b),
+  billingReviews: () => request<BillingReviewItem[]>("GET", "/sessions/billing-review"),
+  resolveBillingReview: (id: number, b: BillingReviewRequest) => request<Bill>("POST", `/sessions/${id}/billing-review`, b),
 
   bill:  (id: number) => request<Bill>("GET", `/sessions/${id}`),
   stop:  (id: number) => request<Bill>("POST", `/sessions/${id}/stop`),
