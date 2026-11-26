@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, contains_eager
 from app.billiard import config
 from app.billiard.models import BilliardTable, TableSession, SessionStatus
 from app.billiard.schemas.table import TableCreate, TableUpdate
-from app.billiard.services.billing_service import billing_service
+from app.billiard.services.billing_service import billing_service, package_overtime_minutes
+from app.billiard.services.package_service import package_service
 from app.billiard.services import session_lifecycle, table_lifecycle
 from app.billiard.services.session_lifecycle import open_session
 from app.billiard.utils.billing import as_utc, billable_minutes
@@ -181,6 +182,7 @@ class TableService:
     @staticmethod
     def start_session(
         db: Session, table_id: int, user: User, planned_minutes: int | None = None,
+        package_id: int | None = None,
     ) -> TableSession:
         # Row lock serializes concurrent starts on the same table (PostgreSQL);
         # the partial unique index is the backstop on every engine.
@@ -191,10 +193,18 @@ class TableService:
         if not table:
             raise HTTPException(404, "Billiard table not found")
 
+        package = None
+        if package_id is not None:
+            package = package_service.find_for_club(db, package_id, table.client_id)   # other club = 404
+            if package is None:
+                raise HTTPException(404, "Package not found")
+            if not package.is_active:
+                raise HTTPException(400, "Package is not available")
+
         # Single owner of table.status transitions (see table_lifecycle).
         # Raises ValueError if the table is inactive or not AVAILABLE.
         try:
-            session = open_session(db, table, user.id, planned_minutes=planned_minutes)  # mark_playing + snapshot
+            session = open_session(db, table, user.id, planned_minutes=planned_minutes, package=package)  # mark_playing + snapshot
         except ValueError as e:                          # inactive / not AVAILABLE / bad planned_minutes
             raise HTTPException(409, str(e))
         except IntegrityError:
@@ -221,6 +231,7 @@ class TableService:
             product_fee = s.total_product_fee
             discount = session_lifecycle.discount_amount(s, table_fee + product_fee)
             ends_at = as_utc(s.ends_at) if s.ends_at else None
+            pkg = s.package_snapshot or None
             remaining = int((ends_at - now).total_seconds()) if ends_at else None
             out.append({
                 "id": s.table.id,
@@ -235,6 +246,8 @@ class TableService:
                 "ends_at": ends_at,
                 "remaining_seconds": remaining,
                 "is_overtime": bool(ends_at and now > ends_at),
+                "package_name": pkg["name"] if pkg else None,
+                "overtime_minutes": package_overtime_minutes(pkg, minutes) if pkg else None,
                 "current_discount": discount,
                 "current_total": table_fee + product_fee - discount,
             })

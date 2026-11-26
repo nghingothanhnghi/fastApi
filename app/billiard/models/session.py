@@ -54,6 +54,9 @@ class TableSession(Base):
     )
     package_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     package_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Everything billing needs from the package, frozen at start (editing the package later changes nothing):
+    # {package_id, name, price, duration_minutes, items: [{product_id, included_quantity}]}. None = no package.
+    package_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_table_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)

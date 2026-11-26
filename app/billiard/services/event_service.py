@@ -35,6 +35,7 @@ from app.billiard.models import (
 )
 from app.billiard.schemas.event import DeviceEventIn, EventBatchResult, EventRef
 from app.billiard.services import game_lifecycle, session_lifecycle
+from app.billiard.services.package_service import package_service
 
 from app.billiard import config
 from app.billiard.utils.billing import as_utc
@@ -253,12 +254,22 @@ def _h_session_start(db, device_pk, client_id, ev):
         _map_local(db, device_pk, "session", ev.local_session_id, active.id)
         return {"adopted_session_id": active.id}
 
+    package, note = None, None
+    package_id = (ev.data or {}).get("package_id")
+    if package_id is not None:
+        # The device already started playing, so an unusable package must not lose the session:
+        # open it as a normal timed-by-rule session and say so in the event note.
+        package = package_service.find_for_club(db, package_id, client_id) if isinstance(package_id, int) else None
+        if package is None or not package.is_active:
+            note = {"package_ignored": f"package {package_id} not found or not available"}
+            package = None
+
     try:
-        session = session_lifecycle.open_session(db, table, None, _event_time(ev))
+        session = session_lifecycle.open_session(db, table, None, _event_time(ev), package=package)
     except ValueError as e:                      # maintenance / inactive / reserved table
         raise EventConflict(str(e))
     _map_local(db, device_pk, "session", ev.local_session_id, session.id)
-    return None
+    return note
 
 
 def _h_session_stop(db, device_pk, client_id, ev):

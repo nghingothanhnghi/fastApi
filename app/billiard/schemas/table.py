@@ -44,5 +44,7 @@ class ActiveTableResponse(BaseModel):
     ends_at: Optional[datetime] = None          # timed play: when the planned time is up
     remaining_seconds: Optional[int] = None     # negative once past ends_at; None for open play
     is_overtime: bool = False                   # flag only: the server never stops a session by itself
+    package_name: Optional[str] = None          # session started with a package
+    overtime_minutes: Optional[int] = None      # minutes beyond the package so far; None without a package
     current_discount: Decimal = Decimal("0")
     current_total: Decimal                      # table fee + products - discount

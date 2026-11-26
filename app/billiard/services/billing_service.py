@@ -13,6 +13,9 @@
 #     changes an existing session or bill.
 #   * Which rule wins when several match: highest priority, then a table-specific
 #     rule over a tenant-wide one, then the newest rule.
+#   * A package (TableSession.package_snapshot) replaces the fee of its first
+#     `duration_minutes` of TABLE time with its price. Time beyond that is billed by the
+#     session's own rule, exactly as without a package. Products are never part of it.
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -23,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.billiard import config
 from app.billiard.models import BilliardTable, PricingRule
-from app.billiard.utils.billing import as_utc, calculate_fee
+from app.billiard.utils.billing import CENT, as_utc, calculate_fee
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -77,6 +80,34 @@ def _matches(rule: PricingRule, local: datetime) -> bool:
     return True
 
 
+def snapshot_package(package) -> dict:
+    """JSON stored in TableSession.package_snapshot (strings and ints only)."""
+    return {
+        "package_id": package.id,
+        "name": package.name,
+        "price": str(Decimal(str(package.price)).quantize(CENT)),
+        "duration_minutes": int(package.duration_minutes),
+        "items": [
+            {"product_id": i.product_id, "included_quantity": int(i.included_quantity)}
+            for i in sorted(package.items, key=lambda i: i.product_id)
+        ],
+    }
+
+
+def package_overtime_minutes(package_snapshot: dict, minutes: int) -> int:
+    return max(0, int(minutes) - int(package_snapshot["duration_minutes"]))
+
+
+def package_table_fee(package_snapshot: dict, rule_type: str, hourly_rate, minutes: int, params: Optional[dict]) -> Decimal:
+    """package price + the session's rule applied to the minutes beyond the package.
+    With no overtime the rule is NOT called: minimum_hour would otherwise charge its floor for 0 minutes."""
+    fee = Decimal(str(package_snapshot["price"])).quantize(CENT)
+    over = package_overtime_minutes(package_snapshot, minutes)
+    if over > 0:
+        fee += calculate_fee(rule_type, hourly_rate, over, params)
+    return fee
+
+
 class BillingService:
 
     @staticmethod
@@ -119,18 +150,22 @@ class BillingService:
         rules existed have no snapshot and fall back to billing_policy
         ('per_minute' / 'rounded_hour'), giving exactly the old result."""
         snap = getattr(session, "pricing_snapshot", None) or {}
-        return calculate_fee(
-            snap.get("rule_type") or session.billing_policy,
-            session.hourly_rate,
-            minutes,
-            snap.get("params"),
-        )
+        rule_type = snap.get("rule_type") or session.billing_policy
+        package = getattr(session, "package_snapshot", None)
+        if package:
+            return package_table_fee(package, rule_type, session.hourly_rate, minutes, snap.get("params"))
+        return calculate_fee(rule_type, session.hourly_rate, minutes, snap.get("params"))
 
     @staticmethod
-    def preview_fee(db: Session, table: BilliardTable, at: datetime, minutes: int) -> dict:
-        """What a session starting at `at` and lasting `minutes` would cost."""
+    def preview_fee(db: Session, table: BilliardTable, at: datetime, minutes: int, package=None) -> dict:
+        """What a session starting at `at` and lasting `minutes` would cost (with `package`, if given).
+        Rule selection still runs with a package: it decides the rate for any overtime."""
         quote = BillingService.quote_for_table(db, table, at)
-        fee = calculate_fee(quote.rule_type, quote.hourly_rate, minutes, quote.params)
+        pkg = snapshot_package(package) if package is not None else None
+        if pkg:
+            fee = package_table_fee(pkg, quote.rule_type, quote.hourly_rate, minutes, quote.params)
+        else:
+            fee = calculate_fee(quote.rule_type, quote.hourly_rate, minutes, quote.params)
         return {
             "table_id": table.id,
             "at": _to_local(at),
@@ -140,6 +175,11 @@ class BillingService:
             "rule_type": quote.rule_type,
             "hourly_rate": quote.hourly_rate,
             "params": quote.params,
+            "package_id": pkg["package_id"] if pkg else None,
+            "package_name": pkg["name"] if pkg else None,
+            "package_price": Decimal(pkg["price"]) if pkg else None,
+            "package_minutes": pkg["duration_minutes"] if pkg else None,
+            "overtime_minutes": package_overtime_minutes(pkg, minutes) if pkg else None,
             "fee": fee,
         }
 

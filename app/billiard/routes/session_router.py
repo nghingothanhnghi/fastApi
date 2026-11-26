@@ -39,7 +39,7 @@ def add_item(
     return SessionItemResponse(
         id=item.id, product_id=item.product_id, variant_id=item.variant_id,
         product_name=item.product_name, quantity=item.quantity,
-        unit_price=item.unit_price, total_price=item.total_price,
+        unit_price=item.unit_price, total_price=item.total_price, from_package=item.from_package,
     )
 
 
