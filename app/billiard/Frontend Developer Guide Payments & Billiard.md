@@ -8,6 +8,12 @@ The frontend needs about 30 endpoints to run a billiard table from start to paym
 
 New to the project? Read "The whole process, start to finish" first. It follows one session from the first tap to the receipt, then the screen-by-screen sections explain each part in detail.
 
+### What changed since Nov 26
+
+| Change | What to do in the frontend |
+| --- | --- |
+| New package endpoints `/billiard/packages` (list, get, create, change, deactivate) | New manager screen 12 (packages). The POS picker can already list packages, but a session cannot be started with one yet, so do not show a picker on Start until that ships |
+
 ### What changed since Nov 20
 
 | Change | What to do in the frontend |
@@ -64,6 +70,7 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 | Manager bank inbox | `/payments/bank-feed/transactions...`, `/payments/bank-feed/pending-lines` | `BankTransaction`, `PendingTransferLine` |
 | Another business later | `/payments/orders/{source_type}/{source_id}/...` | `Order` (same lines as the bill) |
 | Scoreboard | `/sessions/{id}/games`, `/games/{id}/score`, `/games/{id}/reset`, `/games/{id}/new`, `/games/{id}/finish` | `Game`, `NewGameResponse` |
+| Packages | `/billiard/packages`, `/billiard/packages/{id}` | `Package[]`, `Package` |
 | Pricing rules and quote | `/billiard/pricing-rules`, `/billiard/pricing-rules/quote` | `PricingRule[]`, `PricingQuote` |
 | Manager reports and set-up | `/reports/tables/usage`, `POST /tables`, `PATCH /tables/{id}`, `DELETE /tables/{id}` | `TableUsageReport`, `Table`, `DeactivateTableResponse` |
 | Manager controller devices | `/billiard/controller/status`, `/billiard/controller/hydro-candidates`, `/billiard/controller/register` | `ControllerDevice[]`, `HydroCandidate[]`, `RegisterControllerResponse` |
@@ -438,6 +445,16 @@ Build the form like this:
 
 Handle the errors in the form: `422` for a bad field or a QR that is not an account QR (show the message and keep the typed fields), `409` when the account is already used by another club, `413` for a large image (check the size in the browser first), and `501` when the server cannot read QR images (hide the upload button after the first `501` and keep typing).
 
+### 12. Packages (manager)
+
+A package is a fixed price for a number of minutes of table time, with some products included free (for example "2 hours, 150,000, 2 beers"). Billing with packages is not live yet, so this screen only manages the list.
+
+- List with `GET /billiard/packages?include_inactive=true`; show inactive rows greyed out with a Reactivate button (`PUT` with `{"is_active": true}`).
+- The form has `name`, `duration_minutes` (1 to 1440), `price` (0 or more, 2 decimals) and a product list. Build the product list from `GET /products`, only products with `is_active`, and each product once.
+- Save with `POST` (new) or `PUT` (change). On `PUT`, send `items` only when the list changed: a list replaces all items, omitting it keeps them.
+- Errors: `409` name already used in this club (inactive packages keep their name), `400` a product is missing or inactive (reload the menu), `422` a bad value, `403` for staff.
+- "Delete" calls `DELETE`, which only deactivates. Old bills are not affected.
+
 ## State to UI rules
 
 Decide what to render from the bill alone: `payment_state`, `payment_method`, `amount_paid`, `balance_due` and `payments[]`. Do not keep your own copy of the payment state; redraw from each response.
@@ -483,6 +500,8 @@ Cash lines are `completed` as soon as they are created, so a pending cash line o
 | Received (confirm a transfer by hand) | Any logged-in user of the club, unless the club limits it to managers; the club may also require a note |
 | Scoreboard (start a game, change score, reset, new game, finish) | Any logged-in user of the club |
 | Price quote, list pricing rules | Any logged-in user of the club |
+| List or read packages | Any logged-in user of the club |
+| Create, change or deactivate a package | Manager or admin |
 | Void a line | Manager or admin |
 | List, assign or ignore bank transactions, list pending transfer lines | Manager or admin |
 | Save, correct or turn off the club's bank account, read its history, upload a QR image | Manager or admin |
@@ -677,6 +696,28 @@ interface PricingRuleRequest {       // POST (all needed fields) and PUT (any fi
   priority?: number;
   is_active?: boolean;
 }
+interface PackageItem {
+  product_id: number;
+  product_name: string | null;
+  included_quantity: number;         // units given free
+}
+interface Package {                  // GET /billiard/packages, GET/PUT/DELETE /billiard/packages/{id}
+  id: number;
+  name: string;                      // unique per club
+  duration_minutes: number;          // 1 to 1440
+  price: Money;                      // covers table time only
+  is_active: boolean;
+  items: PackageItem[];
+  created_at: ISODate | null;
+}
+interface PackageRequest {           // POST (all of name, duration_minutes, price); PUT (all optional)
+  name: string;
+  duration_minutes: number;
+  price: Money;
+  items?: { product_id: number; included_quantity: number }[];   // PUT: a list REPLACES, omit to keep
+  is_active?: boolean;
+}
+
 interface PricingQuote {             // GET /billiard/pricing-rules/quote
   table_id: number;
   at: ISODate;
@@ -1076,6 +1117,11 @@ export const api = {
   quote: (tableId: number, minutes: number, at?: string) =>
     request<PricingQuote>("GET", `/billiard/pricing-rules/quote?table_id=${tableId}&minutes=${minutes}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
   createRule: (b: PricingRuleRequest) => request<PricingRule>("POST", "/billiard/pricing-rules", b),             // manager
+  packages: (includeInactive = false) => request<Package[]>("GET", `/billiard/packages${includeInactive ? "?include_inactive=true" : ""}`),
+  package: (id: number) => request<Package>("GET", `/billiard/packages/${id}`),
+  createPackage: (b: PackageRequest) => request<Package>("POST", "/billiard/packages", b),                          // manager
+  updatePackage: (id: number, b: Partial<PackageRequest>) => request<Package>("PUT", `/billiard/packages/${id}`, b),   // manager
+  deactivatePackage: (id: number) => request<Package>("DELETE", `/billiard/packages/${id}`),                         // manager
   updateRule: (id: number, b: Partial<PricingRuleRequest>) => request<PricingRule>("PUT", `/billiard/pricing-rules/${id}`, b),  // manager
   createTable: (b: CreateTableRequest) => request<Table>("POST", "/tables", b),                                  // manager
   updateTable: (id: number, b: UpdateTableRequest) => request<Table>("PATCH", `/tables/${id}`, b),               // manager
@@ -1321,6 +1367,7 @@ It answers `{"success": true}` even when the transfer is not matched, so check t
 - No endpoint says whether the club's bank account is set before a transfer is started: a missing account shows up as a transfer line with no QR. Call `GET /payments/bank-accounts/current` on the pay screen if you want to warn the cashier first.
 - No endpoint says whether manual confirmation needs a note or a manager, so the Received button has to react to the `403` and `422` responses.
 - No WebSocket yet: the board and the scoreboard have to poll. Real-time updates are on the backend roadmap.
-- A deactivated table cannot be reactivated, and a table cannot be put into `reserved` or `maintenance` from the API yet.
+- A deactivated table cannot be reactivated.
+- Packages can list any active product, because `GET /products` and the product catalogue are not scoped to the club (see the first point).
 
 Fixed since Oct 24 (kept here so old notes make sense): `GET /auth/me` now returns `roles`, `POST /payments/` and `PATCH /payments/{id}` are admin only, `GET /payments/bank-feed/pending-lines` lists the waiting transfer lines, and stale transfer lines are cancelled automatically.

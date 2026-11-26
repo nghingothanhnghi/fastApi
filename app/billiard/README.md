@@ -67,7 +67,7 @@ app/billiard/
 │   ├── session_item.py#   SessionItem
 │   ├── game.py        #   TableGame, GameStatus
 │   ├── pricing_rule.py#   PricingRule, PricingRuleType
-│   ├── package.py     #   BilliardPackage, BilliardPackageItem (tables only, no API yet)
+│   ├── package.py     #   BilliardPackage, BilliardPackageItem (CRUD API; billing is roadmap item F)
 │   └── device.py      #   Controller, event inbox, local ID map
 ├── schemas/           # Request/response shapes (Pydantic)
 │   ├── table.py
@@ -83,6 +83,7 @@ app/billiard/
 │   ├── game_service.py         # game rules and score changes (POS path)
 │   ├── billing_service.py      # picks the pricing rule, computes the table fee from the session snapshot
 │   ├── pricing_rule_service.py # CRUD for price rules (tenant scoped)
+│   ├── package_service.py      # CRUD for packages and their included products (tenant scoped)
 │   ├── table_lifecycle.py      # the ONLY writer of BilliardTable.status
 │   ├── session_lifecycle.py    # the ONLY place that opens/finalizes a session (POS and device share it)
 │   ├── game_lifecycle.py       # the ONLY place that creates games or writes game status/end_time
@@ -97,6 +98,7 @@ app/billiard/
 │   ├── session_router.py
 │   ├── game_router.py
 │   ├── pricing_router.py
+│   ├── package_router.py
 │   ├── controller_router.py
 │   └── report_router.py
 ├── utils/
@@ -160,7 +162,7 @@ erDiagram
 | `hourly_rate` | **Snapshot** of the rate used for this session (the table rate, or the matched rule's rate) |
 | `billing_policy` | **Snapshot** of the rule type used (`per_minute`, `hourly`, `block`, `minimum_hour`; old rows may hold `rounded_hour`) |
 | `pricing_snapshot` | **Snapshot** (JSON) of the rule: `rule_id`, `rule_name`, `rule_type`, `hourly_rate`, `params`, `priced_at`. Empty on old sessions |
-| `package_id`, `package_name`, `package_price` | Reserved for packages (not used yet) |
+| `package_id`, `package_name`, `package_price` | Reserved for packages. Package CRUD exists, but starting a session with a package is not built yet (roadmap item F) |
 | `duration_minutes` | Filled at Stop |
 | `total_table_fee` | Filled at Stop |
 | `total_product_fee` | Sum of items, updated whenever an item is added |
@@ -218,9 +220,9 @@ A partial unique index (`uq_one_active_game_per_session`) allows only one `activ
 | `device_events` | Every event the controller sent, stored once (`event_id` unique, `device_seq` unique per device) with a status: `received`, `processed`, `rejected`, `conflict`. Never auto-deleted |
 | `device_local_id_map` | `LOCAL-S-...` / `LOCAL-G-...` ids the controller used offline → the real session/game ids |
 
-### Packages (model only)
+### Packages (CRUD only)
 
-`billiard_packages` and `billiard_package_items` exist (duration, price, included products), but there is no API, no selection at session start and no billing logic yet. See the [Roadmap](#11-roadmap-not-implemented-yet).
+`billiard_packages` and `billiard_package_items` hold a package: a `name`, a `duration_minutes` (1 to 1440), a `price` for table time only, and the products included for free (`product_id` + `included_quantity`, one row per product). The manager API is under `/billiard/packages`. Names are unique per club (inactive packages keep their name). `DELETE` only deactivates, so history is kept; `PUT {"is_active": true}` brings it back. Products are the shared catalogue (they have no `client_id`), so a package can use any active product. There is still no selection at session start and no billing logic. See the [Roadmap](#11-roadmap-not-implemented-yet).
 
 ### Payment tables are not here
 
@@ -521,6 +523,11 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 
 | Method | Path | Role | Description |
 |--------|------|------|-------------|
+| `GET` | `/billiard/packages` | any user | List the club's active packages with their items (name, duration, price, included products). `?include_inactive=true` for the manager screen |
+| `GET` | `/billiard/packages/{package_id}` | any user | One package, for the POS picker. `404` unknown or another club |
+| `POST` | `/billiard/packages` | ADMIN, MANAGER | Create (`201`). Body `{"name", "duration_minutes", "price", "items": [{"product_id", "included_quantity"}]}`. `409` duplicate name, `400` unknown or inactive product, `422` bad value or a product listed twice |
+| `PUT` | `/billiard/packages/{package_id}` | ADMIN, MANAGER | Change fields. `items` omitted keeps the list, a list replaces it (`[]` clears it). `is_active` can reactivate |
+| `DELETE` | `/billiard/packages/{package_id}` | ADMIN, MANAGER | Deactivate (not delete). Returns the package. Safe to call twice |
 | `GET` | `/billiard/pricing-rules` | any user | List the club's rules (highest priority first) |
 | `GET` | `/billiard/pricing-rules/quote?table_id=&minutes=&at=` | any user | Preview a price. Writes nothing. A naive `at` means club-local time |
 | `POST` | `/billiard/pricing-rules` | ADMIN, MANAGER | Create a rule (`201`) |
@@ -624,7 +631,7 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 |---------|------|
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
-| **Packages** | The tables and session columns exist. Missing: package CRUD, package selection at session start, included-item consumption, package billing |
+| **Packages in billing** | Package CRUD is done. Missing: package selection at session start, included-item consumption, package billing |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
@@ -637,6 +644,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 
 | File | What it covers |
 |------|----------------|
+| `test_packages.py` | Create with items, duplicate name per club, validation (minutes, price, quantity, duplicate product), unknown/inactive product, update replaces items, deactivate/reactivate, tenant isolation, manager-only writes (HTTP) |
 | `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
