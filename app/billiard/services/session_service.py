@@ -174,11 +174,20 @@ class SessionService:
                 raise HTTPException(404, "Package not found")
             if not package.is_active:
                 raise HTTPException(400, "Package is not available")
+        # ALL-OR-NOTHING: package terms, free items, fees, totals and the audit are written together. If anything
+        # fails, everything this request changed is rolled back, so a half-resolved session can never be committed.
         try:
-            session_lifecycle.resolve_billing_review(session, action=action, by_id=user.id, note=note, package=package)
+            session_lifecycle.resolve_billing_review(
+                session, action=action, by_id=user.id, note=note, package=package,
+                resolver_roles=[r.name for r in getattr(user, "roles", [])],
+            )
+            db.flush()
         except ValueError as e:
+            db.rollback()
             raise HTTPException(409, str(e))
-        db.flush()
+        except Exception:
+            db.rollback()
+            raise
         return session
 
     @staticmethod
@@ -253,6 +262,7 @@ class SessionService:
             billing_review_reason=session.billing_review_reason,
             billing_review_resolution=session.billing_review_resolution,
             billing_review_note=session.billing_review_note,
+            billing_review_audit=session.billing_review_audit,
             billing_reviewed_by=session.billing_reviewed_by.username if session.billing_reviewed_by else None,
             billing_reviewed_at=session.billing_reviewed_at,
             package_name=package.get("name"),

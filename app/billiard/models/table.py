@@ -3,7 +3,7 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Index, Numeric, String, func
+from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -27,6 +27,9 @@ class BilliardTable(Base):
     status: Mapped[TableStatus] = mapped_column(
         enum_col(TableStatus), default=TableStatus.AVAILABLE, nullable=False, index=True,
     )
+    # Counts every change of `status` (written ONLY by table_lifecycle). A controller sends the version it saw with a
+    # table_status event; if the table moved on since, the event is stale and is refused (optimistic concurrency).
+    status_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     hourly_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
     # NEW: retire a table without deleting its history (sessions FK is RESTRICT)

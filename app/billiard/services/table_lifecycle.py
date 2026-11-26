@@ -8,16 +8,24 @@ from sqlalchemy.orm import Session
 from app.billiard.models import BilliardTable, SessionStatus, TableSession, TableStatus
 
 
+def _set_status(table: BilliardTable, status: TableStatus) -> None:
+    """The ONLY assignment of table.status. A real change bumps status_version, so a device that read the table
+    earlier (or a POS user) can tell that something else changed it since."""
+    if table.status != status:
+        table.status = status
+        table.status_version = (table.status_version or 0) + 1
+
+
 def mark_playing(table: BilliardTable) -> None:
     if table.is_active is False:
         raise ValueError("Table is inactive")
     if table.status != TableStatus.AVAILABLE:
         raise ValueError(f"Table is {table.status.value}")
-    table.status = TableStatus.PLAYING
+    _set_status(table, TableStatus.PLAYING)
 
 
 def mark_available(table: BilliardTable) -> None:
-    table.status = TableStatus.AVAILABLE
+    _set_status(table, TableStatus.AVAILABLE)
 
 
 def _require_free(table: BilliardTable) -> None:
@@ -45,7 +53,7 @@ def ensure_no_active_session(db: Session, table: BilliardTable) -> None:
 
 def mark_reserved(table: BilliardTable) -> None:
     _require_free(table)
-    table.status = TableStatus.RESERVED
+    _set_status(table, TableStatus.RESERVED)
 
 
 def mark_maintenance(table: BilliardTable) -> None:
@@ -59,7 +67,7 @@ def mark_maintenance(table: BilliardTable) -> None:
         _require_free(table)
     elif table.is_active is False:
         raise ValueError("Table is inactive")
-    table.status = TableStatus.MAINTENANCE
+    _set_status(table, TableStatus.MAINTENANCE)
 
 
 def release(table: BilliardTable) -> None:
@@ -68,7 +76,7 @@ def release(table: BilliardTable) -> None:
         raise ValueError("Table is inactive")
     if table.status not in (TableStatus.RESERVED, TableStatus.MAINTENANCE):
         raise ValueError(f"Table is {table.status.value}, only a reserved or maintenance table can be released")
-    table.status = TableStatus.AVAILABLE
+    _set_status(table, TableStatus.AVAILABLE)
 
 
 def find_inconsistencies(db: Session) -> list[str]:

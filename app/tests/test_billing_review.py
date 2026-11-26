@@ -2,21 +2,22 @@
 # Follow-up to roadmap item F: a device asked for a package the server could not apply.
 # The event is accepted and the REAL session is opened, but it is flagged for billing review:
 # payment is blocked until someone assigns a valid package or confirms normal pricing (audited).
+import json
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.tests._billiard_fixtures import *  # noqa: F401,F403
 from app.tests.test_package_sessions import (  # noqa: F401  (device is a fixture)
-    T0, _http_user, _setup, _start_event, device, make_package, make_product, make_rule, play,
+    T0, _setup, _start_event, device, make_package, make_product, make_rule, play,
 )
 from app.billiard.models import DeviceEvent, PaymentState, PricingRuleType, TableSession, TableStatus
 from app.billiard.models.session import (
@@ -30,11 +31,36 @@ from app.billiard.services.event_service import event_service
 from app.billiard.services.payment_adapter import billiard_session_payable
 from app.billiard.services.session_service import session_service
 from app.billiard.services.table_service import table_service
+from app.billiard.utils.permissions import (
+    BILLING_REVIEW_RESOLVE, BILLING_REVIEW_VIEW, has_billiard_permission,
+)
 from app.database import Base, get_db
+from app.user.models.role import Role
+from app.user.models.user import User
+from app.user.models.user_role import UserRole
 from app.user.utils.token import get_current_user
 
 
 D = Decimal
+
+
+def fresh(db, s):
+    """Reload the session from the database (drops anything cached in the identity map)."""
+    db.expire_all()
+    return db.get(TableSession, s.id)
+
+
+def grant(db, user, role_name, permissions=()):
+    """Give `user` a role (created once, with these permissions) through the existing Role / UserRole tables."""
+    role = db.execute(select(Role).where(Role.name == role_name)).scalar_one_or_none()
+    if role is None:
+        role = Role(name=role_name, display_name=role_name, permissions=json.dumps(list(permissions)))
+        db.add(role)
+        db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
+    db.flush()
+    db.expire(user, ["user_roles"])
+    return user
 
 
 def flagged_session(db, device, table, package_id=99999):
@@ -312,15 +338,42 @@ def test_device_events_never_overwrite_package_terms_or_billing(db, device):
     assert s.package_snapshot == snap and s.billing_review_state is None and s.requested_package_id is None
 
 
-# ---------------------------------------------------------------- HTTP
+# ---------------------------------------------------------------- permissions
+
+def test_default_grants_and_implied_view(db):
+    admin = grant(db, make_user(db, name="a"), "admin", ["*"])
+    manager = grant(db, make_user(db, name="m"), "manager")                    # no permission entry at all
+    plain = grant(db, make_user(db, name="p"), "cashier")
+    viewer = grant(db, make_user(db, name="v"), "review_viewer", [BILLING_REVIEW_VIEW])
+    resolver = grant(db, make_user(db, name="r"), "trusted_cashier", [BILLING_REVIEW_RESOLVE])
+    for user in (admin, manager):
+        assert has_billiard_permission(user, BILLING_REVIEW_VIEW) and has_billiard_permission(user, BILLING_REVIEW_RESOLVE)
+    assert not has_billiard_permission(plain, BILLING_REVIEW_VIEW) and not has_billiard_permission(plain, BILLING_REVIEW_RESOLVE)
+    assert has_billiard_permission(viewer, BILLING_REVIEW_VIEW) and not has_billiard_permission(viewer, BILLING_REVIEW_RESOLVE)
+    assert has_billiard_permission(resolver, BILLING_REVIEW_RESOLVE) and has_billiard_permission(resolver, BILLING_REVIEW_VIEW)
+
+
+# (club, role, role permissions) for the HTTP users. The manager role has NO permission entry: it is a default grant.
+HTTP_USERS = {
+    "manager": ("c1", "manager", []),
+    "admin": ("c1", "admin", ["*"]),
+    "cashier": ("c1", "cashier", []),
+    "trusted": ("c1", "trusted_cashier", [BILLING_REVIEW_RESOLVE]),
+    "viewer": ("c1", "review_viewer", [BILLING_REVIEW_VIEW]),
+    "other": ("c2", "manager", []),
+}
+
 
 @pytest.fixture()
 def client():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    seed = Session()
-    user = make_user(seed)
+    Session_ = sessionmaker(bind=engine)
+    seed = Session_()
+    users = {}
+    for key, (club, role, perms) in HTTP_USERS.items():
+        name = "u1" if key == "manager" else key
+        users[key] = grant(seed, make_user(seed, client_id=club, name=name), role, perms).id
     table = make_table(seed)
     beer = make_product(seed)
     pkg = make_package(seed, items=[(beer.id, 1)])
@@ -328,26 +381,92 @@ def client():
     s = session_lifecycle.open_session(seed, table, None, at=T0)
     session_lifecycle.flag_billing_review(s, 31337, "Package not found")
     seed.commit()
-    ids = SimpleNamespace(user_id=user.id, session_id=s.id, package_id=pkg.id, beer_id=beer.id)
+    ids = SimpleNamespace(users=users, session_id=s.id, package_id=pkg.id, beer_id=beer.id)
     seed.close()
 
     app = FastAPI()
     app.include_router(session_router)
+    holder = {"id": users["manager"]}
 
     def _db():
-        sess = Session()
+        sess = Session_()
         try:
             yield sess
         finally:
-            sess.close()
+            sess.close()                       # nothing committed => everything of the request is rolled back
 
-    holder = {"u": _http_user()}
-    holder["u"].id = ids.user_id
+    def _current_user(db: Session = Depends(get_db)):
+        return db.get(User, holder["id"])      # a real User: real roles, real permissions
+
     app.dependency_overrides[get_db] = _db
-    app.dependency_overrides[get_current_user] = lambda: holder["u"]
-    c = TestClient(app)
-    c.ids, c.holder = ids, holder
+    app.dependency_overrides[get_current_user] = _current_user
+    c = TestClient(app, raise_server_exceptions=False)
+    c.ids, c.engine, c.sessionmaker = ids, engine, Session_
+    c.act_as = lambda key: holder.__setitem__("id", users[key])
     return c
+
+
+def review_state(client):
+    """The flagged session as stored (a fresh connection, so uncommitted work is invisible)."""
+    s = client.sessionmaker()
+    try:
+        row = s.get(TableSession, client.ids.session_id)
+        return {
+            "state": row.billing_review_state, "package": row.package_snapshot, "audit": row.billing_review_audit,
+            "resolution": row.billing_review_resolution, "by": row.billing_reviewed_by_id,
+            "items": sorted((i.quantity, i.from_package, str(i.total_price)) for i in row.items),
+            "money": (str(row.total_table_fee), str(row.total_product_fee), str(row.discount), str(row.grand_total)),
+            "requested": row.requested_package_id, "reason": row.billing_review_reason,
+        }
+    finally:
+        s.close()
+
+
+def test_cashier_without_the_permission_gets_403(client):
+    client.act_as("cashier")
+    before = review_state(client)
+    listing = client.get("/sessions/billing-review")
+    assert listing.status_code == 403 and BILLING_REVIEW_VIEW in listing.json()["detail"]
+    for body in ({"action": "confirm_normal_pricing", "note": "I say it is fine"},
+                 {"action": "assign_package", "package_id": client.ids.package_id}):
+        r = client.post(f"/sessions/{client.ids.session_id}/billing-review", json=body)
+        assert r.status_code == 403 and BILLING_REVIEW_RESOLVE in r.json()["detail"]
+    assert review_state(client) == before                                    # nothing changed
+    assert review_state(client)["state"] == "required"
+
+
+def test_cashier_still_sees_the_indicator_on_the_bill(client):
+    client.act_as("cashier")
+    bill = client.get(f"/sessions/{client.ids.session_id}").json()
+    assert bill["needs_billing_review"] is True and bill["billing_review_reason"] == "Package not found"
+
+
+def test_view_permission_lists_but_cannot_resolve(client):
+    client.act_as("viewer")
+    rows = client.get("/sessions/billing-review").json()
+    assert [r["session_id"] for r in rows] == [client.ids.session_id]
+    r = client.post(f"/sessions/{client.ids.session_id}/billing-review",
+                    json={"action": "confirm_normal_pricing", "note": "viewer tries"})
+    assert r.status_code == 403
+    assert review_state(client)["state"] == "required"
+
+
+def test_trusted_cashier_with_resolve_permission_can_list_and_resolve(client):
+    client.act_as("trusted")
+    assert len(client.get("/sessions/billing-review").json()) == 1          # resolve implies view
+    r = client.post(f"/sessions/{client.ids.session_id}/billing-review",
+                    json={"action": "assign_package", "package_id": client.ids.package_id})
+    assert r.status_code == 200 and r.json()["billing_reviewed_by"] == "trusted"
+    assert r.json()["billing_review_audit"]["resolver_roles"] == ["trusted_cashier"]
+
+
+@pytest.mark.parametrize("who", ["manager", "admin"])
+def test_manager_and_admin_resolve_by_default(client, who):
+    client.act_as(who)
+    assert len(client.get("/sessions/billing-review").json()) == 1
+    r = client.post(f"/sessions/{client.ids.session_id}/billing-review",
+                    json={"action": "confirm_normal_pricing", "note": "Checked at the desk"})
+    assert r.status_code == 200 and r.json()["needs_billing_review"] is False
 
 
 def test_http_list_then_resolve_with_package(client):
@@ -356,8 +475,7 @@ def test_http_list_then_resolve_with_package(client):
     assert rows[0]["requested_package_id"] == 31337 and rows[0]["reason"] == "Package not found"
 
     client.post(f"/sessions/{client.ids.session_id}/stop")
-    pay_blocked = client.get(f"/sessions/{client.ids.session_id}").json()
-    assert pay_blocked["needs_billing_review"] is True
+    assert client.get(f"/sessions/{client.ids.session_id}").json()["needs_billing_review"] is True
 
     r = client.post(f"/sessions/{client.ids.session_id}/billing-review",
                     json={"action": "assign_package", "package_id": client.ids.package_id})
@@ -377,10 +495,154 @@ def test_http_confirm_needs_note_and_second_call_is_409(client):
 
 
 def test_http_other_club_gets_404_and_empty_list(client):
-    client.holder["u"] = _http_user("other-club")
+    client.act_as("other")                                                  # a manager, but of ANOTHER club
     assert client.get("/sessions/billing-review").json() == []
     url = f"/sessions/{client.ids.session_id}/billing-review"
     assert client.post(url, json={"action": "confirm_normal_pricing", "note": "abc"}).status_code == 404
+
+
+def test_failed_resolution_over_http_changes_nothing(client, monkeypatch):
+    sid = client.ids.session_id
+    client.post(f"/sessions/{sid}/items", json={"product_id": client.ids.beer_id, "quantity": 2})
+    before = review_state(client)
+
+    def boom(session):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(session_lifecycle, "recompute_totals", boom)       # fails AFTER the package was applied
+    r = client.post(f"/sessions/{sid}/billing-review", json={"action": "assign_package", "package_id": client.ids.package_id})
+    assert r.status_code == 500
+    assert review_state(client) == before and review_state(client)["package"] is None
+    monkeypatch.undo()
+    ok = client.post(f"/sessions/{sid}/billing-review", json={"action": "assign_package", "package_id": client.ids.package_id})
+    assert ok.status_code == 200                                            # and it is still resolvable
+
+
+# ---------------------------------------------------------------- audit and transaction (service level)
+
+def _manager(db, name="m"):
+    return grant(db, make_user(db, name=name), "manager")
+
+
+def test_confirm_keeps_a_complete_audit_record(db, device):
+    user, table = _setup(db)
+    manager = _manager(db)
+    s = flagged_session(db, device, table, 5)
+    session_service.stop_session(db, s.id, user)
+    db.commit()
+    money = (s.total_table_fee, s.total_product_fee, s.discount, s.grand_total)
+    session_service.resolve_billing_review(db, s.id, "confirm_normal_pricing", None, "Walk-in, no package", manager)
+    db.commit()
+    s = fresh(db, s)
+    audit = s.billing_review_audit
+    assert audit["action"] == "confirm_normal_pricing" and audit["resolver_roles"] == ["manager"]
+    assert audit["requested_package_id"] == 5 and audit["reason"] == "Package not found"
+    assert audit["before"] == audit["after"] and audit["before"]["package"] is None
+    assert audit["before"]["grand_total"] == str(money[3])
+    # the columns agree with the audit and the original request survives
+    assert (s.billing_review_note, s.billing_reviewed_by_id, s.billing_review_resolution) == (
+        "Walk-in, no package", manager.id, "confirm_normal_pricing")
+    assert s.billing_reviewed_at is not None and s.requested_package_id == 5 and s.billing_review_reason == "Package not found"
+    json.dumps(audit)                                                        # plain JSON
+
+
+def test_assign_keeps_a_complete_audit_record_with_before_and_after(db, device):
+    user, table = _setup(db)
+    manager = _manager(db)
+    beer = make_product(db)
+    s = flagged_session(db, device, table, 77)
+    session_service.add_item(db, s.id, beer.id, 3, None, user)              # 60,000 of beer, no package yet
+    s.start_time = T0
+    session_lifecycle.apply_discount(s, percent=D("10"), by_id=user.id)
+    session_lifecycle.finalize_stop(db, s, table, None, at=T0 + timedelta(minutes=90))
+    pkg = make_package(db, items=[(beer.id, 2)])                            # 60 min for 80,000 + 2 free beers
+    db.commit()
+    assert s.grand_total == D("189000.00")                                   # (150,000 + 60,000) - 10%
+
+    session_service.resolve_billing_review(db, s.id, "assign_package", pkg.id, "Customer showed the voucher", manager)
+    db.commit()
+    s = fresh(db, s)
+    audit = s.billing_review_audit
+    assert audit["action"] == "assign_package" and audit["resolver_roles"] == ["manager"]
+    assert audit["requested_package_id"] == 77 and audit["reason"] == "Package not found"
+    assert audit["before"] == {
+        "total_table_fee": "150000.00", "total_product_fee": "60000.00", "discount": "21000.00",
+        "grand_total": "189000.00", "free_units": 0, "package": None}
+    assert audit["after"]["package"] == {"package_id": pkg.id, "name": "1h Combo", "price": "80000.00", "duration_minutes": 60}
+    assert audit["after"]["free_units"] == 2
+    assert audit["after"]["total_table_fee"] == "130000.00" and audit["after"]["total_product_fee"] == "20000.00"
+    assert audit["after"]["discount"] == "15000.00" and audit["after"]["grand_total"] == "135000.00"   # 10% still applies
+    assert s.grand_total == D("135000.00")
+    assert s.requested_package_id == 77                                      # the device's request is never overwritten
+
+
+def test_audit_is_written_once_and_a_second_resolution_cannot_change_it(db, device):
+    user, table = _setup(db)
+    manager = _manager(db)
+    s = flagged_session(db, device, table)
+    session_service.resolve_billing_review(db, s.id, "confirm_normal_pricing", None, "first decision", manager)
+    db.commit()
+    first = json.loads(json.dumps(fresh(db, s).billing_review_audit))
+    pkg = make_package(db)
+    db.commit()
+    with pytest.raises(HTTPException) as e:
+        session_service.resolve_billing_review(db, s.id, "assign_package", pkg.id, "second", manager)
+    assert e.value.status_code == 409
+    again = fresh(db, s)
+    assert again.billing_review_audit == first and again.billing_review_note == "first decision"
+    assert again.package_snapshot is None
+
+
+def test_bill_exposes_the_audit(db, device):
+    user, table = _setup(db)
+    s = flagged_session(db, device, table)
+    assert session_service.build_bill(s)["billing_review_audit"] is None
+    session_service.resolve_billing_review(db, s.id, "confirm_normal_pricing", None, "fine by me", _manager(db))
+    assert session_service.build_bill(s)["billing_review_audit"]["action"] == "confirm_normal_pricing"
+
+
+def test_failed_resolution_rolls_back_every_related_change(db, device, monkeypatch):
+    """Package terms, converted free items, fees, totals and the audit are written together or not at all."""
+    user, table = _setup(db)
+    manager = _manager(db)
+    beer = make_product(db)
+    s = flagged_session(db, device, table)
+    session_service.add_item(db, s.id, beer.id, 3, None, user)
+    s.start_time = T0
+    session_lifecycle.finalize_stop(db, s, table, None, at=T0 + timedelta(minutes=90))
+    pkg = make_package(db, items=[(beer.id, 2)])
+    db.commit()
+    snapshot = lambda: {
+        "pkg": (s.package_id, s.package_name, s.package_price, s.package_snapshot),
+        "items": sorted((i.quantity, i.from_package, i.product_name, i.total_price) for i in s.items),
+        "money": (s.total_table_fee, s.total_product_fee, s.discount, s.grand_total),
+        "review": (s.billing_review_state, s.billing_review_resolution, s.billing_review_note, s.billing_reviewed_by_id,
+                   s.billing_reviewed_at, s.billing_review_audit, s.requested_package_id, s.billing_review_reason),
+    }
+    before = snapshot()
+    assert before["pkg"] == (None, None, None, None) and before["review"][0] == "required"
+
+    def boom(_session):
+        raise RuntimeError("simulated failure after the package and items were changed")
+    monkeypatch.setattr(session_lifecycle, "recompute_totals", boom)
+    with pytest.raises(RuntimeError):
+        session_service.resolve_billing_review(db, s.id, "assign_package", pkg.id, "voucher", manager)
+
+    db.expire_all()                                                          # what the database really holds
+    s = db.get(TableSession, s.id)
+    assert snapshot() == before
+    monkeypatch.undo()
+    assert session_service.resolve_billing_review(db, s.id, "assign_package", pkg.id, "voucher", manager).package_name == "1h Combo"
+
+
+def test_a_refused_resolution_leaves_the_session_untouched(db, device):
+    user, table = _setup(db)
+    s = flagged_session(db, device, table)
+    s.payment_state = PaymentState.PENDING
+    db.commit()
+    with pytest.raises(HTTPException):
+        session_service.resolve_billing_review(db, s.id, "confirm_normal_pricing", None, "too late", _manager(db))
+    s = fresh(db, s)
+    assert s.billing_review_state == BILLING_REVIEW_REQUIRED and s.billing_review_audit is None
 
 
 # ---------------------------------------------------------------- items: all created lines

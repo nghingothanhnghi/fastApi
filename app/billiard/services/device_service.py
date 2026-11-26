@@ -62,7 +62,7 @@ class DeviceService:
             s = sessions.get(t.id)
             g = games.get(s.id) if s else None
             out.append(TableStateOut(
-                table_id=t.id, name=t.name, status=t.status,
+                table_id=t.id, name=t.name, status=t.status, status_version=t.status_version or 0,
                 session_id=s.id if s else None,
                 session_start_time=_utc(s.start_time) if s else None,
                 session_ends_at=_utc(s.ends_at) if s else None,

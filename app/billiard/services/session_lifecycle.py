@@ -205,9 +205,21 @@ def _give_included_items(session: TableSession) -> None:
                 item.from_package = True
 
 
+def _bill_view(session: TableSession) -> dict:
+    """What the customer owes right now, as strings, for the audit record."""
+    package = session.package_snapshot or None
+    return {
+        "total_table_fee": str(session.total_table_fee), "total_product_fee": str(session.total_product_fee),
+        "discount": str(session.discount), "grand_total": str(session.grand_total),
+        "free_units": sum(i.quantity for i in session.items if i.from_package),
+        "package": {k: package[k] for k in ("package_id", "name", "price", "duration_minutes")} if package else None,
+    }
+
+
 def resolve_billing_review(
     session: TableSession, *, action: str, by_id: Optional[int], note: Optional[str],
     package: Optional[BilliardPackage] = None, at: Optional[datetime] = None,
+    resolver_roles: Optional[list[str]] = None,
 ) -> TableSession:
     """Close a billing review, once. The caller checked the role, the club, that the package is active and
     that no payment was started. Who, when, what and the note stay on the session (the audit record).
@@ -219,6 +231,7 @@ def resolve_billing_review(
         raise ValueError("This session has no billing review to resolve")
     if session.status == SessionStatus.CANCELLED:
         raise ValueError("Session was cancelled")
+    before = _bill_view(session)
     if action == REVIEW_ASSIGN_PACKAGE:
         if package is None:
             raise ValueError("A package is required")
@@ -240,6 +253,11 @@ def resolve_billing_review(
     session.billing_review_note = note
     session.billing_reviewed_by_id = by_id
     session.billing_reviewed_at = at or datetime.now(timezone.utc)
+    session.billing_review_audit = {            # new dict: the JSON change is saved. requested_package_id / reason stay untouched
+        "action": action, "resolver_roles": sorted(resolver_roles or []),
+        "requested_package_id": session.requested_package_id, "reason": session.billing_review_reason,
+        "before": before, "after": _bill_view(session),
+    }
     return session
 
 

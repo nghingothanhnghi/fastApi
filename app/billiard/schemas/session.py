@@ -150,6 +150,7 @@ class BillResponse(BaseModel):
     billing_review_reason: Optional[str] = None
     billing_review_resolution: Optional[str] = None   # assign_package | confirm_normal_pricing
     billing_review_note: Optional[str] = None
+    billing_review_audit: Optional[dict[str, Any]] = None   # action, resolver_roles, before / after bill
     billing_reviewed_by: Optional[str] = None
     billing_reviewed_at: Optional[datetime] = None
 

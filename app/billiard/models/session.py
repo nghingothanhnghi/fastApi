@@ -76,6 +76,9 @@ class TableSession(Base):
     billing_review_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     billing_reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     billing_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Self-contained audit of the decision: action, resolver roles at that moment, the request and reason, and the
+    # bill BEFORE and AFTER (fees, discount, total, package). Written once, by session_lifecycle.resolve_billing_review.
+    billing_review_audit: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_table_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
