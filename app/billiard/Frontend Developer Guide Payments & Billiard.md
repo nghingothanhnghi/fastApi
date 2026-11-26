@@ -12,7 +12,8 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 
 | Change | What to do in the frontend |
 | --- | --- |
-| New package endpoints `/billiard/packages` (list, get, create, change, deactivate) | New manager screen 12 (packages). The POS picker can already list packages, but a session cannot be started with one yet, so do not show a picker on Start until that ships |
+| New package endpoints `/billiard/packages` (list, get, create, change, deactivate) | New manager screen 12 (packages). The POS picker lists them with `GET /billiard/packages` and starts a session with `package_id` (see Step 4) |
+| Sessions can start with a package: `POST /tables/{id}/start` accepts `package_id`; the bill gets `package_name`, `package_price`, `package_minutes`, `overtime_minutes`; items have `from_package`; the board has `package_name` and `overtime_minutes`; the quote accepts `package_id` | Add a package picker to Start (next to the timed-play choice). On the bill show the package as the table-time line and `overtime_minutes` as extra time. Show free items with their `(package)` name and a price of 0. After `POST /items` reload the bill, because one call can create two lines |
 
 ### What changed since Nov 20
 
@@ -152,13 +153,13 @@ Keep `session_id` on the tile. Every later call uses it. `current_total` is a ru
 
 ### Step 4. Start a session
 
-`POST /tables/{id}/start` takes an optional body `{"planned_minutes": 90}` (1 to 1440) for timed play; send no body for open play. It returns the new session:
+`POST /tables/{id}/start` takes an optional body: `{"planned_minutes": 90}` (1 to 1440) for timed play, `{"package_id": 3}` to start with a package (the package's duration becomes `ends_at`), or no body for open play. Never send both `planned_minutes` and `package_id` (`422`). It returns the new session:
 
 ```json
 { "session_id": 42, "table_id": 1, "start_time": "2026-10-24T02:00:00", "ends_at": "2026-10-24T03:30:00", "opened_by": "cashier1" }
 ```
 
-If the table cannot be started the server answers `409` with the reason: `Table is playing` (somebody else started it first), `Table is reserved`, `Table is maintenance`, `Table is inactive`, or, if two people start it at the same instant, `Table already has an active session`. Reload the board and open the running session if there is one.
+A package must be active (`400 Package is not available`) and belong to the club (`404 Package not found`): reload `GET /billiard/packages` when you see either. If the table cannot be started the server answers `409` with the reason: `Table is playing` (somebody else started it first), `Table is reserved`, `Table is maintenance`, `Table is inactive`, or, if two people start it at the same instant, `Table already has an active session`. Reload the board and open the running session if there is one.
 
 ### Step 5. Add drinks and food
 
@@ -172,6 +173,8 @@ If the table cannot be started the server answers `409` with the reason: `Table 
   "quantity": 2, "unit_price": "15000.00", "total_price": "30000.00"
 }
 ```
+
+If the session was started with a package that includes this product, the first units are free: the call can create **two** lines, a free one (`from_package: true`, `unit_price` `"0.00"`, name ending in `(package)`) and a paid one for the rest. The response is the paid line when there is one, otherwise the free line, so always reload `GET /sessions/{id}` to draw the list.
 
 Errors: `404 Product not found`, `400 Product is not available`, `400 Variant does not belong to this product`, and `409 Items can only be added to an active session` once the session is stopped. To show the current list, call `GET /sessions/{id}`: `items` is the full list and `grand_total` is up to date.
 
@@ -447,7 +450,7 @@ Handle the errors in the form: `422` for a bad field or a QR that is not an acco
 
 ### 12. Packages (manager)
 
-A package is a fixed price for a number of minutes of table time, with some products included free (for example "2 hours, 150,000, 2 beers"). Billing with packages is not live yet, so this screen only manages the list.
+A package is a fixed price for a number of minutes of table time, with some products included free (for example "2 hours, 150,000, 2 beers"). The package price covers table time only; products are charged separately except the included ones, and time beyond the duration is billed by the normal rule (see "Packages" in the README).
 
 - List with `GET /billiard/packages?include_inactive=true`; show inactive rows greyed out with a Reactivate button (`PUT` with `{"is_active": true}`).
 - The form has `name`, `duration_minutes` (1 to 1440), `price` (0 or more, 2 decimals) and a product list. Build the product list from `GET /products`, only products with `is_active`, and each product once.
@@ -604,6 +607,8 @@ interface ActiveTable {              // GET /tables/active (only tables being pl
   ends_at: ISODate | null;           // timed play only
   remaining_seconds: number | null;  // negative once past ends_at; null for open play
   is_overtime: boolean;              // flag only: the server never stops a session by itself
+  package_name: string | null;       // session started with a package
+  overtime_minutes: number | null;   // minutes beyond the package so far
   current_discount: Money;           // 0 when there is no discount
   current_total: Money;              // table fee + products - discount
 }
@@ -727,7 +732,12 @@ interface PricingQuote {             // GET /billiard/pricing-rules/quote
   rule_type: string;
   hourly_rate: Money;
   params: Record<string, unknown>;
-  fee: Money;
+  package_id: number | null;         // only when the request had package_id
+  package_name: string | null;
+  package_price: Money | null;
+  package_minutes: number | null;
+  overtime_minutes: number | null;
+  fee: Money;                        // table time only (package price + overtime with a package)
 }
 
 interface TableUsageRow {
@@ -791,6 +801,7 @@ interface SessionItem {
   quantity: number;
   unit_price: Money;
   total_price: Money;
+  from_package: boolean;             // free units included by the package (unit_price 0)
 }
 
 interface Bill {                     // GET /sessions/{id}, /stop, and every /pay... response
@@ -807,6 +818,10 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   billing_policy: string;            // per_minute | hourly | block | minimum_hour (old bills: rounded_hour)
   pricing_rule_name: string | null;
   pricing_params: Record<string, unknown>;
+  package_name: string | null;       // session started with a package
+  package_price: Money | null;
+  package_minutes: number | null;
+  overtime_minutes: number | null;   // beyond the package, billed by the rule; null until stopped
   total_table_fee: Money;
   total_product_fee: Money;
   discount: Money;                   // amount taken off (table fee + products); 0 = none
@@ -1076,8 +1091,8 @@ export async function login(username: string, password: string) {
 export const api = {
   tables:       () => request<Table[]>("GET", "/tables"),
   activeTables: () => request<ActiveTable[]>("GET", "/tables/active"),
-  startTable:   (tableId: number, plannedMinutes?: number) =>
-    request<StartSessionResponse>("POST", `/tables/${tableId}/start`, plannedMinutes ? { planned_minutes: plannedMinutes } : undefined),
+  startTable:   (tableId: number, opts?: { planned_minutes?: number; package_id?: number }) =>   // not both
+    request<StartSessionResponse>("POST", `/tables/${tableId}/start`, opts),
   extendSession: (id: number, minutes: number) => request<Bill>("POST", `/sessions/${id}/extend`, { minutes }),
   products:     () => request<Product[]>("GET", "/products"),
   addItem:      (id: number, b: AddItemRequest) => request<SessionItem>("POST", `/sessions/${id}/items`, b),
@@ -1114,8 +1129,8 @@ export const api = {
   finishGame:  (gameId: number) => request<Game>("POST", `/games/${gameId}/finish`),
 
   pricingRules: () => request<PricingRule[]>("GET", "/billiard/pricing-rules"),
-  quote: (tableId: number, minutes: number, at?: string) =>
-    request<PricingQuote>("GET", `/billiard/pricing-rules/quote?table_id=${tableId}&minutes=${minutes}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
+  quote: (tableId: number, minutes: number, at?: string, packageId?: number) =>
+    request<PricingQuote>("GET", `/billiard/pricing-rules/quote?table_id=${tableId}&minutes=${minutes}${at ? `&at=${encodeURIComponent(at)}` : ""}${packageId ? `&package_id=${packageId}` : ""}`),
   createRule: (b: PricingRuleRequest) => request<PricingRule>("POST", "/billiard/pricing-rules", b),             // manager
   packages: (includeInactive = false) => request<Package[]>("GET", `/billiard/packages${includeInactive ? "?include_inactive=true" : ""}`),
   package: (id: number) => request<Package>("GET", `/billiard/packages/${id}`),

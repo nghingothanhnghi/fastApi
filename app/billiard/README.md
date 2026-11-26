@@ -27,7 +27,7 @@ flowchart LR
 |------|----------|--------------|
 | Create table | `POST /tables` | Admin/Manager adds a table with an hourly rate |
 | Start | `POST /tables/{id}/start` | Opens a session, table becomes `playing`. The price rule is chosen and frozen now |
-| Add item | `POST /sessions/{id}/items` | Adds a product (price is frozen at this moment) |
+| Add item | `POST /sessions/{id}/items` | Adds a product (price is frozen at this moment). Units a package includes are added free |
 | Play | `POST /sessions/{id}/games`, `/games/{id}/score` | Optional scoreboard. Billing keeps running |
 | Stop | `POST /sessions/{id}/stop` | Calculates the fee, closes the running game, frees the table, returns the bill |
 | Pay | `POST /sessions/{id}/pay` | Creates a payment through the Payments module |
@@ -67,7 +67,7 @@ app/billiard/
 │   ├── session_item.py#   SessionItem
 │   ├── game.py        #   TableGame, GameStatus
 │   ├── pricing_rule.py#   PricingRule, PricingRuleType
-│   ├── package.py     #   BilliardPackage, BilliardPackageItem (CRUD API; billing is roadmap item F)
+│   ├── package.py     #   BilliardPackage, BilliardPackageItem (CRUD API and package billing)
 │   └── device.py      #   Controller, event inbox, local ID map
 ├── schemas/           # Request/response shapes (Pydantic)
 │   ├── table.py
@@ -162,7 +162,8 @@ erDiagram
 | `hourly_rate` | **Snapshot** of the rate used for this session (the table rate, or the matched rule's rate) |
 | `billing_policy` | **Snapshot** of the rule type used (`per_minute`, `hourly`, `block`, `minimum_hour`; old rows may hold `rounded_hour`) |
 | `pricing_snapshot` | **Snapshot** (JSON) of the rule: `rule_id`, `rule_name`, `rule_type`, `hourly_rate`, `params`, `priced_at`. Empty on old sessions |
-| `package_id`, `package_name`, `package_price` | Reserved for packages. Package CRUD exists, but starting a session with a package is not built yet (roadmap item F) |
+| `package_id`, `package_name`, `package_price` | Set when the session was started with a package (for reports). Billing reads `package_snapshot`, never these |
+| `package_snapshot` | JSON frozen at start: `{package_id, name, price, duration_minutes, items: [{product_id, included_quantity}]}`. `NULL` = no package. Editing or deactivating the package later changes nothing |
 | `duration_minutes` | Filled at Stop |
 | `total_table_fee` | Filled at Stop |
 | `total_product_fee` | Sum of items, updated whenever an item is added |
@@ -220,9 +221,22 @@ A partial unique index (`uq_one_active_game_per_session`) allows only one `activ
 | `device_events` | Every event the controller sent, stored once (`event_id` unique, `device_seq` unique per device) with a status: `received`, `processed`, `rejected`, `conflict`. Never auto-deleted |
 | `device_local_id_map` | `LOCAL-S-...` / `LOCAL-G-...` ids the controller used offline → the real session/game ids |
 
-### Packages (CRUD only)
+### Packages
 
-`billiard_packages` and `billiard_package_items` hold a package: a `name`, a `duration_minutes` (1 to 1440), a `price` for table time only, and the products included for free (`product_id` + `included_quantity`, one row per product). The manager API is under `/billiard/packages`. Names are unique per club (inactive packages keep their name). `DELETE` only deactivates, so history is kept; `PUT {"is_active": true}` brings it back. Products are the shared catalogue (they have no `client_id`), so a package can use any active product. There is still no selection at session start and no billing logic. See the [Roadmap](#11-roadmap-not-implemented-yet).
+`billiard_packages` and `billiard_package_items` hold a package: a `name`, a `duration_minutes` (1 to 1440), a `price` for table time only, and the products included for free (`product_id` + `included_quantity`, one row per product). The manager API is under `/billiard/packages`. Names are unique per club (inactive packages keep their name). `DELETE` only deactivates, so history is kept; `PUT {"is_active": true}` brings it back. Products are the shared catalogue (they have no `client_id`), so a package can use any active product. 
+**Starting with a package.** `POST /tables/{id}/start` with `{"package_id": 3}` (not together with `planned_minutes`). The package must be active (`400` if not) and belong to the table's club (`404` if not). Any package can be used on any active table. The session gets `ends_at = start + duration_minutes`, and the package terms are frozen into `package_snapshot`. The device path does the same with `data.package_id` on a `session_start` event; if that package is unknown, inactive or another club's, the session is still opened without it (the device already played) and the event's `payload.reconciled.package_ignored` says why.
+
+**The fee.** The package price covers the first `duration_minutes` of **table time only**. Time beyond it is billed by the session's own rule (the rule is still chosen at start):
+
+```text
+table_fee = package_price + rule_fee(minutes - duration_minutes)     (the rule is not called when there is no overtime)
+```
+
+Examples with the table at 100,000/h and a 60-minute package at 80,000, played 90 minutes: `per_minute` 80,000 + 50,000 = **130,000**; `hourly` 80,000 + 100,000 = **180,000**; `block` of 30 minutes 80,000 + 50,000 = **130,000**; `minimum_hour` (60) 80,000 + 100,000 = **180,000** (the rule's floor applies to the overtime). Zero minutes still cost the package price. The package price is never rounded by `FEE_ROUNDING_UNIT`, the overtime is. The live total on `/tables/active` and the final bill use the same function (`billing_service.table_fee`), and a discount is applied after it as usual.
+
+**Included products.** When staff add a product the package includes, the first `included_quantity` units **per session** cost 0. `POST /sessions/{id}/items` splits the quantity into two lines: a free line (`from_package: true`, `unit_price` 0, name suffixed `(package)`) and a normal paid line for the rest. The response is the paid line when there is one, otherwise the free line; read the bill for the full list. Included units are counted across all add calls of the session. Other products are charged normally.
+
+**Deploying.** Run `python migrate_billiard_package_snapshot.py` once on existing databases (adds `table_sessions.package_snapshot` and `session_items.from_package`; backs up SQLite first, safe to run twice).
 
 ### Payment tables are not here
 
@@ -489,14 +503,14 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `POST` | `/tables/{table_id}/reserve` | ADMIN, MANAGER | Mark an **available** table `reserved`. `409` if it is playing, already reserved, in maintenance or inactive, or has an active session |
 | `POST` | `/tables/{table_id}/maintenance` | ADMIN, MANAGER | Put an **available or reserved** table in `maintenance` (this ends a reservation). `409` if it is playing (stop the session first), already in maintenance, inactive, or has an active session |
 | `POST` | `/tables/{table_id}/release` | ADMIN, MANAGER | `reserved` or `maintenance` back to `available`. `409` for a playing or already available table |
-| `POST` | `/tables/{table_id}/start` | any user | Start a session. Optional body `{"planned_minutes": 90}` (1 to 1440) sets `ends_at` for timed play; no body means open play. `422` for a bad value. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
+| `POST` | `/tables/{table_id}/start` | any user | Start a session. Optional body `{"planned_minutes": 90}` (1 to 1440) sets `ends_at` for timed play, or `{"package_id": 3}` starts with a package (both together: `422`; unknown or other club's package `404`; inactive `400`). No body means open play. `422` for a bad value. `404` unknown table, `409` not available (`Table is playing`, `Table is maintenance`, `Table is inactive`, or `Table already has an active session` on a race) |
 
 ### Sessions
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/sessions/{id}` | Get the bill/receipt (also works after payment) |
-| `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active |
+| `POST` | `/sessions/{id}/items` | Add an item. `409` if the session is not active. Units included by the session's package are added as a separate free line (`from_package: true`); the response is the paid line when there is one |
 | `POST` | `/sessions/{id}/stop` | Stop and return the bill. `409` if already completed or cancelled |
 | `POST` | `/sessions/{id}/extend` | any user | Body `{"minutes": 30}` (1 to 480). Moves `ends_at` forward: the base is the current `ends_at`, or now if it is empty or already passed, so the customer always gets the full `minutes` from now. Returns the bill. `409` if the session is not active, `422` for a bad value. Billing is unchanged |
 | `POST` | `/sessions/{id}/discount` | **ADMIN, MANAGER.** Body `{"amount": 5000, "reason": "..."}` or `{"percent": 10, "reason": "..."}`, exactly one of the two. `{"amount": 0}` removes it. Returns the bill with `discount`, `discount_percent`, `discount_reason`, `discounted_by` and the new `grand_total`. `409` after a payment was started or for a cancelled session, `422` for a bad value (negative, percent over 100, both or neither, missing reason), `404` for another club |
@@ -529,7 +543,7 @@ All endpoints require a logged-in user (JWT) except the controller firmware endp
 | `PUT` | `/billiard/packages/{package_id}` | ADMIN, MANAGER | Change fields. `items` omitted keeps the list, a list replaces it (`[]` clears it). `is_active` can reactivate |
 | `DELETE` | `/billiard/packages/{package_id}` | ADMIN, MANAGER | Deactivate (not delete). Returns the package. Safe to call twice |
 | `GET` | `/billiard/pricing-rules` | any user | List the club's rules (highest priority first) |
-| `GET` | `/billiard/pricing-rules/quote?table_id=&minutes=&at=` | any user | Preview a price. Writes nothing. A naive `at` means club-local time |
+| `GET` | `/billiard/pricing-rules/quote?table_id=&minutes=&at=&package_id=` | any user | Preview the table fee. Writes nothing. A naive `at` means club-local time. With `package_id` the fee is package price + overtime and the answer adds `package_*` and `overtime_minutes` (`404` / `400` as at start) |
 | `POST` | `/billiard/pricing-rules` | ADMIN, MANAGER | Create a rule (`201`) |
 | `PUT` | `/billiard/pricing-rules/{rule_id}` | ADMIN, MANAGER | Change a rule. The merged result is validated |
 | `DELETE` | `/billiard/pricing-rules/{rule_id}` | ADMIN, MANAGER | Delete a rule. Existing bills are unaffected |
@@ -631,7 +645,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 |---------|------|
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
-| **Packages in billing** | Package CRUD is done. Missing: package selection at session start, included-item consumption, package billing |
 | **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
@@ -644,6 +657,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 
 | File | What it covers |
 |------|----------------|
+| `test_package_sessions.py` | Start with a package (snapshot, `ends_at`, `400` / `404`), fee inside and beyond the duration for every rule type, zero minutes, snapshot survives package edits, discount, live total = stop total, included products (free, split, across calls, per session), bill fields, controller `session_start` with `package_id`, quote = real bill, HTTP |
 | `test_packages.py` | Create with items, duplicate name per club, validation (minutes, price, quantity, duplicate product), unknown/inactive product, update replaces items, deactivate/reactivate, tenant isolation, manager-only writes (HTTP) |
 | `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |

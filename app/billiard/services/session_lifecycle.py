@@ -12,8 +12,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.billiard.models import BilliardTable, SessionStatus, TableSession
-from app.billiard.services.billing_service import billing_service
+from app.billiard.models import BilliardPackage, BilliardTable, SessionStatus, TableSession
+from app.billiard.services.billing_service import billing_service, snapshot_package
 from app.billiard.services.game_lifecycle import cancel_active_game, close_active_game
 from app.billiard.services.table_lifecycle import mark_available, mark_playing
 from app.billiard.utils.billing import CENT, as_utc, billable_minutes
@@ -102,15 +102,23 @@ def _check_minutes(minutes: int) -> None:
 
 def open_session(
     db: Session, table: BilliardTable, opened_by_id: Optional[int], at: Optional[datetime] = None,
-    planned_minutes: Optional[int] = None,
+    planned_minutes: Optional[int] = None, package: Optional[BilliardPackage] = None,
 ) -> TableSession:
     """Start a session on a locked table. Raises ValueError if the table can't start one.
     May raise IntegrityError from the flush (uq_one_active_session_per_table).
 
     planned_minutes sets ends_at = start + planned_minutes (timed play). It is a countdown
-    and an overtime flag only: the bill is still computed from the real start and stop."""
+    and an overtime flag only: the bill is still computed from the real start and stop.
+
+    package (already loaded by the caller, who checked the club): its terms are frozen into the
+    session and ends_at = start + its duration. Use planned_minutes OR package, not both."""
     if planned_minutes is not None:
         _check_minutes(planned_minutes)
+    if package is not None:
+        if planned_minutes is not None:
+            raise ValueError("Choose a package or planned_minutes, not both")
+        if not package.is_active:
+            raise ValueError("Package is not available")
     mark_playing(table)
     start, source = resolve_time(at)
     # The rule is chosen once, by the start time, and frozen into the session
@@ -128,6 +136,14 @@ def open_session(
         opened_by_id=opened_by_id,
         ends_at=start + timedelta(minutes=planned_minutes) if planned_minutes else None,
     )
+    if package is not None:
+        snap = snapshot_package(package)
+        session.package_id = package.id            # id/name/price columns: for reports; billing reads the snapshot
+        session.package_name = package.name
+        session.package_price = Decimal(snap["price"])
+        session.package_snapshot = snap
+        session.ends_at = start + timedelta(minutes=snap["duration_minutes"])
+
     db.add(session)
     db.flush()
     return session

@@ -16,6 +16,7 @@ from app.billiard.schemas.pricing import (
     PricingQuoteOut, PricingRuleCreate, PricingRuleOut, PricingRuleUpdate,
 )
 from app.billiard.services.billing_service import billing_service
+from app.billiard.services.package_service import package_service
 from app.billiard.services.pricing_rule_service import pricing_rule_service
 from app.billiard.services.table_service import scope_tables
 
@@ -34,6 +35,7 @@ def quote(
     table_id: int,
     minutes: int = Query(..., ge=1, le=1440),
     at: Optional[datetime] = Query(None, description="Start time; naive = club-local. Default: now"),
+    package_id: Optional[int] = Query(None, ge=1, description="Preview with this package (table time only)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -43,7 +45,14 @@ def quote(
     ).scalar_one_or_none()
     if not table:
         raise HTTPException(404, "Billiard table not found")
-    return billing_service.preview_fee(db, table, at or datetime.now(timezone.utc), minutes)
+    package = None
+    if package_id is not None:
+        package = package_service.find_for_club(db, package_id, table.client_id)
+        if package is None:
+            raise HTTPException(404, "Package not found")
+        if not package.is_active:
+            raise HTTPException(400, "Package is not available")
+    return billing_service.preview_fee(db, table, at or datetime.now(timezone.utc), minutes, package=package)
 
 
 @router.post("", response_model=PricingRuleOut, status_code=201)

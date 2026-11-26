@@ -14,6 +14,7 @@ from app.billiard.models import (
 )
 from app.billiard.schemas.session import BillResponse, SessionItemResponse
 from app.billiard.services import session_lifecycle
+from app.billiard.services.billing_service import package_overtime_minutes
 from app.billiard.utils.billing import CENT
 from app.payments.services.order_service import payment_order_service
 from app.product.models.product import Product, ProductVariant
@@ -40,6 +41,14 @@ class SessionService:
         return session
 
     @staticmethod
+    def _included_left(session: TableSession, product_id: int) -> int:
+        """Units of this product the session's package still gives for free."""
+        package = session.package_snapshot or {}
+        allowed = sum(i["included_quantity"] for i in package.get("items", []) if i["product_id"] == product_id)
+        used = sum(i.quantity for i in session.items if i.from_package and i.product_id == product_id)
+        return max(allowed - used, 0)
+
+    @staticmethod
     def add_item(
         db: Session, session_id: int, product_id: int, quantity: int,
         variant_id: int | None, user: User,
@@ -63,15 +72,29 @@ class SessionService:
 
         # Price is frozen NOW. Receipts read SessionItem.*, never Product.*.
         unit_price = Decimal(str(price)).quantize(CENT)
-        item = SessionItem(
-            product_id=product.id, variant_id=variant_id, product_name=name,
-            quantity=quantity, unit_price=unit_price, total_price=unit_price * quantity,
-            added_by_id=user.id,
-        )
-        session.items.append(item)
+
+        # A package may include some units of this product for free (counted per session, from the
+        # package snapshot). The free units become their own line at price 0, the rest is a normal line.
+        free_qty = min(quantity, SessionService._included_left(session, product.id))
+        paid_qty = quantity - free_qty
+        item = None
+        if free_qty:
+            item = SessionItem(
+                product_id=product.id, variant_id=variant_id, product_name=f"{name} (package)",
+                quantity=free_qty, unit_price=Decimal("0.00"), total_price=Decimal("0.00"),
+                from_package=True, added_by_id=user.id,
+            )
+            session.items.append(item)
+        if paid_qty:
+            item = SessionItem(
+                product_id=product.id, variant_id=variant_id, product_name=name,
+                quantity=paid_qty, unit_price=unit_price, total_price=unit_price * paid_qty,
+                added_by_id=user.id,
+            )
+            session.items.append(item)
         session_lifecycle.recompute_totals(session)
         db.flush()
-        return item
+        return item          # the paid line when there is one, else the free line; the bill lists both
 
     @staticmethod
     def stop_session(db: Session, session_id: int, user: User) -> TableSession:
@@ -147,6 +170,7 @@ class SessionService:
     def build_bill(session: TableSession) -> dict:
         """Built purely from session snapshots; safe for old receipts."""
         snap = session.pricing_snapshot or {}
+        package = session.package_snapshot or {}
         order = session.payment_order
         amount_paid = payment_order_service.amount_paid(order)
         # Legacy sessions (paid before the Payments module kept the bill) have no order.
@@ -166,6 +190,13 @@ class SessionService:
             billing_policy=session.billing_policy,
             pricing_rule_name=snap.get("rule_name"),
             pricing_params=snap.get("params") or {},
+            package_name=package.get("name"),
+            package_price=Decimal(package["price"]) if package else None,
+            package_minutes=package.get("duration_minutes"),
+            overtime_minutes=(
+                package_overtime_minutes(package, session.duration_minutes)
+                if package and session.duration_minutes is not None else None
+            ),
             total_table_fee=session.total_table_fee,
             total_product_fee=session.total_product_fee,
             discount=session.discount or Decimal("0"),
@@ -177,7 +208,7 @@ class SessionService:
                 SessionItemResponse(
                     id=i.id, product_id=i.product_id, variant_id=i.variant_id,
                     product_name=i.product_name, quantity=i.quantity,
-                    unit_price=i.unit_price, total_price=i.total_price,
+                    unit_price=i.unit_price, total_price=i.total_price, from_package=bool(i.from_package),
                 ) for i in session.items
             ],
             payment_state=session.payment_state.value,

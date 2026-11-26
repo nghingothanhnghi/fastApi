@@ -116,4 +116,9 @@ class PricingQuoteOut(BaseModel):
     rule_type: str
     hourly_rate: Decimal
     params: dict[str, Any] = Field(default_factory=dict)
-    fee: Decimal
+    package_id: Optional[int] = None
+    package_name: Optional[str] = None
+    package_price: Optional[Decimal] = None
+    package_minutes: Optional[int] = None
+    overtime_minutes: Optional[int] = None
+    fee: Decimal                    # table time only (package price + overtime when a package is given)

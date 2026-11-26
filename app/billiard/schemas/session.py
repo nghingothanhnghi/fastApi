@@ -11,6 +11,13 @@ from app.payments.schemas.order import PaymentLineResponse
 class StartSessionRequest(BaseModel):
     """Optional body of POST /tables/{id}/start. No body (or no planned_minutes) = open play."""
     planned_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    package_id: Optional[int] = Field(default=None, ge=1, description="Start with a package (its duration sets ends_at)")
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if self.package_id is not None and self.planned_minutes is not None:
+            raise ValueError("Send package_id or planned_minutes, not both")
+        return self
 
 
 class ExtendSessionRequest(BaseModel):
@@ -71,6 +78,7 @@ class SessionItemResponse(BaseModel):
     quantity: int
     unit_price: Decimal
     total_price: Decimal
+    from_package: bool = False       # free part of a package's included products
 
 
 class BillResponse(BaseModel):
@@ -91,6 +99,10 @@ class BillResponse(BaseModel):
     # rule and for sessions created before pricing rules existed.
     pricing_rule_name: Optional[str] = None
     pricing_params: dict[str, Any] = Field(default_factory=dict)
+    package_name: Optional[str] = None        # set when the session was started with a package
+    package_price: Optional[Decimal] = None
+    package_minutes: Optional[int] = None
+    overtime_minutes: Optional[int] = None    # minutes beyond the package, billed by the session's rule; None until stopped
 
     total_table_fee: Decimal
     total_product_fee: Decimal

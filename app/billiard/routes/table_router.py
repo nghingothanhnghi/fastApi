@@ -100,11 +100,12 @@ def active_tables(db: Session = Depends(get_db), current_user: User = Depends(ge
 @router.post("/{table_id}/start", response_model=StartSessionResponse)
 def start_table(
     table_id: int,
-    request: StartSessionRequest | None = None,      # optional body: {"planned_minutes": 60}
+    request: StartSessionRequest | None = None,      # optional body: {"planned_minutes": 60} or {"package_id": 3}
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     planned = request.planned_minutes if request else None
-    session = table_service.start_session(db, table_id, current_user, planned_minutes=planned)
+    package_id = request.package_id if request else None
+    session = table_service.start_session(db, table_id, current_user, planned_minutes=planned, package_id=package_id)
     db.commit()
     return StartSessionResponse(
         session_id=session.id, table_id=session.table_id,

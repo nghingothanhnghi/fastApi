@@ -61,6 +61,13 @@ class PackageService:
         return pkg
 
     @staticmethod
+    def find_for_club(db: Session, package_id: int, client_id: str) -> Optional[BilliardPackage]:
+        """The package if it belongs to this club, else None. Used when starting a session: the package must
+        belong to the TABLE's club (a super admin starting another club's table can't use a foreign package)."""
+        pkg = db.get(BilliardPackage, package_id)
+        return pkg if pkg is not None and pkg.client_id == client_id else None
+
+    @staticmethod
     def _name_taken(db: Session, client_id: str, name: str, except_id: Optional[int] = None) -> bool:
         stmt = select(BilliardPackage.id).where(BilliardPackage.client_id == client_id, BilliardPackage.name == name)
         if except_id is not None:
