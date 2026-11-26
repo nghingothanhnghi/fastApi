@@ -309,7 +309,9 @@ Handler pattern (copy `_h_score_change`, register in `HANDLERS`): `_h_xxx(db, de
 
 ---
 
-### H. Offline heartbeat job (S)
+### H. Offline heartbeat job (S) ✅ built
+
+Built as planned, with two deliberate differences: the settings live in `app/billiard/config.py` (not a global config), and the "back online" log is written by `device_watchdog.mark_online`, called on every authenticated device contact (not only in the heartbeat handler), so a device that only syncs or reads `/state` also recovers. Added `billiard_devices.status_changed_at` for H5.
 
 `device_service.effective_status` already shows offline after 90 s. The job records the **change** and can alert.
 

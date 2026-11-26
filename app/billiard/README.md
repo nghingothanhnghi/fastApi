@@ -90,9 +90,12 @@ app/billiard/
 │   ├── event_service.py        # idempotent ESP32 event ingestion and apply
 │   ├── device_auth.py          # controller API-key check (X-Device-Id / X-Device-Key)
 │   ├── device_service.py       # controller state snapshot, status, register
+│   ├── device_watchdog.py      # the ONLY writer of online/offline status + status log (mark_online, sweep_offline)
+│   ├── device_alerts.py        # notify_device_offline hook (logs a warning; realtime push comes with item I)
 │   ├── payment_adapter.py      # billiard's side of the Payments contract (what to charge, which club)
 │   ├── payment_service.py      # thin entry point: session id -> Payments module
 │   └── report_service.py       # usage/revenue report
+├── jobs/              # Background jobs registered in main.py (device_watchdog_job)
 ├── routes/            # HTTP endpoints only (no business logic)
 │   ├── table_router.py
 │   ├── session_router.py
@@ -217,7 +220,8 @@ A partial unique index (`uq_one_active_game_per_session`) allows only one `activ
 
 | Table | Purpose |
 |-------|---------|
-| `billiard_devices` | The central controller: `device_id`, `api_key_hash` (the raw key is never stored), `status`, `firmware_version`, `last_seen`, `last_applied_seq`, `last_error`, `last_error_at` (latest `device_error`) |
+| `billiard_devices` | The central controller: `device_id`, `api_key_hash` (the raw key is never stored), `status`, `firmware_version`, `last_seen`, `last_applied_seq`, `last_error`, `last_error_at` (latest `device_error`), `status_changed_at` (last online/offline change) |
+| `billiard_device_status_log` | One row per real online/offline change of a controller: `device_id`, `from_status`, `to_status`, `at`, `reason`. Written only by `device_watchdog` |
 | `device_events` | Every event the controller sent, stored once (`event_id` unique, `device_seq` unique per device) with a status: `received`, `processed`, `rejected`, `conflict`. Never auto-deleted |
 | `device_local_id_map` | `LOCAL-S-...` / `LOCAL-G-...` ids the controller used offline → the real session/game ids |
 
@@ -477,6 +481,8 @@ Only a SHA-256 hash of the key is stored. A manager registers the controller wit
 | `button_press` | `data.action` is looked up in `BUTTON_ACTIONS` (one dict in `event_service.py`): `score_a_up`, `score_a_down`, `score_b_up`, `score_b_down` (+/-1 on the server's current score, never below 0), `reset_score`, `new_game`, `end_game` (these reuse the existing handlers and their data). An unknown action is `rejected` with the list of known ones. Firmware should still send `score_change` with the absolute score so both sides stay in sync |
 | `device_error` | Always `processed` (rejecting a fault report would hide it). `data.code` (64 chars) and `data.message` (200 chars) go to the event note, and the latest one is copied to the controller row (`last_error`, `last_error_at` = server time) and shown in `GET /billiard/controller/status`. It changes nothing else. There is no alert or push yet |
 
+**Offline watchdog.** `device_watchdog` is the only code that changes a controller's online/offline status. Any authenticated contact from the device (a heartbeat, `/events`, `/sync` or `/state`) calls `mark_online`; if the controller was offline it becomes online and one row is written to `billiard_device_status_log`. A job (`jobs/device_watchdog_job.py`, registered in `main.py`, every `BILLIARD_WATCHDOG_INTERVAL_SECONDS`, default 30) calls `sweep_offline`: a controller stored as online and silent for **more than** `BILLIARD_OFFLINE_AFTER_SECONDS` (default 90; exactly 90 s is still online, the same rule as `GET /controller/status`) becomes offline, with one log row and one call to `device_alerts.notify_device_offline` (a warning in the log today; realtime push is item I). Both changes are conditional `UPDATE`s, so with several workers or overlapping runs a transition is logged and alerted **once**, and a sweep can never overwrite a heartbeat that arrived meanwhile. The alert runs after the commit; if it fails, the change stays and is not repeated. The job covers every club; `GET /controller/status` still shows only the caller's club. **Deploying:** run `python migrate_billiard_device_watchdog.py` once (adds `billiard_devices.status_changed_at` and creates `billiard_device_status_log`; backs up SQLite first, safe to run twice). No firmware change.
+
 `time_extend`, `table_status` and `button_press` follow the same clock and tenant rules as the older events: a `table_id` or `session_id` of another club is `rejected` as "not found", and a device timestamp more than the allowed seconds ahead or older than the offline limit is `rejected`. Like every event they are idempotent by `event_id`, ordered by `device_seq`, and only a `processed` event moves `server_state_version`. **Deploying:** run `python migrate_billiard_device_error.py` once (adds `billiard_devices.last_error` and `last_error_at`), then `python migrate_billiard_billing_review_audit.py` (adds `table_sessions.billing_review_audit`) and `python migrate_billiard_table_status_version.py` (adds `billiard_tables.status_version`, existing rows start at 0). Both back up SQLite first and are safe to run twice. **Upgrade the controller firmware together with this release:** `table_status` without `expected_version` is now rejected.
 
 ### Endpoints
@@ -488,7 +494,7 @@ Firmware endpoints use the device headers. `status`, `hydro-candidates` and `reg
 | `GET` | `/billiard/controller/state` | device | Server view of every active table (session, game, scores, `server_state_version`) for reboot and reconnect |
 | `POST` | `/billiard/controller/events` | device | One live event. Same pipeline as `/sync` |
 | `POST` | `/billiard/controller/sync` | device | Replay the offline queue (max 500 events). `403` if `device_id` differs from the credentials |
-| `GET` | `/billiard/controller/status` | ADMIN, MANAGER | Controllers of the club with an effective online/offline status and the latest reported fault (`last_error`, `last_error_at`) |
+| `GET` | `/billiard/controller/status` | ADMIN, MANAGER | Controllers of the club with an effective online/offline status the latest reported fault (`last_error`, `last_error_at`) and when the status last changed (`status_changed_at`) |
 | `GET` | `/billiard/controller/hydro-candidates` | ADMIN, MANAGER | Existing hydro devices that could be registered as a controller |
 | `POST` | `/billiard/controller/register` | ADMIN, MANAGER | Register a controller (by `device_id`, or copy it from a hydro device). Returns the API key once |
 
@@ -648,13 +654,12 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 
 ## 11. Roadmap (not implemented yet)
 
-🗺️ The items below are the **remaining target design**. Already built: tables (create, edit, deactivate), sessions, items, games and scores, pricing rules, controller authentication, idempotent event ingestion, local-to-server ID mapping, controller state snapshots, reports and payments.
+🗺️ The items below are the **remaining target design**. Already built: tables (create, edit, deactivate), sessions, items, games and scores, pricing rules, the offline heartbeat job, controller authentication, idempotent event ingestion, local-to-server ID mapping, controller state snapshots, reports and payments.
 
 | Feature | Idea |
 |---------|------|
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
-| **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
 
 ---
@@ -671,6 +676,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 | `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
+| `test_device_watchdog.py` | Offline sweep (stale, fresh, exact 90 s boundary, never-seen, idempotent, configurable threshold), back online on any contact, one log row per transition (two workers, heartbeat racing the sweep), alert hook and job (once per transition, failure does not undo or repeat), `status_changed_at` in `/controller/status`, tenant isolation, migration run twice |
 | `test_event_handlers_extra.py` | `time_extend` (device-time base, bad minutes, no or stopped session, package/items/billing/review untouched), `table_status` (all transitions, `playing` rejected, active session conflict, no-op repeat), `button_press` (every action, unknown action, no game), `device_error` (stored, truncated, shown in `/controller/status`), idempotency, `device_seq` order and cursor, tenant isolation, clock rules |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |
 | `test_game_service.py` | Game numbering, one active game, scores up/down/never negative, new game keeps billing, tenant 404, clamped device clock, stop closes the game |

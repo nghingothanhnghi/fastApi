@@ -35,6 +35,7 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 | --- | --- |
 | `PATCH /tables/{id}` edits a table's name or hourly rate, and `DELETE /tables/{id}` deactivates it | New: see screen 9 (manager set-up). `GET /tables` now returns only active tables, so a deactivated table disappears from the board |
 | Manual "Received" can be restricted by the club: manager only, and/or a note is required | The Received call can now return `403` or `422`. Always offer a note field and handle both (see screen 2). No endpoint tells you which rule is on |
+| `GET /billiard/controller/status` rows have `status_changed_at` (when the controller last went online or offline; `null` if never recorded). The server now records these changes itself, so `status` is no longer only a guess from `last_seen` | On the controller card (screen 10) show "Offline since 14:32" from `status_changed_at` when `status` is `offline`. Keep polling the status as before; no new calls |
 | `GET /billiard/controller/status` rows have `last_error` and `last_error_at` (latest fault the controller reported). The controller can now also send `time_extend`, `table_status`, `button_press` and `device_error` events, which change `ends_at`, the table status and the scoreboard | Show the fault as a warning on the controller card (screen 10). The board needs no new fields: poll `GET /tables/active` and `ends_at` / `remaining_seconds` / `status` already reflect these events |
 | Controller device admin endpoints: `GET /billiard/controller/status`, `GET /billiard/controller/hydro-candidates`, `POST /billiard/controller/register` | New manager screen 10. The other `/controller/...` calls stay device-only |
 | New audit event type `line_expired` | Add it to your event labels (see "Generic order and audit trail") |
@@ -425,7 +426,7 @@ The club's physical scoreboards are run by one central controller (ESP32). A man
 
 | Action | Call | Notes |
 | --- | --- | --- |
-| List controllers | `GET /billiard/controller/status` | `ControllerDevice[]`. `status` is `online`, `offline`, `syncing` or `error`. A controller that has been silent for 90 seconds shows `offline`. `last_error` / `last_error_at` hold the latest fault it reported (`null` if none): show it as a warning with the time |
+| List controllers | `GET /billiard/controller/status` | `ControllerDevice[]`. `status` is `online`, `offline`, `syncing` or `error`. A controller that has been silent for 90 seconds shows `offline`; `status_changed_at` says since when. `last_error` / `last_error_at` hold the latest fault it reported (`null` if none): show it as a warning with the time |
 | Find devices to register | `GET /billiard/controller/hydro-candidates` | Existing devices of the club that are not yet a controller, so the manager can pick one instead of typing an id |
 | Register | `POST /billiard/controller/register` with `{"device_id": "BILLIARD-CONTROLLER-01", "name": "Main hall"}` or `{"hydro_device_id": 3}` | `201`. Returns the device **and its `api_key`, shown once**. `409` if the id is already registered, `404` if the hydro device is not found, `422` if neither `device_id` nor `hydro_device_id` is sent |
 
@@ -796,6 +797,7 @@ interface ControllerDevice {         // GET /billiard/controller/status
   last_applied_seq: number;          // highest contiguous device event the server applied
   last_error: string | null;         // latest device_error, "code: message"
   last_error_at: ISODate | null;     // when the server received it
+  status_changed_at: ISODate | null; // last online/offline change recorded by the server
 }
 
 interface HydroCandidate {           // GET /billiard/controller/hydro-candidates

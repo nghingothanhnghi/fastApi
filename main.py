@@ -54,6 +54,8 @@ from app.migration.controllers import ingest_api
 from app.transform_data.controllers import transform_api, template_api
 
 from app.utils.scheduler import start_scheduler, add_job, add_cron_job
+from app.billiard.jobs.device_watchdog_job import device_watchdog_job
+from app.billiard.config import WATCHDOG_INTERVAL_SECONDS as BILLIARD_WATCHDOG_INTERVAL_SECONDS
 from app.transform_data.jobs.transform_job import transform_unprocessed_data
 from app.jackpot.jobs.draw_job import draw_job
 from app.hydro_system.scheduler import start_sensor_job
@@ -252,6 +254,14 @@ try:
         job_id="payments_transfer_expiry_job",
         minutes=5,
         job_name="Payments Transfer Expiry Job"
+    )
+
+    # Billiard: record controllers that went silent (online -> offline) and alert
+    add_job(
+        device_watchdog_job,
+        job_id="billiard_device_watchdog_job",
+        seconds=BILLIARD_WATCHDOG_INTERVAL_SECONDS,
+        job_name="Billiard Device Watchdog Job"
     )
 
     # AI Vision: process queued jobs every 15 seconds

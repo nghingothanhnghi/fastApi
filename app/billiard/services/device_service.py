@@ -10,6 +10,7 @@ from app.billiard.models import (
     BilliardDevice, BilliardTable, GameStatus, SessionStatus, TableGame, TableSession,
 )
 from app.billiard.schemas.device import ControllerState, TableStateOut
+from app.billiard.services import device_watchdog
 from app.billiard.utils.billing import as_utc
 from app.user.models.user import User
 
@@ -18,8 +19,6 @@ from datetime import timedelta
 from fastapi import HTTPException
 from app.billiard.services.device_auth import hash_api_key
 from app.hydro_system.models.device import HydroDevice
-
-OFFLINE_AFTER = timedelta(seconds=90)
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
     return as_utc(dt) if dt else None   # SQLite returns naive datetimes
@@ -90,7 +89,7 @@ class DeviceService:
     @staticmethod
     def effective_status(d: BilliardDevice):
         from app.billiard.models import DeviceStatus
-        if d.last_seen is None or datetime.now(timezone.utc) - as_utc(d.last_seen) > OFFLINE_AFTER:
+        if d.last_seen is None or datetime.now(timezone.utc) - as_utc(d.last_seen) > device_watchdog.offline_after():
             return DeviceStatus.OFFLINE
         return d.status
 
