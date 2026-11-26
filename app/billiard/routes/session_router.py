@@ -12,6 +12,7 @@ from app.billiard.schemas.session import (
     DiscountRequest, ExtendSessionRequest, PayResponse, SessionItemResponse,
 )
 from app.billiard.services.payment_service import billiard_payment_service
+from app.billiard.utils.permissions import BILLING_REVIEW_RESOLVE, BILLING_REVIEW_VIEW, require_billiard_permission
 from app.billiard.services.session_service import session_service
 from app.payments.schemas.order import (
     CancelPaymentLineRequest, ConfirmTransferRequest, PayOrderRequest, PaymentEventResponse,
@@ -22,8 +23,12 @@ router = APIRouter(prefix="/sessions", tags=["Billiard Sessions"])
 
 
 @router.get("/billing-review", response_model=list[BillingReviewItem])
-def list_billing_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Sessions that need a cashier decision before they can be paid. Declared before /{session_id}."""
+def list_billing_reviews(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_billiard_permission(BILLING_REVIEW_VIEW)),
+):
+    """Sessions that need a billing decision before they can be paid. Needs `billiard.billing_review.view`
+    (admin and manager by default). Declared before /{session_id}."""
     return session_service.list_billing_reviews(db, current_user)
 
 
@@ -55,10 +60,12 @@ def add_item(
 @router.post("/{session_id}/billing-review", response_model=BillResponse)
 def resolve_billing_review(
     session_id: int, request: BillingReviewRequest,
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_billiard_permission(BILLING_REVIEW_RESOLVE)),
 ):
     """Resolve a flagged session: assign a valid package, or confirm normal pricing (note required).
-    The decision is recorded (who, when, what, note) and unblocks payment."""
+    Needs `billiard.billing_review.resolve` (admin and manager by default; a trusted cashier through a role).
+    The decision is recorded (who, when, what, note, before/after bill) and unblocks payment."""
     session = session_service.resolve_billing_review(
         db, session_id, request.action, request.package_id, request.note, current_user
     )

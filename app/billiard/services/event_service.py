@@ -389,18 +389,29 @@ _TABLE_STATUS_CHANGES = {
 
 def _h_table_status(db, device_pk, client_id, ev):
     """data.status in reserved | maintenance | available, through the same table_lifecycle functions as the POS.
-    `playing` is refused: only a session start can make a table playing. A table that already has the reported
-    status is a no-op (so a repeat never stalls the device's cursor); a table with an active session is a conflict."""
-    _event_time(ev)        # a stale or future-dated status change is not applied
+
+    STALE PROTECTION (optimistic concurrency): data.expected_version is the table's `status_version` the device last
+    saw (GET /controller/state). If the table has changed since (the POS reserved it, a session started...), the
+    version differs and the event is a CONFLICT: it is logged with both versions and NOT applied, so a delayed device
+    event can never overwrite a newer change. If the table ALREADY has the reported status the event is a harmless
+    no-op that is accepted (idempotent; it never stalls the device's cursor), whatever its version.
+    `playing` is refused: only a session start can make a table playing. A table with an active session is a conflict."""
+    _event_time(ev)        # a future-dated or too-old status change is not applied
     status = ev.data.get("status")
     if status == "playing":
         raise EventRejected("A table becomes playing only when a session starts (session_start)")
     change = _TABLE_STATUS_CHANGES.get(status) if isinstance(status, str) else None
     if change is None:
         raise EventRejected("status must be one of: reserved, maintenance, available")
+    expected = _int_field(ev.data, "expected_version", 0, 2**31 - 1)
     table = _lock_table(db, client_id, ev.table_id)
+    current = table.status_version or 0
     if table.status.value == status:
-        return {"already": status}
+        return {"already": status, "status_version": current}
+    if expected != current:
+        raise EventConflict(
+            f"Stale table_status: the device saw version {expected} but the table is now {table.status.value} "
+            f"(version {current}). Not applied; read GET /controller/state and decide again")
     previous = table.status.value
     try:
         table_lifecycle.ensure_no_active_session(db, table)
@@ -408,7 +419,7 @@ def _h_table_status(db, device_pk, client_id, ev):
     except ValueError as e:
         raise EventConflict(str(e))
     db.flush()
-    return {"previous": previous}
+    return {"previous": previous, "status_version": table.status_version}
 
 
 def _button_score(delta_a: int, delta_b: int):

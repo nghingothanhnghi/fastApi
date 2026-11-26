@@ -13,6 +13,7 @@ class TableStateOut(BaseModel):
     table_id: int
     name: str
     status: TableStatus
+    status_version: int = 0                 # send it back as data.expected_version in a table_status event
     session_id: Optional[int] = None
     session_start_time: Optional[datetime] = None
     session_ends_at: Optional[datetime] = None

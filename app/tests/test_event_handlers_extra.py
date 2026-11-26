@@ -133,64 +133,65 @@ def test_time_extend_twice_adds_up(db, env):
 @pytest.mark.parametrize("status, expected", [
     ("maintenance", TableStatus.MAINTENANCE), ("reserved", TableStatus.RESERVED)])
 def test_table_status_event_sets_status(db, env, status, expected):
-    res = run(db, env, E(1, "table_status", {"status": status}, table_id=env.table.id))
+    res = run(db, env, E(1, "table_status", {"status": status, "expected_version": 0}, table_id=env.table.id))
     assert res.accepted == ["e1"]
     assert fresh(db, env.table).status == expected
 
 
 def test_table_status_reserved_then_maintenance_then_available(db, env):
     res = run(db, env,
-              E(1, "table_status", {"status": "reserved"}, table_id=env.table.id),
-              E(2, "table_status", {"status": "maintenance"}, table_id=env.table.id),
-              E(3, "table_status", {"status": "available"}, table_id=env.table.id))
+              E(1, "table_status", {"status": "reserved", "expected_version": 0}, table_id=env.table.id),
+              E(2, "table_status", {"status": "maintenance", "expected_version": 1}, table_id=env.table.id),
+              E(3, "table_status", {"status": "available", "expected_version": 2}, table_id=env.table.id))
     assert res.accepted == ["e1", "e2", "e3"] and res.server_state_version == 3
     assert fresh(db, env.table).status == TableStatus.AVAILABLE
 
 
 def test_maintenance_event_blocks_a_new_session(db, env):
-    run(db, env, E(1, "table_status", {"status": "maintenance"}, table_id=env.table.id))
+    run(db, env, E(1, "table_status", {"status": "maintenance", "expected_version": 0}, table_id=env.table.id))
     res = run(db, env, E(2, "session_start", table_id=env.table.id))
     assert [c.event_id for c in res.conflicts] == ["e2"] and "maintenance" in res.conflicts[0].error
 
 
 def test_table_status_playing_event_is_rejected(db, env):
-    res = run(db, env, E(1, "table_status", {"status": "playing"}, table_id=env.table.id))
+    res = run(db, env, E(1, "table_status", {"status": "playing", "expected_version": 0}, table_id=env.table.id))
     assert [r.event_id for r in res.rejected] == ["e1"] and "session_start" in res.rejected[0].error
     assert fresh(db, env.table).status == TableStatus.AVAILABLE
 
 
 @pytest.mark.parametrize("status", ["broken", "", None, 5])
 def test_table_status_unknown_value_is_rejected(db, env, status):
-    res = run(db, env, E(1, "table_status", {"status": status}, table_id=env.table.id))
+    res = run(db, env, E(1, "table_status", {"status": status, "expected_version": 0}, table_id=env.table.id))
     assert [r.event_id for r in res.rejected] == ["e1"]
 
 
 @pytest.mark.parametrize("status", ["maintenance", "reserved", "available"])
 def test_table_status_on_playing_table_is_conflict_and_not_applied(db, env, status):
     pos_start(db, env)
-    res = run(db, env, E(1, "table_status", {"status": status}, table_id=env.table.id))
+    version = fresh(db, env.table).status_version              # the device read the table AFTER the session started
+    res = run(db, env, E(1, "table_status", {"status": status, "expected_version": version}, table_id=env.table.id))
     assert [c.event_id for c in res.conflicts] == ["e1"] and "active session" in res.conflicts[0].error
     assert fresh(db, env.table).status == TableStatus.PLAYING
     assert res.server_state_version == 0                      # a conflict is never acknowledged
 
 
 def test_table_status_same_status_is_a_noop_that_is_accepted(db, env):
-    run(db, env, E(1, "table_status", {"status": "maintenance"}, table_id=env.table.id))
-    res = run(db, env, E(2, "table_status", {"status": "maintenance"}, table_id=env.table.id),
-              E(3, "table_status", {"status": "available"}, table_id=env.table.id),
-              E(4, "table_status", {"status": "available"}, table_id=env.table.id))
+    run(db, env, E(1, "table_status", {"status": "maintenance", "expected_version": 0}, table_id=env.table.id))
+    res = run(db, env, E(2, "table_status", {"status": "maintenance", "expected_version": 0}, table_id=env.table.id),
+              E(3, "table_status", {"status": "available", "expected_version": 1}, table_id=env.table.id),
+              E(4, "table_status", {"status": "available", "expected_version": 1}, table_id=env.table.id))
     assert res.accepted == ["e2", "e3", "e4"] and res.server_state_version == 4
-    assert event_row(db, "e2").payload["reconciled"] == {"already": "maintenance"}
+    assert event_row(db, "e2").payload["reconciled"] == {"already": "maintenance", "status_version": 1}
 
 
 def test_table_status_reserved_on_maintenance_table_is_conflict(db, env):
-    run(db, env, E(1, "table_status", {"status": "maintenance"}, table_id=env.table.id))
-    res = run(db, env, E(2, "table_status", {"status": "reserved"}, table_id=env.table.id))
+    run(db, env, E(1, "table_status", {"status": "maintenance", "expected_version": 0}, table_id=env.table.id))
+    res = run(db, env, E(2, "table_status", {"status": "reserved", "expected_version": 1}, table_id=env.table.id))
     assert [c.event_id for c in res.conflicts] == ["e2"]
 
 
 def test_table_status_without_table_is_rejected(db, env):
-    res = run(db, env, E(1, "table_status", {"status": "maintenance"}))
+    res = run(db, env, E(1, "table_status", {"status": "maintenance", "expected_version": 0}))
     assert [r.event_id for r in res.rejected] == ["e1"] and "table_id" in res.rejected[0].error
 
 
@@ -316,7 +317,7 @@ def test_device_error_is_shown_in_controller_status(db, env):
 # ---------------------------------------------------------------- cross-cutting
 
 NEW_EVENTS = [
-    ("time_extend", {"minutes": 10}), ("table_status", {"status": "maintenance"}),
+    ("time_extend", {"minutes": 10}), ("table_status", {"status": "maintenance", "expected_version": 0}),
     ("button_press", {"action": "score_a_up"}), ("device_error", {"code": "E1"}),
 ]
 
@@ -419,3 +420,167 @@ def test_pos_table_status_still_works_after_sharing_the_active_session_guard(db,
     with pytest.raises(HTTPException) as e:
         table_service.set_status(db, env.table.id, "maintenance", env.user)
     assert e.value.status_code == 409 and "stop its session first" in e.value.detail
+
+
+# ---------------------------------------------------------------- stale status protection (status_version)
+
+def ts(seq, status, version, **kw):
+    return E(seq, "table_status", {"status": status, "expected_version": version}, **kw)
+
+
+def version_of(db, table):
+    return fresh(db, table).status_version
+
+
+def test_status_version_counts_every_real_change(db, env):
+    assert version_of(db, env.table) == 0
+    table_service.set_status(db, env.table.id, "reserve", env.user)
+    table_service.set_status(db, env.table.id, "maintenance", env.user)
+    table_service.set_status(db, env.table.id, "release", env.user)
+    db.commit()
+    assert version_of(db, env.table) == 3
+    session = table_service.start_session(db, env.table.id, env.user)       # available -> playing
+    db.commit()
+    assert version_of(db, env.table) == 4
+    session_service.stop_session(db, session.id, env.user)                  # playing -> available
+    db.commit()
+    assert version_of(db, env.table) == 5
+
+
+def test_failed_or_identical_changes_do_not_bump_the_version(db, env):
+    from fastapi import HTTPException
+    table_service.set_status(db, env.table.id, "maintenance", env.user)
+    db.commit()
+    with pytest.raises(HTTPException):
+        table_service.set_status(db, env.table.id, "reserve", env.user)     # refused: maintenance
+    with pytest.raises(HTTPException):
+        table_service.set_status(db, env.table.id, "maintenance", env.user)  # refused: same status
+    db.commit()
+    assert version_of(db, env.table) == 1
+
+
+def test_controller_state_exposes_the_status_version(db, env):
+    from app.billiard.services.device_service import device_service
+    table_service.set_status(db, env.table.id, "reserve", env.user)
+    db.commit()
+    state = device_service.build_state(db, env.device)
+    assert [(t.table_id, t.status.value, t.status_version) for t in state.tables] == [(env.table.id, "reserved", 1)]
+
+
+def test_delayed_device_event_cannot_overwrite_a_newer_pos_change(db, env):
+    """The device read version 0, went offline, and queued 'maintenance'. Meanwhile the POS reserved the table."""
+    seen = version_of(db, env.table)                                         # 0: what the device saw
+    table_service.set_status(db, env.table.id, "reserve", env.user)          # newer POS change
+    db.commit()
+
+    res = run(db, env, ts(1, "maintenance", seen, table_id=env.table.id))
+
+    assert res.accepted == [] and [c.event_id for c in res.conflicts] == ["e1"]
+    assert "Stale table_status" in res.conflicts[0].error
+    assert fresh(db, env.table).status == TableStatus.RESERVED               # the POS change survived
+    assert version_of(db, env.table) == 1                                    # and nothing was bumped
+    row = event_row(db, "e1")                                                # logged, not lost
+    assert row.status == DeviceEventStatus.CONFLICT
+    assert "version 0" in row.error and "version 1" in row.error and "reserved" in row.error
+    assert row.payload["status"] == "maintenance" and row.payload["expected_version"] == 0
+    assert res.server_state_version == 0                                     # the device still holds this event
+
+
+def test_delayed_status_event_after_a_session_started_and_stopped_is_stale(db, env):
+    seen = version_of(db, env.table)
+    session, _ = pos_start(db, env)
+    session_service.stop_session(db, session.id, env.user)
+    db.commit()                                                              # available again, but version 2
+    res = run(db, env, ts(1, "maintenance", seen, table_id=env.table.id))
+    assert [c.event_id for c in res.conflicts] == ["e1"] and fresh(db, env.table).status == TableStatus.AVAILABLE
+
+
+def test_device_can_apply_the_change_after_reading_the_new_version(db, env):
+    table_service.set_status(db, env.table.id, "reserve", env.user)
+    db.commit()
+    res = run(db, env, ts(1, "maintenance", 0, table_id=env.table.id),       # stale: refused
+              ts(2, "maintenance", 1, table_id=env.table.id))                # re-decided on version 1: applied
+    assert [c.event_id for c in res.conflicts] == ["e1"] and res.accepted == ["e2"]
+    assert fresh(db, env.table).status == TableStatus.MAINTENANCE and version_of(db, env.table) == 2
+    assert event_row(db, "e2").payload["reconciled"] == {"previous": "reserved", "status_version": 2}
+    # Known rule (unchanged): a conflict is never acknowledged, so the cursor stays below it.
+    assert res.server_state_version == 0
+
+
+def test_a_stale_event_does_not_touch_anything_else(db, env):
+    session, _ = pos_start(db, env)
+    ends = session.ends_at
+    res = run(db, env, ts(1, "maintenance", 0, table_id=env.table.id))
+    assert [c.event_id for c in res.conflicts] == ["e1"]
+    s = fresh(db, session)
+    assert s.status == SessionStatus.ACTIVE and s.ends_at == ends and fresh(db, env.table).status == TableStatus.PLAYING
+
+
+def test_repeated_identical_status_events_are_idempotent_and_keep_the_cursor_moving(db, env):
+    first = run(db, env, ts(1, "maintenance", 0, table_id=env.table.id))
+    assert first.accepted == ["e1"] and first.server_state_version == 1
+    # same intent again, under new event ids and the now-stale version 0: harmless no-ops
+    again = run(db, env, ts(2, "maintenance", 0, table_id=env.table.id), ts(3, "maintenance", 0, table_id=env.table.id))
+    assert again.accepted == ["e2", "e3"] and again.conflicts == [] and again.server_state_version == 3
+    assert version_of(db, env.table) == 1                                    # no extra bumps
+    assert event_row(db, "e2").payload["reconciled"] == {"already": "maintenance", "status_version": 1}
+
+
+def test_a_pos_change_to_the_same_status_makes_the_late_device_event_a_noop(db, env):
+    table_service.set_status(db, env.table.id, "maintenance", env.user)      # POS got there first
+    db.commit()
+    res = run(db, env, ts(1, "maintenance", 0, table_id=env.table.id))
+    assert res.accepted == ["e1"] and res.server_state_version == 1 and version_of(db, env.table) == 1
+
+
+def test_duplicate_status_event_is_acknowledged_without_reapplying(db, env):
+    ev = ts(1, "maintenance", 0, table_id=env.table.id)
+    assert run(db, env, ev).accepted == ["e1"]
+    table_service.set_status(db, env.table.id, "release", env.user)          # POS moves on
+    db.commit()
+    again = run(db, env, ev)                                                 # the device resends the SAME event
+    assert again.duplicates == ["e1"] and again.accepted == [] and again.conflicts == []
+    assert fresh(db, env.table).status == TableStatus.AVAILABLE              # the duplicate did not re-apply
+
+
+def test_out_of_order_status_events_are_not_applied_ahead_of_their_predecessor(db, env):
+    # seq 1: reserved (version 0 -> 1). seq 2 was decided on that result (version 1): maintenance. seq 2 arrives first.
+    early = run(db, env, ts(2, "maintenance", 1, table_id=env.table.id))
+    assert [c.event_id for c in early.conflicts] == ["e2"] and early.server_state_version == 0
+    assert fresh(db, env.table).status == TableStatus.AVAILABLE and version_of(db, env.table) == 0
+    first = run(db, env, ts(1, "reserved", 0, table_id=env.table.id))        # seq 1 now applies normally
+    assert first.accepted == ["e1"] and fresh(db, env.table).status == TableStatus.RESERVED
+    assert version_of(db, env.table) == 1
+
+
+def test_status_events_in_one_batch_apply_in_seq_order(db, env):
+    res = run(db, env,                                                       # listed backwards on purpose
+              ts(2, "available", 1, table_id=env.table.id),
+              ts(1, "maintenance", 0, table_id=env.table.id))
+    assert res.accepted == ["e1", "e2"] and res.server_state_version == 2
+    assert fresh(db, env.table).status == TableStatus.AVAILABLE and version_of(db, env.table) == 2
+
+
+@pytest.mark.parametrize("data", [
+    {"status": "maintenance"},                                   # missing
+    {"status": "maintenance", "expected_version": "0"},          # not a number
+    {"status": "maintenance", "expected_version": -1},
+    {"status": "maintenance", "expected_version": 1.5},
+    {"status": "maintenance", "expected_version": True},
+    {"status": "maintenance", "expected_version": None},
+])
+def test_table_status_without_a_valid_expected_version_is_rejected(db, env, data):
+    res = run(db, env, E(1, "table_status", data, table_id=env.table.id))
+    assert [r.event_id for r in res.rejected] == ["e1"] and "expected_version" in res.rejected[0].error
+    assert fresh(db, env.table).status == TableStatus.AVAILABLE
+
+
+def test_time_extend_is_unaffected_by_status_versioning(db, env):
+    session, _ = pos_start(db, env)
+    version = version_of(db, env.table)
+    session.ends_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    db.commit()
+    before = as_utc(session.ends_at)
+    res = run(db, env, E(1, "time_extend", {"minutes": 20}, table_id=env.table.id))      # no expected_version needed
+    assert res.accepted == ["e1"] and as_utc(fresh(db, session).ends_at) == before + timedelta(minutes=20)
+    assert version_of(db, env.table) == version                                          # it never changes the status

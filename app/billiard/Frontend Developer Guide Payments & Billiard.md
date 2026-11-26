@@ -12,6 +12,7 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 
 | Change | What to do in the frontend |
 | --- | --- |
+| Billing review is now role-based: `GET /sessions/billing-review` needs `billiard.billing_review.view` and `POST /sessions/{id}/billing-review` needs `billiard.billing_review.resolve` (managers and admins by default; a trusted cashier gets them from the role's permissions). Others get `403`. The bill has a new `billing_review_audit`. `GET /controller/state` tables have `status_version`; controllers must send it as `expected_version` on `table_status` | Show the review list and the Resolve button only to users who may use them (a `403` means hide them, do not retry). Everyone still sees the badge and the Pay lock. Poll the list every 10 to 15 s |
 | A table started from the controller with a package the server cannot apply now opens the session and is flagged for **billing review**. New fields on the board (`needs_billing_review`, `requested_package_id`, `billing_review_reason`) and on the bill (those plus `billing_review_resolution`, `billing_review_note`, `billing_reviewed_by`, `billing_reviewed_at`). New `GET /sessions/billing-review` and `POST /sessions/{id}/billing-review`. Payment returns `409` until it is resolved | Show a warning badge on the board tile and a "Needs billing review" list. On the bill, hide Pay while `needs_billing_review` is true and show a Resolve button (see screen 13) |
 | `POST /sessions/{id}/items` also returns `lines` (every line created, free first). The old top-level fields are unchanged | Optional: use `lines` instead of reloading the bill. Reloading still works |
 | `minimum_hour` overtime on a package is prorated (no second minimum) | None. The totals come from the server |
@@ -466,8 +467,8 @@ A package is a fixed price for a number of minutes of table time, with some prod
 
 When a controller starts a table with a package the server cannot apply, the session still opens (the game is real) and is flagged. Show it in three places:
 
-- **Board:** a badge on tiles with `needs_billing_review: true` and the reason (`billing_review_reason`). Poll `GET /tables/active` as usual; there is no push yet.
-- **List:** `GET /sessions/billing-review` returns the sessions that still need a decision (`session_id`, `table_name`, `requested_package_id`, `reason`, `grand_total`).
+- **Board:** a badge on tiles with `needs_billing_review: true` and the reason (`billing_review_reason`). Poll `GET /tables/active` as usual; there is no push yet. Every user sees this badge, whatever their permissions.
+- **List:** `GET /sessions/billing-review` returns the sessions that still need a decision (`session_id`, `table_name`, `requested_package_id`, `reason`, `grand_total`). It needs the `billiard.billing_review.view` permission. **Polling:** refresh it every 10 to 15 seconds while the screen is open, and show a counter on the board. On the first `403` stop polling and hide the list (the user has no permission); the board badge still works. No WebSocket yet.
 - **Bill:** while `needs_billing_review` is true, hide Pay (the server answers `409 Billing review required before payment`) and show **Resolve**.
 
 Resolve offers two choices, both through `POST /sessions/{id}/billing-review`:
@@ -475,7 +476,7 @@ Resolve offers two choices, both through `POST /sessions/{id}/billing-review`:
 1. **Assign a package:** pick from `GET /billiard/packages` and send `{"action": "assign_package", "package_id": 3}`. The server applies the package, turns the units of included products that were already added into free ones, recomputes the fee if the session is stopped, and returns the new `Bill`. Redraw from it.
 2. **Confirm normal pricing:** send `{"action": "confirm_normal_pricing", "note": "Customer did not buy a package"}`. The note is required (3 to 255 characters) and is kept for audit. Amounts do not change.
 
-Any logged-in user of the club can resolve it. After it is resolved show who decided and when (`billing_reviewed_by`, `billing_reviewed_at`, `billing_review_resolution`, `billing_review_note`) and keep `requested_package_id` visible as history. Errors: `409` already resolved, payment already started, or the session was cancelled; `400` the package is inactive; `404` the package or session is not found; `422` a missing package id or note.
+Only users with `billiard.billing_review.resolve` (managers, admins, and cashiers whose role was given it) can resolve; others get `403 Permission 'billiard.billing_review.resolve' required`, so show Resolve only to them and tell other cashiers to call a manager. The change is all-or-nothing: if the server fails (`500`), nothing was saved and the review is still pending, so it is safe to retry. After it is resolved show who decided and when (`billing_reviewed_by`, `billing_reviewed_at`, `billing_review_resolution`, `billing_review_note`; `billing_review_audit` has the bill before and after) and keep `requested_package_id` visible as history. Errors: `403` no permission, `409` already resolved, payment already started, or the session was cancelled; `400` the package is inactive; `404` the package or session is not found; `422` a missing package id or note.
 
 ## State to UI rules
 
@@ -832,6 +833,10 @@ interface SessionItem {
   from_package: boolean;             // free units included by the package (unit_price 0)
 }
 
+interface BillSummary {              // inside billing_review_audit
+  total_table_fee: Money; total_product_fee: Money; discount: Money; grand_total: Money; free_units: number;
+  package: { package_id: number; name: string; price: Money; duration_minutes: number } | null;
+}
 interface BillingReviewItem {        // GET /sessions/billing-review
   session_id: number; table_id: number; table_name: string; status: string; start_time: ISODate;
   requested_package_id: number | null; reason: string | null; grand_total: Money;
@@ -865,6 +870,11 @@ interface Bill {                     // GET /sessions/{id}, /stop, and every /pa
   billing_review_note: string | null;
   billing_reviewed_by: string | null;
   billing_reviewed_at: ISODate | null;
+  billing_review_audit: {            // set once the review is resolved; null before
+    action: "assign_package" | "confirm_normal_pricing"; resolver_roles: string[];
+    requested_package_id: number | null; reason: string | null;
+    before: BillSummary; after: BillSummary;
+  } | null;
   total_table_fee: Money;
   total_product_fee: Money;
   discount: Money;                   // amount taken off (table fee + products); 0 = none
