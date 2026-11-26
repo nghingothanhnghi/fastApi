@@ -38,6 +38,8 @@ class DeviceStatusOut(BaseModel):
     firmware_version: Optional[str] = None
     last_seen: Optional[datetime] = None
     last_applied_seq: int
+    last_error: Optional[str] = None            # latest device_error event, "code: message"
+    last_error_at: Optional[datetime] = None
 
 
 class DeviceRegisterIn(BaseModel):

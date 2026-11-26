@@ -34,6 +34,15 @@ def _blocked_message(table: BilliardTable) -> str:
     return f"Table is {table.status.value}"
 
 
+def ensure_no_active_session(db: Session, table: BilliardTable) -> None:
+    """Check the session record too, not only table.status. Shared by the POS routes and the device
+    table_status event, so both refuse to change a table that still has an active session."""
+    if db.execute(
+        select(TableSession.id).where(TableSession.table_id == table.id, TableSession.status == SessionStatus.ACTIVE)
+    ).first():
+        raise ValueError("Table has an active session, stop its session first")
+
+
 def mark_reserved(table: BilliardTable) -> None:
     _require_free(table)
     table.status = TableStatus.RESERVED

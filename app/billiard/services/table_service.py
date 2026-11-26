@@ -155,15 +155,8 @@ class TableService:
         if not table:
             raise HTTPException(404, "Billiard table not found")
 
-        # Check the session record too, not only table.status (same rule as deactivate_table).
-        if db.execute(
-            select(TableSession.id).where(
-                TableSession.table_id == table_id, TableSession.status == SessionStatus.ACTIVE
-            )
-        ).first():
-            raise HTTPException(409, "Table has an active session, stop its session first")
-
         try:
+            table_lifecycle.ensure_no_active_session(db, table)   # the session record, not only table.status
             change(table)
         except ValueError as e:
             raise HTTPException(409, str(e))
