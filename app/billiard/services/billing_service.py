@@ -100,11 +100,14 @@ def package_overtime_minutes(package_snapshot: dict, minutes: int) -> int:
 
 def package_table_fee(package_snapshot: dict, rule_type: str, hourly_rate, minutes: int, params: Optional[dict]) -> Decimal:
     """package price + the session's rule applied to the minutes beyond the package.
-    With no overtime the rule is NOT called: minimum_hour would otherwise charge its floor for 0 minutes."""
+    With no overtime the rule is NOT called. minimum_hour's floor is also not applied to the overtime:
+    the package already covers the included time, so extra minutes are prorated at the session's rate
+    (per_minute) and the normal fee rounding still applies. hourly and block keep their own rounding."""
     fee = Decimal(str(package_snapshot["price"])).quantize(CENT)
     over = package_overtime_minutes(package_snapshot, minutes)
     if over > 0:
-        fee += calculate_fee(rule_type, hourly_rate, over, params)
+        overtime_rule = "per_minute" if rule_type == "minimum_hour" else rule_type
+        fee += calculate_fee(overtime_rule, hourly_rate, over, params)
     return fee
 
 

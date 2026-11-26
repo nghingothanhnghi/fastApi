@@ -1,7 +1,7 @@
 # app/billiard/schemas/session.py
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -81,6 +81,46 @@ class SessionItemResponse(BaseModel):
     from_package: bool = False       # free part of a package's included products
 
 
+class AddItemResponse(SessionItemResponse):
+    """POST /sessions/{id}/items. The top-level fields are the paid line when there is one (else the free line),
+    exactly as before. `lines` lists EVERY line the call created: one normally, two when a package gave
+    some units for free (free line first)."""
+    lines: list[SessionItemResponse] = Field(default_factory=list)
+
+
+class BillingReviewRequest(BaseModel):
+    """Resolve a session whose device-requested package could not be applied."""
+    action: Literal["assign_package", "confirm_normal_pricing"]
+    package_id: Optional[int] = Field(default=None, ge=1, description="Required for assign_package")
+    note: Optional[str] = Field(default=None, max_length=255, description="Required (3+ characters) for confirm_normal_pricing")
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.note is not None:
+            self.note = self.note.strip() or None
+        if self.action == "assign_package":
+            if self.package_id is None:
+                raise ValueError("package_id is required to assign a package")
+        else:
+            if self.package_id is not None:
+                raise ValueError("package_id is only for assign_package")
+            if self.note is None or len(self.note) < 3:
+                raise ValueError("note is required (at least 3 characters) to confirm normal pricing")
+        return self
+
+
+class BillingReviewItem(BaseModel):
+    """One row of the cashier's 'needs billing review' list."""
+    session_id: int
+    table_id: int
+    table_name: str
+    status: str
+    start_time: datetime
+    requested_package_id: Optional[int] = None
+    reason: Optional[str] = None
+    grand_total: Decimal
+
+
 class BillResponse(BaseModel):
     """Bill after STOP and receipt after PAY: same shape, built only from session snapshots."""
     session_id: int
@@ -103,6 +143,15 @@ class BillResponse(BaseModel):
     package_price: Optional[Decimal] = None
     package_minutes: Optional[int] = None
     overtime_minutes: Optional[int] = None    # minutes beyond the package, billed by the session's rule; None until stopped
+    # Billing review: a device asked for a package the server could not apply. Payment is blocked while
+    # needs_billing_review is true. The audit fields are filled once somebody resolves it.
+    needs_billing_review: bool = False
+    requested_package_id: Optional[int] = None
+    billing_review_reason: Optional[str] = None
+    billing_review_resolution: Optional[str] = None   # assign_package | confirm_normal_pricing
+    billing_review_note: Optional[str] = None
+    billing_reviewed_by: Optional[str] = None
+    billing_reviewed_at: Optional[datetime] = None
 
     total_table_fee: Decimal
     total_product_fee: Decimal

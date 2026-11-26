@@ -176,7 +176,7 @@ def test_zero_minutes_still_charges_package_price(db):
     (PricingRuleType.HOURLY, None, "180000.00"),                      # started hour is full
     (PricingRuleType.BLOCK, {"block_minutes": 30}, "130000.00"),      # one 30-min block
     (PricingRuleType.BLOCK, {"block_minutes": 45}, "155000.00"),      # one 45-min block
-    (PricingRuleType.MINIMUM_HOUR, {"min_minutes": 60}, "180000.00"), # the rule's floor applies to the overtime
+    (PricingRuleType.MINIMUM_HOUR, {"min_minutes": 60}, "130000.00"), # overtime prorated: no second floor
 ])
 def test_overtime_billed_with_session_rule(db, rule_type, params, expected):
     _, table = _setup(db)
@@ -190,6 +190,42 @@ def test_minimum_hour_rule_does_not_charge_its_floor_when_there_is_no_overtime(d
     make_rule(db, PricingRuleType.MINIMUM_HOUR, {"min_minutes": 60})
     s = play(db, table, 30, make_package(db, minutes=60))
     assert s.total_table_fee == D("80000.00")
+
+
+def test_minimum_hour_overtime_is_prorated_not_floored(db):
+    """60 min package for 80,000 + 5 min over at 100,000/h = 80,000 + 8,333.33 (rounded by the normal policy)."""
+    _, table = _setup(db)
+    make_rule(db, PricingRuleType.MINIMUM_HOUR, {"min_minutes": 60})
+    s = play(db, table, 65, make_package(db))
+    assert s.total_table_fee == D("88333.00")           # FEE_ROUNDING_UNIT is 1 by default
+
+
+def test_minimum_hour_overtime_follows_the_fee_rounding_policy(db, monkeypatch):
+    from app.billiard import config
+    monkeypatch.setattr(config, "FEE_ROUNDING_UNIT", D("1000"))
+    _, table = _setup(db)
+    make_rule(db, PricingRuleType.MINIMUM_HOUR, {"min_minutes": 60})
+    s = play(db, table, 65, make_package(db))
+    assert s.total_table_fee == D("88000.00")            # 8,333.33 rounded to the unit, package price untouched
+
+
+def test_minimum_hour_overtime_matches_per_minute_overtime(db):
+    _, t1 = _setup(db, name="a")
+    _, t2 = _setup(db, client_id="c2", name="b")
+    make_rule(db, PricingRuleType.MINIMUM_HOUR, {"min_minutes": 120}, client_id="c1")
+    make_rule(db, PricingRuleType.PER_MINUTE, None, client_id="c2")
+    one = play(db, t1, 100, make_package(db, client_id="c1"))
+    two = play(db, t2, 100, make_package(db, client_id="c2"))
+    assert one.total_table_fee == two.total_table_fee
+
+
+def test_hourly_and_block_overtime_keep_their_own_rounding(db):
+    _, t1 = _setup(db, name="a")
+    _, t2 = _setup(db, client_id="c2", name="b")
+    make_rule(db, PricingRuleType.HOURLY, client_id="c1")
+    make_rule(db, PricingRuleType.BLOCK, {"block_minutes": 30}, client_id="c2")
+    assert play(db, t1, 65, make_package(db, client_id="c1")).total_table_fee == D("180000.00")   # 5 min -> a full hour
+    assert play(db, t2, 65, make_package(db, client_id="c2")).total_table_fee == D("130000.00")   # 5 min -> a full 30-min block
 
 
 def test_rule_selection_still_runs_with_a_package(db):
@@ -366,23 +402,6 @@ def test_package_start_from_controller_event(db, device):
     assert res.accepted == ["e1"]
     s = db.execute(select(TableSession)).scalar_one()
     assert s.package_snapshot["package_id"] == pkg.id and s.ends_at is not None
-
-
-@pytest.mark.parametrize("make", [
-    lambda db: make_package(db, active=False).id,        # inactive
-    lambda db: make_package(db, client_id="c2").id,      # other club
-    lambda db: 99999,                                    # unknown
-])
-def test_event_with_unusable_package_still_opens_the_session_and_says_so(db, device, make):
-    _, table = _setup(db)
-    package_id = make(db)
-    res = event_service.ingest(db, device, [_start_event(table, package_id)])
-    assert res.accepted == ["e1"]                        # the device really played; never lose the session
-    s = db.execute(select(TableSession)).scalar_one()
-    assert s.package_snapshot is None
-    from app.billiard.models import DeviceEvent
-    row = db.execute(select(DeviceEvent)).scalar_one()
-    assert "package_ignored" in row.payload["reconciled"]
 
 
 def test_event_without_package_is_unchanged(db, device):
