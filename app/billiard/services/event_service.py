@@ -18,9 +18,16 @@
 #   future, never before the start); the SERVER still computes the fee.
 #
 # Implemented handlers: heartbeat, score_change, score_reset, game_end,
-# session_start, session_stop, game_start, new_game.
-# Other types (e.g. time_extend) are stored as REJECTED with a clear message,
-# never silently dropped.
+# session_start, session_stop, game_start, new_game, time_extend, table_status,
+# button_press, device_error. A type with no handler would be stored as REJECTED with a
+# clear message, never silently dropped.
+#
+# WHAT AN EVENT MAY CHANGE (three separate things, never mixed):
+#   - what was purchased   -> TableSession.package_snapshot: written only at session start / billing review
+#   - what is owed         -> total_* / grand_total / pricing_snapshot: written only by session_lifecycle
+#   - what physically happened -> the DeviceEvent row and the scoreboard / countdown / table status
+# time_extend moves ends_at and nothing else, so it cannot reset a package, its free-product
+# allowance, a billing review or the bill.
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Callable, Optional
@@ -34,7 +41,7 @@ from app.billiard.models import (
     DeviceLocalIdMap, DeviceStatus, GameStatus, SessionStatus, TableGame, TableSession,
 )
 from app.billiard.schemas.event import DeviceEventIn, EventBatchResult, EventRef
-from app.billiard.services import game_lifecycle, session_lifecycle
+from app.billiard.services import game_lifecycle, session_lifecycle, table_lifecycle
 from app.billiard.services.package_service import package_service
 
 from app.billiard import config
@@ -348,6 +355,116 @@ def _h_new_game(db, device_pk, client_id, ev):
     return note
 
 
+# ── time_extend / table_status / button_press / device_error ─────────────
+MAX_EXTEND_MINUTES = 480          # same limit as POST /sessions/{id}/extend
+
+
+def _int_field(data: dict, key: str, low: int, high: int) -> int:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not (low <= value <= high):
+        raise EventRejected(f"{key} must be a whole number between {low} and {high}")
+    return value
+
+
+def _h_time_extend(db, device_pk, client_id, ev):
+    """data.minutes (1-480): push the countdown (ends_at) of the table's ACTIVE session forward.
+    Only ends_at changes. The base is the device time of the press (clock rules apply), so a press that
+    reaches the server late still gives the customer the time from when it was pressed."""
+    at = _event_time(ev)
+    minutes = _int_field(ev.data, "minutes", 1, MAX_EXTEND_MINUTES)
+    session = _resolve_session(db, device_pk, client_id, ev)      # no active session for the table: rejected
+    if session.status != SessionStatus.ACTIVE:
+        raise EventConflict("Session is not active on the server")
+    session_lifecycle.extend_session(session, minutes, now=at)
+    db.flush()
+    return {"ends_at": as_utc(session.ends_at).isoformat()}
+
+
+_TABLE_STATUS_CHANGES = {
+    "reserved": table_lifecycle.mark_reserved,
+    "maintenance": table_lifecycle.mark_maintenance,
+    "available": table_lifecycle.release,
+}
+
+
+def _h_table_status(db, device_pk, client_id, ev):
+    """data.status in reserved | maintenance | available, through the same table_lifecycle functions as the POS.
+    `playing` is refused: only a session start can make a table playing. A table that already has the reported
+    status is a no-op (so a repeat never stalls the device's cursor); a table with an active session is a conflict."""
+    _event_time(ev)        # a stale or future-dated status change is not applied
+    status = ev.data.get("status")
+    if status == "playing":
+        raise EventRejected("A table becomes playing only when a session starts (session_start)")
+    change = _TABLE_STATUS_CHANGES.get(status) if isinstance(status, str) else None
+    if change is None:
+        raise EventRejected("status must be one of: reserved, maintenance, available")
+    table = _lock_table(db, client_id, ev.table_id)
+    if table.status.value == status:
+        return {"already": status}
+    previous = table.status.value
+    try:
+        table_lifecycle.ensure_no_active_session(db, table)
+        change(table)
+    except ValueError as e:
+        raise EventConflict(str(e))
+    db.flush()
+    return {"previous": previous}
+
+
+def _button_score(delta_a: int, delta_b: int):
+    """A score button: +/-1 on the server's current score of the active game (never below 0).
+    Firmware should also send score_change with the absolute score so the two stay in sync."""
+    def handler(db, device_pk, client_id, ev):
+        game = _resolve_game(db, device_pk, client_id, ev)
+        if game.status == GameStatus.CANCELLED:
+            raise EventConflict("Game was cancelled on the server")
+        a = max(game.player_a_score + delta_a, 0)
+        b = max(game.player_b_score + delta_b, 0)
+        game_lifecycle.set_scores(db, game, a, b)
+        return {"score": [a, b]}
+    return handler
+
+
+# The ONE place that says what each controller button means. Each entry reuses an existing handler.
+BUTTON_ACTIONS: dict[str, Callable] = {
+    "score_a_up": _button_score(1, 0),
+    "score_a_down": _button_score(-1, 0),
+    "score_b_up": _button_score(0, 1),
+    "score_b_down": _button_score(0, -1),
+    "reset_score": _h_score_reset,
+    "new_game": _h_new_game,
+    "end_game": _h_game_end,
+}
+
+
+def _h_button_press(db, device_pk, client_id, ev):
+    """data.action -> BUTTON_ACTIONS. An unknown action is rejected with a message, never dropped."""
+    _event_time(ev)
+    action = ev.data.get("action")
+    handler = BUTTON_ACTIONS.get(action) if isinstance(action, str) else None
+    if handler is None:
+        raise EventRejected(f"Unknown button action {str(action)[:40]!r}; known: {', '.join(sorted(BUTTON_ACTIONS))}")
+    note = handler(db, device_pk, client_id, ev)
+    return {"button": action, **(note or {})}
+
+
+def _clean(value, limit: int) -> Optional[str]:
+    text = str(value).strip()[:limit] if value is not None else ""
+    return text or None
+
+
+def _h_device_error(db, device_pk, client_id, ev):
+    """A fault report: always stored as processed (rejecting it would hide the fault). The latest one is
+    copied onto the device row so managers see it in GET /controller/status. last_error_at is the server's
+    receive time; the device's own timestamp stays on the event row."""
+    code = _clean(ev.data.get("code"), 64) or "unspecified"
+    message = _clean(ev.data.get("message"), 200)
+    device = db.get(BilliardDevice, device_pk)
+    device.last_error = (f"{code}: {message}" if message else code)[:255]
+    device.last_error_at = datetime.now(timezone.utc)
+    return {"code": code, "message": message}
+
+
 HANDLERS: dict[DeviceEventType, Callable] = {
     DeviceEventType.HEARTBEAT: _h_heartbeat,
     DeviceEventType.SCORE_CHANGE: _h_score_change,
@@ -357,6 +474,10 @@ HANDLERS: dict[DeviceEventType, Callable] = {
     DeviceEventType.SESSION_STOP: _h_session_stop,
     DeviceEventType.GAME_START: _h_game_start,
     DeviceEventType.NEW_GAME: _h_new_game,
+    DeviceEventType.TIME_EXTEND: _h_time_extend,
+    DeviceEventType.TABLE_STATUS: _h_table_status,
+    DeviceEventType.BUTTON_PRESS: _h_button_press,
+    DeviceEventType.DEVICE_ERROR: _h_device_error,
 }
 
 

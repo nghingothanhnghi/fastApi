@@ -217,7 +217,7 @@ A partial unique index (`uq_one_active_game_per_session`) allows only one `activ
 
 | Table | Purpose |
 |-------|---------|
-| `billiard_devices` | The central controller: `device_id`, `api_key_hash` (the raw key is never stored), `status`, `firmware_version`, `last_seen`, `last_applied_seq` |
+| `billiard_devices` | The central controller: `device_id`, `api_key_hash` (the raw key is never stored), `status`, `firmware_version`, `last_seen`, `last_applied_seq`, `last_error`, `last_error_at` (latest `device_error`) |
 | `device_events` | Every event the controller sent, stored once (`event_id` unique, `device_seq` unique per device) with a status: `received`, `processed`, `rejected`, `conflict`. Never auto-deleted |
 | `device_local_id_map` | `LOCAL-S-...` / `LOCAL-G-...` ids the controller used offline → the real session/game ids |
 
@@ -472,7 +472,12 @@ Only a SHA-256 hash of the key is stored. A manager registers the controller wit
 | `session_stop` | Applies final scores, closes the game, bills and frees the table. Already-completed sessions keep their server billing |
 | `game_start`, `new_game`, `game_end` | Opens / rotates / finishes a game |
 | `score_change`, `score_reset` | Sets the scores reported by the device |
-| `time_extend`, `button_press`, `table_status`, `device_error` | Stored as `rejected` ("No handler yet"), never silently dropped |
+| `time_extend` | `data.minutes` (whole number 1 to 480) moves `ends_at` of the table's **active** session forward. The base is the device time of the press (the normal clock rules apply), so a press that arrives late still gives the full time. It changes `ends_at` only: package, free-product allowance, billing review and amounts are never touched. No active session: `rejected`; a stopped session addressed by `session_id`: `conflict` |
+| `table_status` | `data.status` = `reserved`, `maintenance` or `available`, using the same `table_lifecycle` functions as the POS routes (`available` = release). `playing` is `rejected` (only `session_start` makes a table playing), as is any other value. A table with an active session is a `conflict` and is not changed. A table that already has the reported status is accepted as a no-op, so a repeat never stalls the device. The latest write wins: there is no check against a newer POS change |
+| `button_press` | `data.action` is looked up in `BUTTON_ACTIONS` (one dict in `event_service.py`): `score_a_up`, `score_a_down`, `score_b_up`, `score_b_down` (+/-1 on the server's current score, never below 0), `reset_score`, `new_game`, `end_game` (these reuse the existing handlers and their data). An unknown action is `rejected` with the list of known ones. Firmware should still send `score_change` with the absolute score so both sides stay in sync |
+| `device_error` | Always `processed` (rejecting a fault report would hide it). `data.code` (64 chars) and `data.message` (200 chars) go to the event note, and the latest one is copied to the controller row (`last_error`, `last_error_at` = server time) and shown in `GET /billiard/controller/status`. It changes nothing else. There is no alert or push yet |
+
+`time_extend`, `table_status` and `button_press` follow the same clock and tenant rules as the older events: a `table_id` or `session_id` of another club is `rejected` as "not found", and a device timestamp more than the allowed seconds ahead or older than the offline limit is `rejected`. Like every event they are idempotent by `event_id`, ordered by `device_seq`, and only a `processed` event moves `server_state_version`. **Deploying:** run `python migrate_billiard_device_error.py` once (adds `billiard_devices.last_error` and `last_error_at`).
 
 ### Endpoints
 
@@ -483,7 +488,7 @@ Firmware endpoints use the device headers. `status`, `hydro-candidates` and `reg
 | `GET` | `/billiard/controller/state` | device | Server view of every active table (session, game, scores, `server_state_version`) for reboot and reconnect |
 | `POST` | `/billiard/controller/events` | device | One live event. Same pipeline as `/sync` |
 | `POST` | `/billiard/controller/sync` | device | Replay the offline queue (max 500 events). `403` if `device_id` differs from the credentials |
-| `GET` | `/billiard/controller/status` | ADMIN, MANAGER | Controllers of the club with an effective online/offline status |
+| `GET` | `/billiard/controller/status` | ADMIN, MANAGER | Controllers of the club with an effective online/offline status and the latest reported fault (`last_error`, `last_error_at`) |
 | `GET` | `/billiard/controller/hydro-candidates` | ADMIN, MANAGER | Existing hydro devices that could be registered as a controller |
 | `POST` | `/billiard/controller/register` | ADMIN, MANAGER | Register a controller (by `device_id`, or copy it from a hydro device). Returns the API key once |
 
@@ -649,7 +654,6 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 |---------|------|
 | **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
-| **More device events** | Handlers for `time_extend`, `button_press`, `table_status`, `device_error` (stored as rejected today) |
 | **Offline heartbeat job** | `status` already shows offline after 90s; a background job could also record the change and alert |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
 
@@ -667,6 +671,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 | `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
+| `test_event_handlers_extra.py` | `time_extend` (device-time base, bad minutes, no or stopped session, package/items/billing/review untouched), `table_status` (all transitions, `playing` rejected, active session conflict, no-op repeat), `button_press` (every action, unknown action, no game), `device_error` (stored, truncated, shown in `/controller/status`), idempotency, `device_seq` order and cursor, tenant isolation, clock rules |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |
 | `test_game_service.py` | Game numbering, one active game, scores up/down/never negative, new game keeps billing, tenant 404, clamped device clock, stop closes the game |
 | `test_pricing_sessions.py` | Rule selection, happy hour, day windows, block pricing, snapshots survive rule edits, live total, bill rule name |
