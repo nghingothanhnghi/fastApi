@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.billiard.models import BilliardDevice, DeviceStatus, DeviceStatusLog
+from app.billiard.services import realtime
 from app.billiard.utils.billing import as_utc
 from app.billiard import config
 
@@ -44,6 +45,7 @@ def mark_online(db: Session, device: BilliardDevice, now: Optional[datetime] = N
     if won:
         set_committed_value(device, "status_changed_at", now)
         _log(db, device.id, previous, DeviceStatus.ONLINE, now, "device contact")
+        realtime.publish_after_commit(db, device.client_id, realtime.device_status(device.device_id, "online"))
     db.flush()
     return won
 
@@ -80,6 +82,7 @@ def sweep_offline(db: Session, now: Optional[datetime] = None, after: Optional[t
             _log(db, device.id, DeviceStatus.ONLINE, DeviceStatus.OFFLINE, now, silent)
             set_committed_value(device, "status", DeviceStatus.OFFLINE)
             set_committed_value(device, "status_changed_at", now)
+            realtime.publish_after_commit(db, device.client_id, realtime.device_status(device.device_id, "offline"))
             switched.append(device)
     db.flush()
     return switched

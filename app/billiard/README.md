@@ -91,12 +91,13 @@ app/billiard/
 │   ├── device_auth.py          # controller API-key check (X-Device-Id / X-Device-Key)
 │   ├── device_service.py       # controller state snapshot, status, register
 │   ├── device_watchdog.py      # the ONLY writer of online/offline status + status log (mark_online, sweep_offline)
-│   ├── device_alerts.py        # notify_device_offline hook (logs a warning; realtime push comes with item I)
+│   ├── device_alerts.py        # notify_device_offline hook (logs a warning)
+│   ├── realtime.py             # POS WebSocket rooms (one per club), id-only messages, publish-after-commit queue
 │   ├── payment_adapter.py      # billiard's side of the Payments contract (what to charge, which club)
 │   ├── payment_service.py      # thin entry point: session id -> Payments module
 │   └── report_service.py       # usage/revenue report
 ├── jobs/              # Background jobs registered in main.py (device_watchdog_job)
-├── routes/            # HTTP endpoints only (no business logic)
+├── routes/            # HTTP endpoints only (ws_router.py is the one WebSocket) (no business logic)
 │   ├── table_router.py
 │   ├── session_router.py
 │   ├── game_router.py
@@ -494,9 +495,31 @@ Firmware endpoints use the device headers. `status`, `hydro-candidates` and `reg
 | `GET` | `/billiard/controller/state` | device | Server view of every active table (session, game, scores, `server_state_version`) for reboot and reconnect |
 | `POST` | `/billiard/controller/events` | device | One live event. Same pipeline as `/sync` |
 | `POST` | `/billiard/controller/sync` | device | Replay the offline queue (max 500 events). `403` if `device_id` differs from the credentials |
+| `WS` | `/ws/billiard?token=<JWT>` | any active user of the club | Live id-only updates of the club (see "Realtime POS updates"). Closed with `1008` when the token is missing or invalid |
 | `GET` | `/billiard/controller/status` | ADMIN, MANAGER | Controllers of the club with an effective online/offline status the latest reported fault (`last_error`, `last_error_at`) and when the status last changed (`status_changed_at`) |
 | `GET` | `/billiard/controller/hydro-candidates` | ADMIN, MANAGER | Existing hydro devices that could be registered as a controller |
 | `POST` | `/billiard/controller/register` | ADMIN, MANAGER | Register a controller (by `device_id`, or copy it from a hydro device). Returns the API key once |
+
+### Realtime POS updates (WebSocket)
+
+`WS /ws/billiard?token=<JWT>` pushes "something changed" notices to the POS, so it does not have to poll. **Polling `GET /tables/active` keeps working and is the fallback** (a socket can drop, a worker can restart); the socket only makes it faster.
+
+**Connecting.** Use the same JWT as the REST calls. Any active user of a club joins that club's room. A super admin may pass `&client_id=<club>` to choose a room and otherwise joins its own club's. A missing or invalid token, an inactive user, or a `client_id` of another club (for a normal user) is accepted and then closed at once with code **1008** and a reason, so the browser can read it. The first message is `{"type": "ready", "client_id": "c1", "ping_seconds": 30}`. The server sends `{"type": "ping"}` every `BILLIARD_WS_PING_SECONDS` (30); the client may ignore it or answer anything. The token is checked **when connecting only**: a user deactivated later stays connected until the next reconnect (the messages hold ids only). The token travels in the URL, so keep it out of proxy and access logs.
+
+**Messages: a type and ids, never data** (no money, names or scores). The POS refetches what it needs, so the server stays the only authority and there is no second serializer to keep in step:
+
+| Message | Sent when | The POS should |
+|---------|-----------|----------------|
+| `{"type": "table.changed", "table_id": 3, "version": 18}` | A table's status or settings changed (start, stop, reserve, maintenance, release, device `table_status`, edit). `version` is the table's `status_version` | Refresh that tile (`GET /tables/active`) |
+| `{"type": "session.changed", "session_id": 41, "table_id": 3}` | Anything on a session changed: start, stop, extend, items, discount, package, billing review, cancel, payment state | Refresh that tile, and the bill if it is open |
+| `{"type": "game.changed", "game_id": 77, "session_id": 41}` | A game was started, scored, ended or cancelled, from the POS or the controller | Refresh the scoreboard |
+| `{"type": "device.status", "device_id": "BILLIARD-CONTROLLER-01", "status": "offline"}` | The watchdog (item H) recorded an online/offline change | Update the controller card |
+
+Unknown types must be ignored, so new ones can be added without breaking an old POS. A message can arrive more than once for the same change, and one message stands for any number of changes made in the same transaction, so always refetch rather than patching local state.
+
+**How it works (for developers).** Services stay free of I/O. A Session listener in `services/realtime.py` watches what is really flushed (tables, sessions, items, games) and queues one message per touched row in `session.info`; `publish_after_commit(db, client_id, message)` queues one by hand (used by the watchdog, whose conditional `UPDATE` the ORM does not see). `after_commit` sends the queue and `after_rollback` drops it, so **nothing is sent for a failed request or before the commit**. The POS routes, the controller routes (`/events`, `/sync`) and the payment adapter all write through the ORM, so they notify the POS without calling anything, and the controller produces exactly the same messages as the POS path. While nobody is connected the listener does no queries at all. A client that fails to take a message within `BILLIARD_WS_SEND_TIMEOUT_SECONDS` (5) is dropped and the others still get it.
+
+**Several workers.** `InProcessRealtime` keeps the sockets of **one process**: with more than one uvicorn/gunicorn worker a POS only hears about changes made in its own worker. Callers only use `get_realtime()`, and `set_realtime()` swaps the implementation, so a Redis pub/sub version can be added without touching any caller. Until then, either run one worker or rely on the polling fallback. No configuration and no migration is needed.
 
 ---
 
@@ -654,11 +677,10 @@ Product and Payments remain the source of truth for their own data. Billiard onl
 
 ## 11. Roadmap (not implemented yet)
 
-🗺️ The items below are the **remaining target design**. Already built: tables (create, edit, deactivate), sessions, items, games and scores, pricing rules, the offline heartbeat job, controller authentication, idempotent event ingestion, local-to-server ID mapping, controller state snapshots, reports and payments.
+🗺️ The items below are the **remaining target design**. Already built: tables (create, edit, deactivate), sessions, items, games and scores, pricing rules, the offline heartbeat job, WebSocket POS updates, controller authentication, idempotent event ingestion, local-to-server ID mapping, controller state snapshots, reports and payments.
 
 | Feature | Idea |
 |---------|------|
-| **WebSocket POS updates** | Push controller/table/session/game changes to the POS instead of polling (`/tables/active` is polled today) |
 | **RS485 firmware** | Controller firmware and the physical display/button protocol |
 | **Split bills across rate windows** | Today one rule covers the whole session. Splitting a bill across rate windows is a possible later change |
 
@@ -676,6 +698,7 @@ Run from the project root, for example `python -m pytest app/tests/test_game_ser
 | `test_timed_play.py` | `planned_minutes` at start, validation, `extend` (future, expired and open-play bases), active-only, board `ends_at` / `remaining_seconds` / `is_overtime`, billing ignores `ends_at`, tenant isolation, HTTP |
 | `test_session_discount.py` | Fixed and percent discounts, clamping, survives Stop, percent follows the final fee and added items, locked once a payment starts, live total, payment quote, report `discount_total`, manager-only |
 | `test_session_cancel.py` | Cancel rules: table freed, game cancelled, totals zero, who/why/when, not payable, not in reports, controller stop is a conflict, manager-only |
+| `test_billiard_realtime.py` | Socket auth (missing, bad, unknown, inactive, other club, super admin), messages after start/stop/items/extend/controller events/device status, nothing before commit or after rollback, one message per change, tenant isolation, several clients, ids only, dead and slow sockets, replaceable manager, polling unchanged |
 | `test_device_watchdog.py` | Offline sweep (stale, fresh, exact 90 s boundary, never-seen, idempotent, configurable threshold), back online on any contact, one log row per transition (two workers, heartbeat racing the sweep), alert hook and job (once per transition, failure does not undo or repeat), `status_changed_at` in `/controller/status`, tenant isolation, migration run twice |
 | `test_event_handlers_extra.py` | `time_extend` (device-time base, bad minutes, no or stopped session, package/items/billing/review untouched), `table_status` (all transitions, `playing` rejected, active session conflict, no-op repeat), `button_press` (every action, unknown action, no game), `device_error` (stored, truncated, shown in `/controller/status`), idempotency, `device_seq` order and cursor, tenant isolation, clock rules |
 | `test_table_status.py` | Reserve / maintenance / release rules, blocked start, playing and inactive tables, tenant 404, manager-only routes |

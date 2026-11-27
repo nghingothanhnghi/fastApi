@@ -340,7 +340,9 @@ Built as planned, with two deliberate differences: the settings live in `app/bil
 
 ---
 
-### I. WebSocket POS updates (L)
+### I. WebSocket POS updates (L) ✅ built
+
+Built as designed, with these deliberate differences: (1) messages are produced by a Session listener on what is really flushed (plus `publish_after_commit` by hand for the watchdog's conditional `UPDATE`), instead of a call in every router, so the POS path, the controller path (I5) and the payment adapter all notify without any call site and none can be forgotten; (2) a super admin joins the chosen `client_id` or its own club (every user has a club, so "none" cannot happen); (3) the socket is accepted and then closed with 1008, so the browser can read the reason; (4) each connection remembers its own event loop, not one global loop; (5) added a `ready` first message. Multi-worker (I7) is the `Realtime` interface plus `set_realtime()`; the Redis version is not built.
 
 The existing `app/utils/connection_manager.py` is built for hardware detection (location/user subscriptions), so do **not** bend it. Add a small billiard manager with one room per `client_id`.
 
