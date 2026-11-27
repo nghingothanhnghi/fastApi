@@ -30,3 +30,9 @@ LOCAL_TZ = ZoneInfo(TIMEZONE)
 OFFLINE_AFTER_SECONDS = int(os.getenv("BILLIARD_OFFLINE_AFTER_SECONDS", "90"))
 # How often the watchdog job looks for silent controllers.
 WATCHDOG_INTERVAL_SECONDS = int(os.getenv("BILLIARD_WATCHDOG_INTERVAL_SECONDS", "30"))
+
+# POS WebSocket (WS /ws/billiard): the server sends {"type": "ping"} this often, so a half-open
+# connection is noticed and proxies do not close an idle one.
+WS_PING_SECONDS = float(os.getenv("BILLIARD_WS_PING_SECONDS", "30"))
+# A client that cannot take a message within this time is treated as dead and dropped.
+WS_SEND_TIMEOUT_SECONDS = float(os.getenv("BILLIARD_WS_SEND_TIMEOUT_SECONDS", "5"))

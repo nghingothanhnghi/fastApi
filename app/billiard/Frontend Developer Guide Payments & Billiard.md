@@ -12,6 +12,7 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 
 | Change | What to do in the frontend |
 | --- | --- |
+| New `WS /ws/billiard?token=<JWT>`: the server tells the POS when a table, session, game or controller status changed (a type and ids only). Polling still works | Open one socket after login, refetch what a message names, and keep a slow poll as fallback. See "Live updates (WebSocket)" under Polling |
 | Billing review is now role-based: `GET /sessions/billing-review` needs `billiard.billing_review.view` and `POST /sessions/{id}/billing-review` needs `billiard.billing_review.resolve` (managers and admins by default; a trusted cashier gets them from the role's permissions). Others get `403`. The bill has a new `billing_review_audit`. `GET /controller/state` tables have `status_version`; controllers must send it as `expected_version` on `table_status` | Show the review list and the Resolve button only to users who may use them (a `403` means hide them, do not retry). Everyone still sees the badge and the Pay lock. Poll the list every 10 to 15 s |
 | A table started from the controller with a package the server cannot apply now opens the session and is flagged for **billing review**. New fields on the board (`needs_billing_review`, `requested_package_id`, `billing_review_reason`) and on the bill (those plus `billing_review_resolution`, `billing_review_note`, `billing_reviewed_by`, `billing_reviewed_at`). New `GET /sessions/billing-review` and `POST /sessions/{id}/billing-review`. Payment returns `409` until it is resolved | Show a warning badge on the board tile and a "Needs billing review" list. On the bill, hide Pay while `needs_billing_review` is true and show a Resolve button (see screen 13) |
 | `POST /sessions/{id}/items` also returns `lines` (every line created, free first). The old top-level fields are unchanged | Optional: use `lines` instead of reloading the bill. Reloading still works |
@@ -64,7 +65,7 @@ New to the project? Read "The whole process, start to finish" first. It follows 
 | The amount | Never send the bill total. For a single payment the server uses `grand_total`. In a split you send how the total is divided, and the lines must add up exactly to `balance_due` |
 | Your club | Every call is limited to the logged-in user's club. An id that belongs to another club returns `404`, not `403` |
 | Trailing slash | Use the paths exactly as written here. `/tables`, `/products` and `/payments/shifts` have no trailing slash |
-| Live updates | There is no WebSocket yet. Poll: `GET /tables/active` about every 30 seconds, and a waiting bill every 3 to 5 seconds (see "Polling, errors and edge cases") |
+| Live updates | `WS /ws/billiard?token=<JWT>` (same host, `wss://` in production) sends "something changed" messages. Keep polling `GET /tables/active` about every 30 seconds as the fallback, and a waiting bill every 3 to 5 seconds (see "Polling, errors and edge cases") |
 
 ### Which URLs to call
 
@@ -468,8 +469,8 @@ A package is a fixed price for a number of minutes of table time, with some prod
 
 When a controller starts a table with a package the server cannot apply, the session still opens (the game is real) and is flagged. Show it in three places:
 
-- **Board:** a badge on tiles with `needs_billing_review: true` and the reason (`billing_review_reason`). Poll `GET /tables/active` as usual; there is no push yet. Every user sees this badge, whatever their permissions.
-- **List:** `GET /sessions/billing-review` returns the sessions that still need a decision (`session_id`, `table_name`, `requested_package_id`, `reason`, `grand_total`). It needs the `billiard.billing_review.view` permission. **Polling:** refresh it every 10 to 15 seconds while the screen is open, and show a counter on the board. On the first `403` stop polling and hide the list (the user has no permission); the board badge still works. No WebSocket yet.
+- **Board:** a badge on tiles with `needs_billing_review: true` and the reason (`billing_review_reason`). Refresh `GET /tables/active` on `session.changed` (or poll it as usual). Every user sees this badge, whatever their permissions.
+- **List:** `GET /sessions/billing-review` returns the sessions that still need a decision (`session_id`, `table_name`, `requested_package_id`, `reason`, `grand_total`). It needs the `billiard.billing_review.view` permission. **Refreshing:** refetch it when a `session.changed` arrives and also every 10 to 15 seconds while the screen is open (the fallback), and show a counter on the board. On the first `403` stop and hide the list (the user has no permission); the board badge still works.
 - **Bill:** while `needs_billing_review` is true, hide Pay (the server answers `409 Billing review required before payment`) and show **Resolve**.
 
 Resolve offers two choices, both through `POST /sessions/{id}/billing-review`:
@@ -1298,6 +1299,46 @@ await api.confirmCard(42);
 
 A transfer can be confirmed by the bank feed (or cancelled by the server) at any moment, so the transfer-waiting screen must refresh itself. Every other failure should reload the bill and redraw it.
 
+### Live updates (WebSocket)
+
+Open one socket after login: `wss://<host>/ws/billiard?token=<JWT>`. The messages say **what** changed, never the data, so refetch and redraw:
+
+```ts
+type RealtimeMessage =
+  | { type: "ready"; client_id: string; ping_seconds: number }
+  | { type: "ping" }
+  | { type: "table.changed"; table_id: number; version: number }
+  | { type: "session.changed"; session_id: number; table_id: number }
+  | { type: "game.changed"; game_id: number; session_id: number }
+  | { type: "device.status"; device_id: string; status: "online" | "offline" };
+
+export function connectLive(onChange: (m: RealtimeMessage) => void, onState: (live: boolean) => void) {
+  let ws: WebSocket | null = null, retry = 0, closed = false, timer: number | undefined;
+  const open = () => {
+    ws = new WebSocket(`${WS_BASE}/ws/billiard?token=${encodeURIComponent(token)}`);
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data) as RealtimeMessage;
+      if (m.type === "ready") { retry = 0; onState(true); onChange(m); return; }   // refetch once: you may have missed some
+      if (m.type !== "ping") onChange(m);                                          // unknown types: ignore
+    };
+    ws.onclose = (e) => {
+      onState(false);                                                              // use the slow poll while down
+      if (closed || e.code === 1008) return;                                       // 1008: bad token, log in again
+      timer = window.setTimeout(open, Math.min(30000, 1000 * 2 ** retry++));       // 1 s, 2 s, 4 s ... 30 s
+    };
+  };
+  open();
+  return () => { closed = true; clearTimeout(timer); ws?.close(); };
+}
+```
+
+- **Refetch, do not patch.** One message can stand for several changes, and the same change may be announced twice. On `table.changed` or `session.changed` call `GET /tables/active`; on `session.changed` also reload the open bill; on `game.changed` reload the scoreboard; on `device.status` reload `GET /billiard/controller/status`. Group bursts: wait about 200 ms and refetch once.
+- **Reconnect and catch up.** After every `ready` (first connect or reconnect) refetch the board once, because messages sent while the socket was down are not replayed.
+- **Keep the fallback.** While the socket is down, poll `GET /tables/active` about every 10 seconds; while it is up, a slow poll (30 seconds) is enough as a safety net. A socket can die without telling the browser, which is what the server's `ping` is for: if no message (not even a ping) arrives for about 70 seconds, close and reconnect.
+- **Close code 1008** means the token is missing, invalid or the user cannot listen to that club: go back to login, do not retry in a loop.
+- **Only your club.** The server decides the room from the token. A super admin may add `&client_id=<club>`.
+- **Several server workers.** The server pushes only to sockets of the same process, so a POS may miss a message made in another worker. The polling fallback covers it.
+
 ### Poll a pending bill
 
 ```ts
@@ -1438,7 +1479,7 @@ It answers `{"success": true}` even when the transfer is not matched, so check t
 - No endpoint says whether Stripe is configured, so the Card button has to be switched on in the frontend.
 - No endpoint says whether the club's bank account is set before a transfer is started: a missing account shows up as a transfer line with no QR. Call `GET /payments/bank-accounts/current` on the pay screen if you want to warn the cashier first.
 - No endpoint says whether manual confirmation needs a note or a manager, so the Received button has to react to the `403` and `422` responses.
-- No WebSocket yet: the board and the scoreboard have to poll. Real-time updates are on the backend roadmap.
+- The WebSocket only says *what* changed; it carries no data. Always refetch, and keep the fallback poll: a socket can drop silently and the server runs the sockets of one process only.
 - A deactivated table cannot be reactivated.
 - Packages can list any active product, because `GET /products` and the product catalogue are not scoped to the club (see the first point).
 
