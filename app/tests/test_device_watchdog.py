@@ -191,7 +191,7 @@ def test_a_heartbeat_between_select_and_update_beats_the_sweep(db, env, monkeypa
         result = real_execute(stmt, *a, **k)
         if not state["selected"]:                                            # right after the candidate SELECT
             state["selected"] = True
-            real_execute(text("UPDATE billiard_devices SET last_seen = :t"), {"t": NOW.replace(tzinfo=None)})
+            real_execute(text("UPDATE billiard_devices SET last_seen = :t"), {"t": NOW.strftime("%Y-%m-%d %H:%M:%S.%f")})   # string: the sqlite3 datetime adapter is deprecated
         return result
     monkeypatch.setattr(db, "execute", execute)
     assert device_watchdog.sweep_offline(db, NOW + timedelta(seconds=10)) == []
