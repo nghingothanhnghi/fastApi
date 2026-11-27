@@ -41,7 +41,7 @@ from app.billiard.models import (
     DeviceLocalIdMap, DeviceStatus, GameStatus, SessionStatus, TableGame, TableSession,
 )
 from app.billiard.schemas.event import DeviceEventIn, EventBatchResult, EventRef
-from app.billiard.services import game_lifecycle, session_lifecycle, table_lifecycle
+from app.billiard.services import device_watchdog, game_lifecycle, session_lifecycle, table_lifecycle
 from app.billiard.services.package_service import package_service
 
 from app.billiard import config
@@ -139,7 +139,7 @@ def _apply_scores(db: Session, game: TableGame, a: int, b: int) -> Optional[dict
 
 # ── handlers: (db, device_pk, client_id, ev) -> optional audit note ──────
 def _h_heartbeat(db, device_pk, client_id, ev):
-    # last_seen/status are already updated by authentication
+    # last_seen and online status are already recorded by authentication (device_watchdog.mark_online)
     version = ev.data.get("firmware_version")
     if version:
         db.get(BilliardDevice, device_pk).firmware_version = str(version)[:30]
@@ -627,8 +627,7 @@ class EventService:
             db, device_pk, max(initial_cursor, device.last_applied_seq)
         )
         device.last_applied_seq = max(device.last_applied_seq, applied_seq)
-        device.last_seen = datetime.now(timezone.utc)
-        device.status = DeviceStatus.ONLINE
+        device_watchdog.mark_online(db, device)
         db.commit()
         result.server_state_version = device.last_applied_seq
         return result

@@ -41,6 +41,7 @@ class DeviceStatusOut(BaseModel):
     last_applied_seq: int
     last_error: Optional[str] = None            # latest device_error event, "code: message"
     last_error_at: Optional[datetime] = None
+    status_changed_at: Optional[datetime] = None   # last online/offline change recorded by the watchdog
 
 
 class DeviceRegisterIn(BaseModel):

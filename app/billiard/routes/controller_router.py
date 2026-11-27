@@ -56,7 +56,7 @@ def get_status(
     out = []
     for d in device_service.list_devices(db, current_user):
         item = DeviceStatusOut.model_validate(d)
-        item.status = device_service.effective_status(d)   # offline after 90s of silence
+        item.status = device_service.effective_status(d)   # offline after BILLIARD_OFFLINE_AFTER_SECONDS of silence
         out.append(item)
     return out
 

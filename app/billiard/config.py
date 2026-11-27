@@ -25,3 +25,8 @@ MAX_OFFLINE_HOURS = int(os.getenv("BILLIARD_MAX_OFFLINE_HOURS", "48"))
 # timezone, then converted to UTC for querying (end_time is stored in UTC).
 TIMEZONE = os.getenv("BILLIARD_TIMEZONE", "Asia/Ho_Chi_Minh")
 LOCAL_TZ = ZoneInfo(TIMEZONE)
+
+# Controller watchdog: a device silent for MORE than this is stored and shown as offline.
+OFFLINE_AFTER_SECONDS = int(os.getenv("BILLIARD_OFFLINE_AFTER_SECONDS", "90"))
+# How often the watchdog job looks for silent controllers.
+WATCHDOG_INTERVAL_SECONDS = int(os.getenv("BILLIARD_WATCHDOG_INTERVAL_SECONDS", "30"))

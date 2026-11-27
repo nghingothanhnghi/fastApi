@@ -4,13 +4,12 @@
 # plain SHA-256 is sufficient; only the hash is stored in api_key_hash.
 import hashlib
 import hmac
-from datetime import datetime, timezone
-
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.billiard.models import BilliardDevice, DeviceStatus
+from app.billiard.models import BilliardDevice
+from app.billiard.services import device_watchdog
 
 
 def hash_api_key(api_key: str) -> str:
@@ -28,7 +27,5 @@ def authenticate_device(db: Session, device_id: str, api_key: str) -> BilliardDe
     if device is None or not key_ok:
         raise HTTPException(401, "Invalid device credentials")
 
-    device.last_seen = datetime.now(timezone.utc)
-    device.status = DeviceStatus.ONLINE
-    db.flush()
+    device_watchdog.mark_online(db, device)      # last_seen + online, logged once per real change
     return device

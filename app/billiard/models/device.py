@@ -62,11 +62,29 @@ class BilliardDevice(Base):
     # last_error_at is the SERVER's receive time. The device's own timestamp stays on the event row.
     last_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When `status` last changed (online <-> offline). Written only by device_watchdog.
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
     events = relationship("DeviceEvent", back_populates="device", cascade="all, delete-orphan")
+
+
+class DeviceStatusLog(Base):
+    """One row per real online/offline change of a controller (written by device_watchdog only)."""
+    __tablename__ = "billiard_device_status_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("billiard_devices.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    from_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (Index("ix_billiard_device_status_log_device_at", "device_id", "at"),)
 
 
 class DeviceEvent(Base):

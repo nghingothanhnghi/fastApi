@@ -8,7 +8,7 @@ from .game import TableGame, GameStatus
 from .pricing_rule import PricingRule, PricingRuleType
 from .package import BilliardPackage, BilliardPackageItem
 from .device import (
-    BilliardDevice, DeviceEvent, DeviceLocalIdMap,
+    BilliardDevice, DeviceEvent, DeviceLocalIdMap, DeviceStatusLog,
     DeviceStatus, DeviceEventType, DeviceEventStatus,
 )
 
@@ -19,6 +19,6 @@ __all__ = [
     "TableGame", "GameStatus",
     "PricingRule", "PricingRuleType",
     "BilliardPackage", "BilliardPackageItem",
-    "BilliardDevice", "DeviceEvent", "DeviceLocalIdMap",
+    "BilliardDevice", "DeviceEvent", "DeviceLocalIdMap", "DeviceStatusLog",
     "DeviceStatus", "DeviceEventType", "DeviceEventStatus",
 ]
